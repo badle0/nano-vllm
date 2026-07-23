@@ -1,0 +1,6 @@
+torch 2.10.0+cu128
+flash_attn 2.8.1
+transformers 5.14.1
+triton 3.6.0
+name, driver_version
+NVIDIA A100-SXM4-40GB, 570.133.20
