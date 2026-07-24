@@ -192,7 +192,10 @@ class ModelRunner:
         top_ks = None
         if any(seq.top_k != -1 for seq in seqs):
             top_ks = torch.tensor([seq.top_k for seq in seqs], dtype=torch.int64, pin_memory=True).cuda(non_blocking=True)
-        return temperatures, top_ks
+        top_ps = None
+        if any(seq.top_p != 1.0 for seq in seqs):
+            top_ps = torch.tensor([seq.top_p for seq in seqs], dtype=torch.float32, pin_memory=True).cuda(non_blocking=True)
+        return temperatures, top_ks, top_ps
 
     @torch.inference_mode()
     def run_model(self, input_ids: torch.Tensor, positions: torch.Tensor, is_prefill: bool):
@@ -215,9 +218,9 @@ class ModelRunner:
 
     def run(self, seqs: list[Sequence], is_prefill: bool) -> list[int]:
         input_ids, positions = self.prepare_prefill(seqs) if is_prefill else self.prepare_decode(seqs)
-        temperatures, top_ks = self.prepare_sample(seqs) if self.rank == 0 else (None, None)
+        temperatures, top_ks, top_ps = self.prepare_sample(seqs) if self.rank == 0 else (None, None, None)
         logits = self.run_model(input_ids, positions, is_prefill)
-        token_ids = self.sampler(logits, temperatures, top_ks).tolist() if self.rank == 0 else None
+        token_ids = self.sampler(logits, temperatures, top_ks, top_ps).tolist() if self.rank == 0 else None
         reset_context()
         return token_ids
 
