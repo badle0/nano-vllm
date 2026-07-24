@@ -8,6 +8,7 @@ class SamplingParams:
     max_tokens: int = 64
     ignore_eos: bool = False
     top_k: int = -1          # -1 = disabled (consider all tokens)
+    top_p: float = 1.0       # 1.0 = disabled (full nucleus)
 
     def __post_init__(self):
         if isinstance(self.temperature, bool) or not isinstance(self.temperature, (int, float)):
@@ -20,3 +21,9 @@ class SamplingParams:
             raise TypeError("top_k must be an integer")
         if self.top_k != -1 and self.top_k < 1:
             raise ValueError("top_k must be -1 (disabled) or >= 1")
+        if isinstance(self.top_p, bool) or not isinstance(self.top_p, (int, float)):
+            raise TypeError("top_p must be a number")
+        if not isfinite(self.top_p):
+            raise ValueError("top_p must be finite")
+        if not 0.0 < self.top_p <= 1.0:
+            raise ValueError("top_p must be in (0, 1]")

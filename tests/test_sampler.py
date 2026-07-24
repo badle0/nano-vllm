@@ -1,5 +1,6 @@
 import dataclasses
 import importlib.util
+import math
 import pathlib
 import pickle
 import subprocess
@@ -22,6 +23,15 @@ def _filter_top_k(logits, *buckets):
         logits = sampler.filter_top_k(logits, row_indices, top_k)
     return logits
 
+def _filter_top_p(logits, temperatures, top_ps, rows=None):
+    row_indices = (
+        None
+        if rows is None
+        else torch.tensor(rows, dtype=torch.int64, device=logits.device)
+    )
+    top_ps = torch.tensor(top_ps, dtype=torch.float32, device=logits.device)
+    return Sampler().filter_top_p(logits, temperatures, row_indices, top_ps)
+
 def test_temperature_zero_is_permitted():
     SamplingParams(temperature=0.0)
 
@@ -40,14 +50,16 @@ def test_legacy_positional_arguments_keep_their_mapping():
     assert params.max_tokens == 128
     assert params.ignore_eos is True
     assert params.top_k == -1
+    assert params.top_p == 1.0
 
 def test_sampling_params_round_trip():
-    params = SamplingParams(0.6, 128, True, 17)
+    params = SamplingParams(0.6, 128, True, 17, 0.9)
     assert dataclasses.asdict(params) == {
         "temperature": 0.6,
         "max_tokens": 128,
         "ignore_eos": True,
         "top_k": 17,
+        "top_p": 0.9,
     }
     assert pickle.loads(pickle.dumps(params)) == params
 
@@ -67,6 +79,10 @@ invalid = (
     {"top_k": True},
     {"top_k": 1.9},
     {"top_k": 0},
+    {"top_p": True},
+    {"top_p": float("nan")},
+    {"top_p": 0.0},
+    {"top_p": 1.1},
 )
 for kwargs in invalid:
     try:
@@ -263,3 +279,38 @@ def test_topk_params_validation():
     SamplingParams(top_k=-1); SamplingParams(top_k=5)
     with pytest.raises(ValueError):
         SamplingParams(top_k=0)
+
+def test_topp_keeps_the_crossing_token():
+    row = torch.tensor([[math.log(0.5), math.log(0.3), math.log(0.2)]])
+    temperatures = torch.ones(1)
+    filtered = _filter_top_p(row.clone(), temperatures, [0.6])
+    seen = {int(Sampler()(filtered.clone(), temperatures)) for _ in range(2000)}
+    assert seen == {0, 1}
+
+def test_topp_adaptive_collapse_on_peaked_row():
+    row = torch.full((1, 100), -10.0)
+    row[0, 7] = 10.0
+    row[0, 3] = 2.0
+    temperatures = torch.ones(1)
+    filtered = _filter_top_p(row.clone(), temperatures, [0.8])
+    seen = {int(Sampler()(filtered.clone(), temperatures)) for _ in range(500)}
+    assert seen == {7}
+
+def test_topk_topp_combined_containment():
+    logits = torch.randn(8, 1000, dtype=torch.bfloat16)
+    temperatures = torch.ones(8)
+    filtered = _filter_top_k(logits.clone(), (5, range(8)))
+    filtered = _filter_top_p(filtered, temperatures, [0.9] * 8)
+    kth = logits.float().sort(-1, descending=True).values[:, 4:5]
+    allowed = logits.float() >= kth
+    for _ in range(300):
+        sampled = Sampler()(filtered.clone(), temperatures)
+        assert bool(allowed.gather(1, sampled.unsqueeze(1)).all())
+
+def test_topp_params_validation():
+    SamplingParams(top_p=1.0)
+    SamplingParams(top_p=0.9)
+    with pytest.raises(ValueError):
+        SamplingParams(top_p=0.0)
+    with pytest.raises(ValueError):
+        SamplingParams(top_p=1.5)

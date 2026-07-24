@@ -1,7 +1,6 @@
 import torch
 from torch import nn
 
-
 class Sampler(nn.Module):
 
     @torch.compile
@@ -19,6 +18,33 @@ class Sampler(nn.Module):
         top_k_values = torch.topk(active_logits, top_k, dim=-1, sorted=False).values
         threshold = top_k_values.amin(dim=-1, keepdim=True)
         active_logits.masked_fill_(active_logits < threshold, float("-inf"))
+        if row_indices is not None:
+            logits.index_copy_(0, row_indices, active_logits)
+        return logits
+
+    @torch.inference_mode()
+    def filter_top_p(
+        self,
+        logits: torch.Tensor,
+        temperatures: torch.Tensor,
+        row_indices: torch.Tensor | None,
+        top_ps: torch.Tensor,
+    ):
+        active_logits = logits if row_indices is None else logits.index_select(0, row_indices)
+        active_temperatures = (
+            temperatures
+            if row_indices is None
+            else temperatures.index_select(0, row_indices)
+        )
+        scaled_logits = active_logits.float().div_(active_temperatures.unsqueeze(dim=1))
+        sorted_logits, sorted_indices = scaled_logits.sort(dim=-1, descending=False)
+        cumulative_probs = sorted_logits.softmax(dim=-1).cumsum(dim=-1)
+        sorted_indices_to_remove = cumulative_probs <= (1.0 - top_ps.unsqueeze(dim=1))
+        sorted_indices_to_remove[:, -1] = False
+        indices_to_remove = torch.zeros_like(sorted_indices_to_remove).scatter_(
+            -1, sorted_indices, sorted_indices_to_remove
+        )
+        active_logits.masked_fill_(indices_to_remove, float("-inf"))
         if row_indices is not None:
             logits.index_copy_(0, row_indices, active_logits)
         return logits

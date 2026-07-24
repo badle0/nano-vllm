@@ -114,6 +114,18 @@ class ModelRunner:
                 self.sampler.filter_top_k(warmup_logits, row_indices, top_k)
                 warmup_logits = torch.zeros(2, vocab_size)
                 self.sampler.filter_top_k(warmup_logits, None, top_k)
+            warmup_temperatures = torch.ones(2, dtype=torch.float32)
+            warmup_top_ps = torch.full((1,), 0.9, dtype=torch.float32)
+            warmup_logits = torch.zeros(2, vocab_size)
+            row_indices = torch.zeros(1, dtype=torch.int64)
+            self.sampler.filter_top_p(
+                warmup_logits, warmup_temperatures, row_indices, warmup_top_ps
+            )
+            warmup_logits = torch.zeros(2, vocab_size)
+            warmup_top_ps = torch.full((2,), 0.9, dtype=torch.float32)
+            self.sampler.filter_top_p(
+                warmup_logits, warmup_temperatures, None, warmup_top_ps
+            )
             del warmup_logits
         torch.cuda.empty_cache()
 
@@ -209,7 +221,7 @@ class ModelRunner:
         temperatures = tuple(seq.temperature for seq in seqs)
         all_greedy = all(temperature == 0.0 for temperature in temperatures)
         if all_greedy:
-            return temperatures, (), True
+            return temperatures, (), None, True
 
         rows_by_top_k = {}
         for row, (seq, temperature) in enumerate(zip(seqs, temperatures)):
@@ -228,14 +240,31 @@ class ModelRunner:
             )
             for top_k in sorted(rows_by_top_k)
         )
-        return temperatures, top_k_buckets, False
+        top_p_rows = []
+        top_ps = []
+        for row, (seq, temperature) in enumerate(zip(seqs, temperatures)):
+            if temperature != 0.0 and seq.top_p != 1.0:
+                top_p_rows.append(row)
+                top_ps.append(seq.top_p)
+        top_p_plan = None
+        if top_p_rows:
+            top_p_plan = (
+                None if len(top_p_rows) == len(seqs) else tuple(top_p_rows),
+                tuple(top_ps),
+            )
+        return temperatures, top_k_buckets, top_p_plan, False
 
     def prepare_sample(self, seqs: list[Sequence]):
-        temperatures, host_top_k_buckets, all_greedy = self._prepare_sample_metadata(
+        (
+            temperatures,
+            host_top_k_buckets,
+            host_top_p_plan,
+            all_greedy,
+        ) = self._prepare_sample_metadata(
             seqs, self.config.hf_config.vocab_size
         )
         if all_greedy:
-            return None, (), True
+            return None, (), None, True
 
         temperatures = torch.tensor(temperatures, dtype=torch.float32, pin_memory=True).cuda(non_blocking=True)
         top_k_buckets = tuple(
@@ -249,7 +278,17 @@ class ModelRunner:
             )
             for top_k, rows in host_top_k_buckets
         )
-        return temperatures, top_k_buckets, False
+        top_p_plan = None
+        if host_top_p_plan is not None:
+            rows, top_ps = host_top_p_plan
+            row_indices = (
+                None
+                if rows is None
+                else torch.tensor(rows, dtype=torch.int64, pin_memory=True).cuda(non_blocking=True)
+            )
+            top_ps = torch.tensor(top_ps, dtype=torch.float32, pin_memory=True).cuda(non_blocking=True)
+            top_p_plan = (row_indices, top_ps)
+        return temperatures, top_k_buckets, top_p_plan, False
 
     @torch.inference_mode()
     def run_model(self, input_ids: torch.Tensor, positions: torch.Tensor, is_prefill: bool):
@@ -272,7 +311,11 @@ class ModelRunner:
 
     def run(self, seqs: list[Sequence], is_prefill: bool) -> list[int]:
         input_ids, positions = self.prepare_prefill(seqs) if is_prefill else self.prepare_decode(seqs)
-        temperatures, top_k_buckets, all_greedy = self.prepare_sample(seqs) if self.rank == 0 else (None, (), False)
+        temperatures, top_k_buckets, top_p_plan, all_greedy = (
+            self.prepare_sample(seqs)
+            if self.rank == 0
+            else (None, (), None, False)
+        )
         logits = self.run_model(input_ids, positions, is_prefill)
         if self.rank == 0:
             if all_greedy:
@@ -280,6 +323,11 @@ class ModelRunner:
             else:
                 for top_k, row_indices in top_k_buckets:
                     logits = self.sampler.filter_top_k(logits, row_indices, top_k)
+                if top_p_plan is not None:
+                    row_indices, top_ps = top_p_plan
+                    logits = self.sampler.filter_top_p(
+                        logits, temperatures, row_indices, top_ps
+                    )
                 tokens = self.sampler(logits, temperatures)
             token_ids = tokens.tolist()
         else:
