@@ -1,4 +1,5 @@
 from collections import deque
+from time import perf_counter
 
 from nanovllm.config import Config
 from nanovllm.engine.sequence import Sequence, SequenceStatus
@@ -49,6 +50,8 @@ class Scheduler:
                 seq.status = SequenceStatus.RUNNING
                 self.waiting.popleft()
                 self.running.append(seq)
+            if seq.first_scheduled_time is None:
+                seq.first_scheduled_time = perf_counter()
             scheduled_seqs.append(seq)
 
         if scheduled_seqs:
@@ -79,6 +82,7 @@ class Scheduler:
         self.waiting.appendleft(seq)
 
     def postprocess(self, seqs: list[Sequence], token_ids: list[int], is_prefill: bool):
+        now = perf_counter()
         for seq, token_id in zip(seqs, token_ids):
             self.block_manager.hash_blocks(seq)
             seq.num_cached_tokens += seq.num_scheduled_tokens
@@ -86,7 +90,11 @@ class Scheduler:
             if is_prefill and seq.num_cached_tokens < seq.num_tokens:
                 continue
             seq.append_token(token_id)
+            if seq.first_token_time is None:
+                seq.first_token_time = now
+            seq.token_times.append(now)
             if (not seq.ignore_eos and token_id == self.eos) or seq.num_completion_tokens == seq.max_tokens:
+                seq.finish_time = now
                 seq.status = SequenceStatus.FINISHED
                 self.block_manager.deallocate(seq)
                 self.running.remove(seq)

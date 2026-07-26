@@ -1,6 +1,7 @@
 from copy import copy
 from enum import Enum, auto
 from itertools import count
+from time import perf_counter
 
 from nanovllm.sampling_params import SamplingParams
 
@@ -29,6 +30,11 @@ class Sequence:
         self.temperature = sampling_params.temperature
         self.max_tokens = sampling_params.max_tokens
         self.ignore_eos = sampling_params.ignore_eos
+        self.arrival_time = perf_counter()
+        self.first_scheduled_time = None
+        self.first_token_time = None
+        self.finish_time = None
+        self.token_times = []
 
     def __len__(self):
         return self.num_tokens
