@@ -72,7 +72,27 @@ identical to HF TopKLogitsWarper (both implement value-threshold semantics).
 
 ## Unit tests
 
-10/10 (pytest tests/ -v on the box, torch.compile enabled): greedy/argmax equality, mixed-
+13/13 (pytest tests/ -v on the box, torch.compile enabled): greedy/argmax equality, mixed-
 batch routing, stochastic non-constancy, params validation (temperature and top_k bounds),
 seed-equivalence vs compiled PR1 reference, top-k support containment, boundary-tie
 inclusion, top_k=1 == greedy.
+
+## Provenance correction (post-hoc)
+
+This branch was originally cut on `78d0f18`; the feature commit was subsequently
+amended to `93a4664`. The drift was confined to `tests/test_sampler.py` (added
+coverage) — `sampler.py`, `model_runner.py`, and `sampling_params.py` are
+byte-identical across the amend — so all measurements above remain valid as
+recorded, and no benchmark re-runs were required. Original base preserved as tag
+`archive/pr2-pre-amend`. The branch is now rebased onto `93a4664` so the artifacts
+describe shipped code (`git diff 93a4664 pr2-artifacts -- nanovllm/ tests/` is
+empty).
+
+Re-validation on the rebased tree: `pytest tests/ -q` reports 13 passed (the 10
+enumerated above plus the three carried in from `93a4664`); `xval_topk.py`
+reproduces 0 / 600 mismatches; `topk_smoke.py` runs end-to-end with
+`enforce_eager=False`, confirming top_k flows LLM -> Sequence -> prepare_sample ->
+Sampler on the compiled path. The step-time tables were deliberately not re-run:
+their value is the interleaved same-session comparison recorded above, which a
+later standalone run cannot reproduce or improve on, and the measured code is
+unchanged.
