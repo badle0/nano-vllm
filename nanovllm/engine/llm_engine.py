@@ -3,14 +3,21 @@ from dataclasses import fields
 from time import perf_counter
 from tqdm.auto import tqdm
 from transformers import AutoTokenizer
+from typing import NamedTuple
+from collections.abc import Iterator
 import torch.multiprocessing as mp
 
 from nanovllm.config import Config
 from nanovllm.sampling_params import SamplingParams
-from nanovllm.engine.sequence import Sequence
+from nanovllm.engine.sequence import Sequence, StreamOutput
 from nanovllm.engine.scheduler import Scheduler
 from nanovllm.engine.model_runner import ModelRunner
 from nanovllm.metrics import compute_metrics
+
+class StepOutput(NamedTuple):
+    events: list[StreamOutput]
+    finished: list[Sequence]
+    num_tokens: int
 
 
 class LLMEngine:
@@ -60,12 +67,18 @@ class LLMEngine:
         )
         self.scheduler.add(seq)
 
-    def _execute_step(self):
+    def _step(self) -> StepOutput:
         seqs, is_prefill = self.scheduler.schedule()
+        # must precede postprocess: it zeroes num_scheduled_tokens
         num_tokens = sum(seq.num_scheduled_tokens for seq in seqs) if is_prefill else -len(seqs)
         token_ids = self.model_runner.call("run", seqs, is_prefill)
-        self.scheduler.postprocess(seqs, token_ids, is_prefill)
-        return [seq for seq in seqs if seq.is_finished], num_tokens
+        events = self.scheduler.postprocess(seqs, token_ids, is_prefill)
+        finished = [seq for seq in seqs if seq.is_finished]
+        return StepOutput(events, finished, num_tokens)
+
+    def _execute_step(self):
+        step_output = self._step()
+        return step_output.finished, step_output.num_tokens
 
     def step(self):
         """Advance the engine and preserve the legacy pair-valued output API."""
@@ -86,6 +99,10 @@ class LLMEngine:
             for seq in seqs
         ]
         return outputs, num_tokens
+
+    def _run_engine(self) -> Iterator[StepOutput]:
+        while not self.is_finished():
+            yield self._step()
 
     def is_finished(self):
         return self.scheduler.is_finished()
