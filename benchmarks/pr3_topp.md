@@ -47,14 +47,13 @@ Delta +0.15%, within the 0.3-0.7% within-branch spread: no regression.
 
 ## Kept-set cross-validation vs HF TopPLogitsWarper
 
-Tie-free fp32 logits: 0 / 600 mismatches (200 trials x p in {0.3, 0.8, 0.95} x 4 rows) —
-kept sets exactly equal. The rules are equivalent: this implementation accumulates
-head-descending with an exclusive cumsum; HF tail-ascending with an inclusive one.
-bf16-quantized logits: 328/600 comparisons differ, every difference a symmetric
-equal-probability swap inside a tie group straddling the nucleus boundary (kept counts
-identical in all cases; kept mass equal to 1 ulp fp64; verified in fp64). The nucleus
-definition is ambiguous under ties; the two implementations pick different, equally
-valid representatives. Same bf16-tie root cause as the top-k value-threshold findings.
+Re-validated (post-hoc, this session): noties 0/600; bf16 328/600; fp64 328/600 with
+worst boundary offset 8.13e-3. The fp64 run is the decisive one: because the logits are
+bf16-quantized before the fp64 cast, tied probabilities remain exactly tied at any
+precision, so the disagreement does not shrink — it is not a rounding artifact but the
+nucleus definition's genuine ambiguity under ties, where both implementations pick
+equally valid representatives. (Earlier phrasing here implied fp64 resolved the
+comparisons; it does not, and the persistence is the better evidence.)
 
 ## Unit tests
 
