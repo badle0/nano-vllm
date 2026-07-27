@@ -47,11 +47,14 @@ long         n= 2 TTFT p50= 37.4ms p99= 37.4ms mean_ITL= 4.82ms max_ITL p50= 12.
 
 Reading: the moment the long prompts arrive, the scheduler's prefill-first policy (any
 waiting sequence that fits turns the entire step prefill-only) freezes all 16 in-flight
-decodes for one 4096-token prefill step. The freeze appears as a 10x ITL spike
-(mean 5.0 -> max 47.0 ms) on every interactive request simultaneously. Consistency
+decodes for one 4096-token prefill step. The freeze appears as a ~10x ITL spike
+(mean ~5.0 -> max ~47.0 ms) on every interactive request simultaneously. Consistency
 identity, measured through two independent paths across three runs: interactive
 max_ITL (47.0) ~= long TTFT (40.7) + one decode step (~5) — i.e. THE LONG REQUEST'S
 TIME-TO-FIRST-TOKEN IS PAID BY THE INTERACTIVE REQUESTS AS INTER-TOKEN LATENCY.
+(The 47.0 / 40.7 figures are the three-run aggregate; the single-run table above reads
+43.3 / 37.4. The claim is the *relationship*, which holds within every run — absolute
+values drift a few percent per session; see the reproducibility band below.)
 This table is the "before" of the planned SARATHI-style mixed-batch chunked prefill;
 rerunning this script unchanged after that lands is the "after".
 
@@ -69,6 +72,29 @@ comparison this table exists for — cold start would be identical noise on both
 Two truthful artifacts: interactive TTFT p50=p99 (all 16 arrive together and share one
 prefill step — degenerate by construction, not a bug); long max_ITL wobbles across runs
 (extreme-value statistic over n=2 — not meaningful).
+
+## Re-validation (2026-07-27, post-audit smoke)
+
+Re-run unchanged on the same host, immediately after the artifact-branch provenance
+audit. `python benchmarks/bench_latency.py` (from repo root):
+
+interactive  n=16 TTFT p50= 31.7ms mean_ITL= 4.95ms max_ITL p50= 44.4ms
+long         n= 2 TTFT p50= 38.1ms mean_ITL= 4.77ms max_ITL p50=  6.3ms
+
+The stall signature reproduces: mean 4.95 -> max 44.4 ms is a ~9x spike on every
+interactive request, and the consistency identity holds through both paths —
+interactive max_ITL 44.4 ~= long TTFT 38.1 + one decode step (~5) = 43.1.
+
+Reproducibility band (this run vs. the recorded run above): interactive TTFT
+31.7 / 31.5, mean_ITL 4.95 / 4.99, max_ITL 44.4 / 43.3 — all within ~3%, the same
+cross-session variance quoted for throughput in the sampling series. Long max_ITL is
+the exception (6.3 / 12.3): a p50 over n=2, an extreme-value statistic on two samples,
+already flagged above as not meaningful and carrying no weight in the argument.
+
+This band is what makes the table usable as the "before" half of the chunked-prefill
+comparison: a post-change delta must exceed ~3% on the interactive figures to be read
+as signal rather than session drift. The spike itself (~9-10x) is an order of magnitude
+clear of that threshold.
 
 ## Tests (3)
 
@@ -88,3 +114,4 @@ torch out from under the pinned flash-attn wheel).
 pip install -e . --no-deps
 pytest tests/ -v                      # 3 passed
 python benchmarks/bench_latency.py    # prints the two-group table
+                                      # run from the repo root; not importable as a module path
