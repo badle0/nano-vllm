@@ -104,6 +104,21 @@ class LLMEngine:
         while not self.is_finished():
             yield self._step()
 
+    def stream(
+        self,
+        prompts: list[str] | list[list[int]],
+        sampling_params: SamplingParams | list[SamplingParams],
+    ) -> Iterator[StreamOutput]:
+        if not isinstance(sampling_params, list):
+            sampling_params = [sampling_params] * len(prompts)
+        for prompt, sp in zip(prompts, sampling_params):
+            self.add_request(prompt, sp)
+        try:
+            for step_output in self._run_engine():
+                yield from step_output.events
+        finally:
+            self.scheduler.cancel_all()
+
     def is_finished(self):
         return self.scheduler.is_finished()
 

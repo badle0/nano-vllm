@@ -204,21 +204,6 @@ def test_generate_rejects_mismatched_parameter_list_before_admission():
     assert engine.scheduler.sequences == []
     assert engine.tokenizer.encoded == []
 
-
-@pytest.fixture(scope="module")
-def llm():
-    torch = pytest.importorskip("torch")
-    if not torch.cuda.is_available():
-        pytest.skip("engine test needs GPU")
-    from nanovllm import LLM
-
-    return LLM(
-        "/workspace/models/Qwen3-0.6B",
-        enforce_eager=True,
-        max_model_len=1024,
-    )
-
-
 def test_engine_metrics_invariants(llm):
     outputs = llm.generate(
         ["The capital of France is", "def fibonacci(n):", "In 1969"],
