@@ -104,3 +104,10 @@ class Scheduler:
                 self.running.remove(seq)
             events.append(StreamOutput(seq.seq_id, token_id, finished))
         return events
+    
+    def cancel_all(self):
+        for seq in (*self.running, *self.waiting):
+            if seq.block_table:
+                self.block_manager.deallocate(seq)
+        self.running.clear()
+        self.waiting.clear()

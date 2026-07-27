@@ -29,22 +29,6 @@ def test_single_token_sequence():
     assert m["itls"] == [] and m["mean_itl"] == 0.0 and m["max_itl"] == 0.0
     assert m["ttft"] == m["e2e_latency"] == 0.2
 
-# append to tests/test_metrics.py
-import pytest, os
-try:
-    import torch
-    _cuda = torch.cuda.is_available()
-except Exception:
-    _cuda = False
-
-@pytest.fixture(scope="module")
-def llm():
-    if not _cuda:
-        pytest.skip("engine test needs GPU")
-    from nanovllm import LLM
-    return LLM(os.path.expanduser("~/huggingface/Qwen3-0.6B"),
-               enforce_eager=True, max_model_len=1024)
-
 def test_engine_metrics_invariants(llm):
     from nanovllm import SamplingParams
     outs = llm.generate(["The capital of France is", "def fibonacci(n):", "In 1969"],
