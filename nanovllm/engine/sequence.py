@@ -1,6 +1,8 @@
 from copy import copy
 from enum import Enum, auto
 from itertools import count
+from time import perf_counter
+from typing import NamedTuple
 
 from nanovllm.sampling_params import SamplingParams
 
@@ -10,6 +12,10 @@ class SequenceStatus(Enum):
     RUNNING = auto()
     FINISHED = auto()
 
+class StreamOutput(NamedTuple):
+    seq_id: int
+    token_id: int
+    finished: bool
 
 class Sequence:
     block_size = 256
@@ -31,6 +37,11 @@ class Sequence:
         self.top_p = sampling_params.top_p
         self.max_tokens = sampling_params.max_tokens
         self.ignore_eos = sampling_params.ignore_eos
+        self.arrival_time = perf_counter()
+        self.first_scheduled_time = None
+        self.first_token_time = None
+        self.finish_time = None
+        self.token_times = []
 
     def __len__(self):
         return self.num_tokens

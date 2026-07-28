@@ -1,0 +1,34 @@
+=== ttft_caller
+| batch (generate returns) |    832.0 ms |
+| stream (first event)     |     31.7 ms |
+| collapse factor          |     26.3x |
+raw batch=[832.9, 832.0, 829.7] stream=[31.0, 31.7, 31.9]
+| batch (generate returns) |    825.3 ms |
+| stream (first event)     |     31.3 ms |
+| collapse factor          |     26.3x |
+raw batch=[821.9, 861.1, 825.3] stream=[31.3, 31.3, 31.8]
+=== null_consumer
+| generate()      |   9174.3 tok/s |
+| stream() null   |   9216.3 tok/s |
+| delta           |   +0.46% |
+| generate()      |   9144.9 tok/s |
+| stream() null   |   9233.5 tok/s |
+| delta           |   +0.97% |
+=== slow_consumer
+| consumer sleep   0.0 ms | median inter-event   3.572 ms |
+| consumer sleep   0.0 ms | median inter-event   3.058 ms |
+| consumer sleep   2.0 ms | median inter-event  19.905 ms |
+| consumer sleep  10.0 ms | median inter-event  84.747 ms |
+| consumer sleep   0.0 ms | median inter-event   3.584 ms |
+| consumer sleep   0.0 ms | median inter-event   3.006 ms |
+| consumer sleep   2.0 ms | median inter-event  19.754 ms |
+| consumer sleep  10.0 ms | median inter-event  84.867 ms |
+=== detok_cost
+| n=   64 |     10.2 us/token |
+| n=  256 |     32.6 us/token |
+| n= 1024 |    119.9 us/token |
+| n= 2048 |    228.4 us/token |
+| n=   64 |     10.2 us/token |
+| n=  256 |     32.6 us/token |
+| n= 1024 |    112.2 us/token |
+| n= 2048 |    230.4 us/token |
