@@ -1,0 +1,8 @@
+# PR6 "before" — instance C.45901419 (EPYC 7713, 32 vCPU), 2026-07-30, fresh clone
+# instrument: bench_latency.py pinned at metrics-artifacts 5b6f013
+host: A100-SXM4-40GB | 32 vCPU AMD EPYC 7713
+run1: interactive n=16 TTFT p50=27.4ms mean_ITL=5.00ms max_ITL p50=45.8ms | long TTFT=39.4ms
+run2: interactive n=16 TTFT p50=27.2ms mean_ITL=4.98ms max_ITL p50=44.2ms | long TTFT=38.0ms
+identity: 38.0 + 5.0 = 43.0 ~= 44.2 (holds). spike = 8.9x.
+bench.py: 8631.44, 8601.47 tok/s (matches this box's historical 8650 band)
+vs host3 (Xeon 12 vCPU): stall 11.2x, TTFT 47ms — same mechanism, milder here
