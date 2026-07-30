@@ -1,7 +1,5 @@
 # greedy token-gate: natural prompts, dumps token_ids to argv[1]
 import json, sys, os
-if len(sys.argv) != 2:
-    sys.exit("usage: gate_greedy.py OUTPUT.json   (e.g. /tmp/branch_base.json)")
 from nanovllm import LLM, SamplingParams
 llm = LLM(os.path.expanduser("~/huggingface/Qwen3-0.6B"), enforce_eager=False, max_model_len=4096)
 prompts = ["The history of the Roman Empire begins with",
