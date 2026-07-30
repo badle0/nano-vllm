@@ -1,0 +1,6 @@
+C=  64 rep0: dispatch   25.0 ms | wall   25.0 ms
+C=  64 rep1: dispatch   25.2 ms | wall   25.2 ms
+C= 512 rep0: dispatch   24.6 ms | wall   24.6 ms
+C= 512 rep1: dispatch   25.0 ms | wall   25.0 ms
+C=3968 rep0: dispatch   24.8 ms | wall   45.4 ms
+C=3968 rep1: dispatch   25.3 ms | wall   45.6 ms

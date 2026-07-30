@@ -1,0 +1,8 @@
+capture: OK
+replay 0:   6.44 ms
+replay 1:   6.41 ms
+replay 2:   6.29 ms
+capture paged-varlen: OK
+replay 0:   6.56 ms
+replay 1:   6.44 ms
+replay 2:   6.51 ms
