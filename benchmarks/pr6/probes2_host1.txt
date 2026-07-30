@@ -1,0 +1,11 @@
+=== p1_zero_segments
+P1 trailing-empty: OK | bitwise=True | allclose=True
+P1 middle-empty: OK | bitwise=True | allclose=True
+=== p2_oversized_m
+P2 tight M=64 : replay   5.46 ms
+P2 tight M=64 : replay   5.45 ms
+P2 tight M=64 : replay   5.45 ms
+P2 loose M=512: replay   5.45 ms
+P2 loose M=512: replay   5.48 ms
+P2 loose M=512: replay   5.47 ms
+=== p3_bitwise_and_pool
