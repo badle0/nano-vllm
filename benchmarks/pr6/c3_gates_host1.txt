@@ -46,3 +46,42 @@ Axis-2 token-gate, forced mixing (gate_generate_tau.py, tau=24, chunked+mixed st
   buckets (P12 rate). NEXT: per-bucket slot cap min(max_num_seqs+1, T_pad) — free
   by the segments<=tokens argument (every real segment holds >=1 token) — predicted
   to close most of the gap; re-gate captures after.
+
+== P13 — slot policy decided by measurement (p13_small_bucket_tax.py) ==
+A) rate scales with M-blocks(T_pad), as predicted from P12:
+   T=512:  slots 18 / 128 / 513 -> 4.61 / 5.21 / 7.46 ms   (0.0058 ms/slot)
+   T=1024: slots 18 / 128 / 513 -> 7.84 / 9.03 / 13.46 ms  (0.0114 ms/slot)
+B) production bucket-512 path decomposed: replay 7.46 | fill 0.15 | logits 0.33 |
+   run_model 7.84 | paged-eager 25.23 ms. Replay DOMINATES the tau=512 residual;
+   lean slots recover ~2.85 ms -> projected max_ITL ~7.5-8 ms (inside the 6-8 band).
+Options weighed: (1) slot cap min(S+1,T_pad) — no-op for buckets >=512 at S=512,
+rejected; (3) single lean count + eager fallback — destroys the ITL bound in the
+many-decoder regime, rejected on theory; (5) tiered slots across existing buckets
+(route high-ns steps up a bucket) — degrades many-decoder tau=512 (~+6 ms via
+oversized-M in bucket 2048), rejected; (4) do nothing — leaves 10.6 vs 6-8;
+(2) TWO-TIER captures per bucket (lean ~64 slots + full S+1, routed by live ns) —
+serves both regimes at graph speed; cost: 2x graphs (10), ~+1-2 s init capture,
+shared-pool growth. CHOSEN: (2), pending implementation + full re-gate
+(launch shapes change: per-bucket bitwise both tiers, token-gate vs base.json).
+
+== Two-tier captures IMPLEMENTED + re-gated (option 2, chosen by P13) ==
+Change: capture_varlen_graphs captures each bucket at slots in {64, 513} (prefix-
+slices of the same buffers; grid baked from slice length; _fill_varlen unchanged —
+its full-size padding serves every tier); run_model routes by live ns. 10 graphs.
+Init cost: +0.2 s (8.0 -> 8.2 s). No new Dynamo frames (counters identical).
+Gates:
+  pytest 44 passed — per-bucket bitwise re-certified for the LEAN tier + new
+  full-tier case (65 x 8-tok prompts, ns=65 -> 513-slot graph), each vs its own
+  capture-identical eager launch (F5 axis-1 discipline).
+  Token-gate: default path 4/4 BYTE-MATCH vs base.json; forced-mixing (tau=24)
+  reproduces the identical single flip (prompt 0 tok 6, 553->11) already
+  adjudicated this session as a 2-ULP tie — verdict carries. PASS.
+  P11 sanity: step1 292.3 ms, 1 frame — recompile fix undisturbed.
+  bench.py: 8613.51 / 8589.83 — inside the provisional post-C3 band (8560-8610);
+  default-tau throughput untouched as predicted (16k steps miss the buckets).
+Prediction scored — HIT: tau=512 interactive max_ITL 10.6 -> 7.8 / 7.8 ms
+(median of 3; one 11.8 outlier carried an elevated-TTFT host-hiccup signature;
+third sample taken at loadavg 21.8 and still 7.8). INSIDE the 6-8 headline band.
+Side effects, both rate-model-consistent: tau=1024 max_ITL 18.0 -> 12.4;
+default-tau interactive TTFT 14.6 -> 9.3 ms (interactive prefill replays lean);
+tau=512 interactive TTFT 16.4 -> 11.3. Long TTFT unchanged (eager-bound).

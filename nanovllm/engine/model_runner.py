@@ -258,7 +258,8 @@ class ModelRunner:
                 self.varlen_miss += 1
             return self.model.compute_logits(self.model(input_ids, positions))
         tp = self._fill_varlen(input_ids, positions, ctx)
-        self.varlen_graphs[tp].replay()
+        sl = next(s for s in self.varlen_slots if s >= ns)   # lean tier for few segments (P13)
+        self.varlen_graphs[(tp, sl)].replay()
         return self.model.compute_logits(self.varlen_vars["outputs"][:t])   # gather runs on the LIVE real context
 
     def run(self, seqs: list[Sequence], is_prefill: bool) -> list[int]:
@@ -327,20 +328,29 @@ class ModelRunner:
             block_tables=torch.zeros(S1, max_blocks, dtype=torch.int32),
             outputs=torch.zeros(T, config.hf_config.hidden_size),
         )
+        # Two slot tiers per bucket (P13): zero-length padding slots cost real replay
+        # time (~0.006-0.011 ms/slot at T=512/1024), so the common few-segment step
+        # replays a lean capture while high-ns mixed steps keep a full-slot graph
+        # instead of falling back to eager (which would break the ITL bound exactly
+        # in the many-decoder regime). Tiers are prefix-slices of the SAME buffers —
+        # the baked grid comes from the slice length; _fill_varlen's full-size
+        # padding serves every tier.
+        self.varlen_slots = sorted({min(64, S1), S1})
         self.varlen_graphs = {}
         self.varlen_miss = 0
         for t in reversed(self.varlen_ts):
-            v["cu_q"].fill_(t); v["cu_q"][0] = 0        # one segment owns all t tokens; rest zero-length (P1)
-            v["cu_k"].copy_(v["cu_q"])
-            set_context(True, v["cu_q"], v["cu_k"], t, config.max_model_len,   # M=T_pad (P2); K-ceiling=max_model_len
-                        v["slot_mapping"][:t], None, v["block_tables"])
-            graph = torch.cuda.CUDAGraph()
-            v["outputs"][:t] = self.model(v["input_ids"][:t], v["positions"][:t])      # warmup
-            with torch.cuda.graph(graph, self.graph_pool):                              # shared pool (P3b)
-                v["outputs"][:t] = self.model(v["input_ids"][:t], v["positions"][:t])
-            self.varlen_graphs[t] = graph
-            torch.cuda.synchronize()
-            reset_context()
+            for sl in reversed(self.varlen_slots):
+                v["cu_q"].fill_(t); v["cu_q"][0] = 0    # one segment owns all t tokens; rest zero-length (P1)
+                v["cu_k"].copy_(v["cu_q"])
+                set_context(True, v["cu_q"][:sl + 1], v["cu_k"][:sl + 1], t,   # M=T_pad (P2); K-ceiling=max_model_len
+                            config.max_model_len, v["slot_mapping"][:t], None, v["block_tables"][:sl])
+                graph = torch.cuda.CUDAGraph()
+                v["outputs"][:t] = self.model(v["input_ids"][:t], v["positions"][:t])      # warmup
+                with torch.cuda.graph(graph, self.graph_pool):                              # shared pool (P3b)
+                    v["outputs"][:t] = self.model(v["input_ids"][:t], v["positions"][:t])
+                self.varlen_graphs[(t, sl)] = graph
+                torch.cuda.synchronize()
+                reset_context()
         self.varlen_vars = v
 
     def _pretouch_eager_prefill(self):

@@ -1,6 +1,10 @@
 # nano-vllm contribution project — agent memory
 
 ## Working rules (non-negotiable — apply before any action)
+- Before ANY code change: enumerate the alternative options (including "do
+  nothing") and state why the chosen change is optimal — with a measurement
+  when the deciding quantity is measurable (probe first if it isn't). State the
+  theoretical mechanism before presenting the diff.
 - Register predictions with falsifiers BEFORE any measurement run; score them after.
 - Probes before code: mechanism confirmed by experiment, never assumed.
 - Verify claims against source (read the file) before writing code that depends on them.
@@ -13,8 +17,10 @@
   is cut; named stashes only, verify with `stash show --stat`, prefer apply over pop;
   push freely as backup.
 - Engines are one-per-process (unconditional init_process_group, atexit-pinned memory).
-- bench.py band on host1 (EPYC, C.45901419): 8600–8650 tok/s. A miss is a HARD STOP —
-  no commit until attributed.
+- bench.py band on host1 (EPYC, C.45901419): 8600–8650 tok/s through C2. Post-C3
+  (decision accepted 2026-07-31: ~0.5% default-τ cost is the designed chunked-prefill
+  trade): provisional band 8560–8610, confirm on a quiet host (C3-era samples ran at
+  loadavg 9–14). A miss is a HARD STOP — no commit until attributed.
 - bench_latency.py exists ONLY at metrics-artifacts 5b6f013; fetch via `git show`, never edit.
 
 ## Environment constants

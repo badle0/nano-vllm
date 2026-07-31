@@ -29,8 +29,9 @@ with torch.inference_mode():
     graphed = mr.run_model(ids, pos, True).clone()      # replay; also fills the persistent buffers
     v, t = mr.varlen_vars, ids.size(0)
     tp = next(x for x in mr.varlen_ts if x >= t)
-    set_context(True, v["cu_q"], v["cu_k"], tp, mr.config.max_model_len,
-                v["slot_mapping"][:tp], None, v["block_tables"])       # capture-identical launch
+    sl = next(s for s in mr.varlen_slots if s >= ctx.cu_seqlens_q.numel() - 1)  # routed tier (P13)
+    set_context(True, v["cu_q"][:sl + 1], v["cu_k"][:sl + 1], tp, mr.config.max_model_len,
+                v["slot_mapping"][:tp], None, v["block_tables"][:sl])  # capture-identical launch
     eager_padded = mr.model.compute_logits(mr.model(v["input_ids"][:tp], v["positions"][:tp]))
     print("P5b eager(padded launch) == graphed bitwise:",
           torch.equal(eager_padded[:graphed.size(0)], graphed))
