@@ -17,7 +17,8 @@ from nanovllm.metrics import compute_metrics
 class StepOutput(NamedTuple):
     events: list[StreamOutput]
     finished: list[tuple]      # (seq_id, completion_token_ids, metrics) — shape unchanged
-    num_tokens: int
+    num_prefill_tokens: int    # chunk tokens scheduled this step (0 for a pure-decode step)
+    num_decode_tokens: int     # decode rows this step (0 for a pure-prefill step)
 
 
 class LLMEngine:
@@ -57,16 +58,23 @@ class LLMEngine:
     def _step(self) -> StepOutput:
         seqs, is_prefill = self.scheduler.schedule()
         # must precede postprocess: it zeroes num_scheduled_tokens
-        num_tokens = sum(seq.num_scheduled_tokens for seq in seqs) if is_prefill else -len(seqs)
+        num_prefill_tokens = sum(seq.num_scheduled_tokens for seq in seqs if seq.is_prefill)
+        num_decode_tokens = sum(1 for seq in seqs if not seq.is_prefill)
         token_ids = self.model_runner.call("run", seqs, is_prefill)
         events = self.scheduler.postprocess(seqs, token_ids, is_prefill)
         finished = [(seq.seq_id, seq.completion_token_ids, compute_metrics(seq))
                     for seq in seqs if seq.is_finished]
-        return StepOutput(events, finished, num_tokens)
+        return StepOutput(events, finished, num_prefill_tokens, num_decode_tokens)
 
     def step(self):
+        # Public shim: keeps the legacy (finished, num_tokens) shape. Pure steps keep
+        # the legacy signed value (+prefill tokens / -decode count); a MIXED step
+        # reports +num_prefill_tokens — its sign remains a valid "step did prefill
+        # work" predicate, and the pinned bench_latency.py ignores this element.
         step_output = self._step()
-        return step_output.finished, step_output.num_tokens
+        num_tokens = (step_output.num_prefill_tokens if step_output.num_prefill_tokens
+                      else -step_output.num_decode_tokens)
+        return step_output.finished, num_tokens
 
     def _run_engine(self) -> Iterator[StepOutput]:
         while not self.is_finished():
@@ -106,10 +114,10 @@ class LLMEngine:
         t = perf_counter()
         for step_output in self._run_engine():
             dt = perf_counter() - t
-            if step_output.num_tokens > 0:
-                prefill_throughput = step_output.num_tokens / dt
-            else:
-                decode_throughput = -step_output.num_tokens / dt
+            if step_output.num_prefill_tokens:      # mixed steps update both rates (F4)
+                prefill_throughput = step_output.num_prefill_tokens / dt
+            if step_output.num_decode_tokens:
+                decode_throughput = step_output.num_decode_tokens / dt
             pbar.set_postfix({
                 "Prefill": f"{int(prefill_throughput)}tok/s",
                 "Decode": f"{int(decode_throughput)}tok/s",

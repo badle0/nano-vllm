@@ -1,0 +1,24 @@
+# C4 gate record — host1 (EPYC 7713, A100-40GB, C.45901419), 2026-07-31
+# C4 = accounting + public surface (F4), llm_engine.py only.
+# Change: StepOutput's ambiguous signed num_tokens REPLACED by explicit
+# num_prefill_tokens / num_decode_tokens, split computed in _step before postprocess
+# zeroes num_scheduled_tokens; generate()'s tqdm updates both rates on mixed steps;
+# step() keeps the legacy (finished, num_tokens) shape via a shim — pure steps keep
+# the legacy signed value, a mixed step reports +num_prefill_tokens (sign stays a
+# valid "did prefill work" predicate; pinned bench_latency ignores the element).
+# Options rejected on record: split in scheduler.schedule() (signature churn outside
+# C4's file map); keeping num_tokens as a third StepOutput field (preserves the
+# ambiguity C4 removes; all consumers verified in-file); +total for mixed shim
+# (breaks nothing but conflates decode rows into a "prefill" number again).
+
+Gates:
+  pytest: 45 passed — 44 prior + test_step_shim_convention (pure prefill +100 /
+  pure decode -1 / mixed +255 on deterministic budget arithmetic).
+  byte-gate vs base.json: IDENTICAL 4/4 (accounting-only change; token path untouched).
+  pinned bench_latency.py (5b6f013) runs unmodified: interactive TTFT 9.5 ms,
+  max_ITL 36.2 — consistent with the post-two-tier record.
+  bench.py: 8522.62 / 8533.67 (sub-band) -> interleaved A/B vs pre-C4 engine:
+  deltas -27 / +5.6 / -4 tok/s, sign-flipping, mean ~-8 = pair noise. ATTRIBUTED to
+  host load (loadavg 10-14; both arms 8500-8530, matching this load regime's earlier
+  samples). C4 itself costs nothing measurable. Quiet-host band confirmation remains
+  the standing caveat from the C3 band decision.
