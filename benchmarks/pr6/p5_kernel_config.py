@@ -1,17 +1,14 @@
 # benchmarks/pr6/p5_kernel_config.py — is the per-bucket failure a kernel-config (M_q/M_k) effect?
-import os, random, torch
-from nanovllm import LLM, SamplingParams
-from nanovllm.utils.context import get_context, set_context, reset_context
+# P5b (padded-launch bitwise) graduated into tests/test_varlen_graphs.py; kept here as the
+# mechanism record: baked-M alone vs the full capture-identical launch shape.
+import random, torch
+from probe_common import make_llm, ragged_step
+from nanovllm.utils.context import set_context, reset_context
 
-llm = LLM(os.path.expanduser("~/huggingface/Qwen3-0.6B"), enforce_eager=False, max_model_len=4096)
+llm = make_llm()
 random.seed(7)
 for target, budget, t_pad in ((100, 128, 128), (400, 512, 512), (1500, 2048, 2048)):
-    llm.scheduler.max_num_batched_tokens = budget
-    llm.add_request([random.randint(1000, 150000) for _ in range(target)],
-                    SamplingParams(temperature=0.6, max_tokens=1, ignore_eos=True))
-    seqs, _ = llm.scheduler.schedule()
-    ids, pos = llm.model_runner.prepare_ragged(seqs)
-    ctx = get_context()
+    ids, pos, ctx = ragged_step(llm, [target], budget)
     with torch.inference_mode():
         eager = llm.model_runner.model.compute_logits(llm.model_runner.model(ids, pos)).clone()
         graphed = llm.model_runner.run_model(ids, pos, True).clone()
@@ -26,21 +23,15 @@ for target, budget, t_pad in ((100, 128, 128), (400, 512, 512), (1500, 2048, 204
     reset_context(); llm.scheduler.cancel_all()
 
 # P5b: does matching the FULL launch shape (padded batch, buffers, baked Ms) restore bitwise?
-llm.scheduler.max_num_batched_tokens = 2048
-llm.add_request([random.randint(1000, 150000) for _ in range(1500)],
-                SamplingParams(temperature=0.6, max_tokens=1, ignore_eos=True))
-seqs, _ = llm.scheduler.schedule()
-ids, pos = llm.model_runner.prepare_ragged(seqs)
-ctx = get_context()
+ids, pos, ctx = ragged_step(llm, [1500], 2048)
 mr = llm.model_runner
 with torch.inference_mode():
     graphed = mr.run_model(ids, pos, True).clone()      # replay; also fills the persistent buffers
-    v, t, ns = mr.varlen_vars, ids.size(0), ctx.cu_seqlens_q.numel() - 1
+    v, t = mr.varlen_vars, ids.size(0)
     tp = next(x for x in mr.varlen_ts if x >= t)
     set_context(True, v["cu_q"], v["cu_k"], tp, mr.config.max_model_len,
                 v["slot_mapping"][:tp], None, v["block_tables"])       # capture-identical launch
     eager_padded = mr.model.compute_logits(mr.model(v["input_ids"][:tp], v["positions"][:tp]))
-    eager_padded = mr.model.compute_logits(mr.model(v["input_ids"][:tp], v["positions"][:tp]))
     print("P5b eager(padded launch) == graphed bitwise:",
-          torch.equal(eager_padded[: graphed.size(0)] if eager_padded.size(0) != graphed.size(0) else eager_padded, graphed))
+          torch.equal(eager_padded[:graphed.size(0)], graphed))
 reset_context(); llm.scheduler.cancel_all()

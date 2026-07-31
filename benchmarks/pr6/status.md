@@ -22,7 +22,7 @@ Before/after instrument: bench_latency.py byte-pinned at metrics-artifacts 5b6f0
 | commit | contents | status | gate record |
 |---|---|---|---|
 | C1 | prepare_prefill → prepare_ragged; dormant decode-mode extraction branch; class alias | DONE `<c1-sha>` | byte-gate: base.json == c1.json, IDENTICAL; pytest 38 incl. test_ragged; bench 8632.15 / 8597.40 (band) |
-| C2 | bucketed varlen graphs + run_model routing + miss counter; prepare_ragged block_tables condition | next — entry gated on P4 | targets: per-bucket bitwise; byte-gate continuity vs base.json; 39 tests; bench band; C2-stage bench_latency (predict: interactive TTFT 27→7–10 ms, long TTFT 39→8–14, max_ITL only ~15–20 — stall residual is C3's job) |
+| C2 | bucketed varlen graphs + run_model routing + miss counter; prepare_ragged block_tables condition | wip `523c19e` — additionally gated on the P10/P11 step-1 compile investigation (probes in-tree; arm results pending) | targets: per-bucket bitwise; byte-gate continuity vs base.json; 39 tests; bench band; C2-stage bench_latency (predict: interactive TTFT 27→7–10 ms, long TTFT 39→8–14, max_ITL only ~15–20 — stall residual is C3's job) |
 | C3 | decode-first mixed-step scheduler | pending | two-axis equivalence; ≤1-mid-chunk assert; streaming gates under forced mixing; preemption-under-mixing |
 | C4 | StepOutput token fields; tqdm; shim convention | pending | test_step_public_contract; pinned bench_latency runs unmodified |
 | C5 (optional) | drop redundant is_prefill conjunct from emission gate | pending | own byte-gate |
@@ -52,3 +52,9 @@ kernel semantics proven: key count from cu_seqlens_k (2b), pages gathered per bl
 - Paged-prefill output correctness had zero test coverage before P4b-3; its
   production-path check graduates into the suite (natural prompts, longer outputs,
   tie adjudication) alongside C2/C3.
+- Probe cleanup (p5+): shared plumbing lives in probe_common.py (LLM ctor, timed,
+  arm parsing/stub, bench workload, ragged-step setup, clean exit). P8 folded into
+  P9 (same workload/AB; P9 prints the P8' tok/s line). P6b/P6c retired and p7's
+  "graphed(4096)" relabeled: varlen_ts caps at 2048, so the 4096-token step takes
+  run_model's miss-fallback (verified: miss counter increments, run_model ≈
+  paged-eager). P5b's padded-launch bitwise gate graduated to tests/test_varlen_graphs.py.

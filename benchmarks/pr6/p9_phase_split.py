@@ -1,19 +1,16 @@
 # benchmarks/pr6/p9_phase_split.py — where do the ~750ms live: prefill steps, decode steps, or neither?
 # usage: p9_phase_split.py {varlen|novarlen}
-import os, sys, time, torch
-from random import randint, seed
-if len(sys.argv) != 2 or sys.argv[1] not in ("varlen", "novarlen"):
-    sys.exit("usage: p9_phase_split.py {varlen|novarlen}")
-if sys.argv[1] == "novarlen":
-    from nanovllm.engine.model_runner import ModelRunner
-    ModelRunner.capture_varlen_graphs = lambda self: None
-from nanovllm import LLM, SamplingParams
+# Absorbs p8_pool_cohabitation (deleted in the probe cleanup): same workload, same A/B —
+# its free-MiB and end-to-end tok/s lines are printed here (tok/s from the step loop,
+# which excludes generate()'s final detokenize; the arm delta is what matters).
+from probe_common import parse_arm, make_llm, bench_workload
 
-seed(0)
-llm = LLM(os.path.expanduser("~/huggingface/Qwen3-0.6B"), enforce_eager=False, max_model_len=4096)
-prompts = [[randint(0, 10000) for _ in range(randint(100, 1024))] for _ in range(256)]
-sps = [SamplingParams(temperature=0.6, ignore_eos=True, max_tokens=randint(100, 1024)) for _ in range(256)]
-llm.generate(["Benchmark: "], SamplingParams())          # warmup, same as bench.py
+ARM = parse_arm("varlen", "novarlen")
+import time, torch
+
+llm = make_llm()
+prompts, sps = bench_workload(llm)                       # seed(0) load + warmup, as bench.py
+print("free MiB pre-generate:", torch.cuda.mem_get_info()[0] // 2**20)
 torch.cuda.reset_peak_memory_stats()
 r0 = torch.cuda.memory_stats().get("num_alloc_retries", 0)
 for p, sp in zip(prompts, sps):
@@ -29,6 +26,7 @@ while not llm.is_finished():
     if ntok > 0: np += 1; tp += dt; wp = max(wp, dt)
     else:        nd += 1; td += dt; wd = max(wd, dt)
 r1 = torch.cuda.memory_stats().get("num_alloc_retries", 0)
-print(f"P9 [{sys.argv[1]:8s}] prefill: {np:4d} steps {tp:6.2f}s (max {wp*1e3:6.1f}ms) | "
+print(f"P9 [{ARM:8s}] prefill: {np:4d} steps {tp:6.2f}s (max {wp*1e3:6.1f}ms) | "
       f"decode: {nd:5d} steps {td:6.2f}s (max {wd*1e3:5.1f}ms) | "
       f"total {tp+td:6.2f}s | alloc_retries {r1-r0} | miss {getattr(llm.model_runner,'varlen_miss','n/a')}")
+print(f"P8' [{ARM:8s}] {sum(sp.max_tokens for sp in sps)/(tp+td):.2f} tok/s   ({tp+td:.2f}s)")
