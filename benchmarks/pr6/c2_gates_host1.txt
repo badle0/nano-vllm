@@ -1,0 +1,52 @@
+# C2 gate record — host1 (EPYC 7713, A100-40GB, C.45901419), 2026-07-31
+# C2 tree = a18b258 + F3 slot alignment (S+1) + bucket set finalized {128..2048} (P12).
+# Instruments: gate_generate.py (byte-pinned copy, both sides), gate_adjudicate.py,
+# p12_slot_tax.py, pinned bench_latency.py @ metrics-artifacts 5b6f013.
+
+== Axis-2 token-gate at C2 entry (branch-change event per F5) ==
+Baseline: C1 @ 9f7bffe checkout, same host/process pattern -> c1_base tokens.
+Candidate: C2 tree, greedy 4 prompts x 48 tokens.
+  prompt 1: byte-match. prompts 0/2/3: diverge at tokens 42/27/21.
+fp64 adjudication (gate_adjudicate.py, both kernel compositions per divergence):
+  ALL THREE are exact ties — gap(base_tok - cand_tok) = +0.000000 in BOTH the fresh
+  (C1-side) and paged (C2-side) numerics; flipped pair is the top-2 on both sides.
+  Verdict: tie-class flips only => TOKEN-GATE PASS. base.json re-baselined to the C2
+  output (numerics note: C2 greedy differs from C1 only at exact argmax ties).
+Byte self-consistency: two C2 processes byte-identical (True) — deterministic replay.
+Slot-shape change (S -> S+1 segment slots) did NOT move any token vs base.json.
+
+== P12 — segment-slot tax + the 4096-bucket decision ==
+T=4096 captures, replaying the exact 2x2048 load:
+  slots=2:   32.4 ms   (k_ceil 4096 vs 2048: identical -> K-ceiling free)
+  slots=8:   32.4 ms
+  slots=64:  35.2 ms
+  slots=257: 42.8 ms   (~0.04 ms/slot; production capture with 1-segment-baked
+                        split plan measured 54.6 ms on the same load)
+Floor 32.4 ms ~= paged-eager 34.4 ms: host1 is past the E2 dispatch/GPU crossover at
+T=4096 — no dispatch left for the graph to remove. F3's zero-length-padding cost
+assumption partially falsified (P1 proved correctness, never time). DECISION:
+varlen_ts tops out at 2048; the 4096-token step takes the miss-fallback (paged eager,
+p7: run_model ~= paged-eager there); C3's chunking bounds mixed steps to the budget,
+making larger buckets structurally unnecessary. Slot tax at small buckets (~2 ms at
+1024 with 257 slots) accepted as the C3-readiness price per the locked F3 slot count.
+
+== C2-stage bench_latency (pinned 5b6f013; first run discarded; loadavg 8-10 shared host) ==
+                     before (E1)        C2 (run1 / run2)     prediction -> score
+interactive TTFT p50 27.4 / 27.2 ms     18.4 / 14.7 ms       7-10   -> direction HIT, magnitude MISS:
+                                                             floor is the graphed 1024-token step
+                                                             itself (p7: 14.4 ms incl. dispatch+sample)
+long TTFT            39.4 / 38.0 ms     41.7 / 34.5 ms       8-14   -> MISS, roofline-impossible on
+                                                             host1 (GPU work alone ~32 ms at 4096;
+                                                             prediction implicitly assumed a graphed
+                                                             4096 bucket beating the crossover)
+max_ITL p50 (inter.) 45.8 / 44.2 ms     48.8 / 40.0 ms       ~15-20 -> MISS as C2-stage; unchanged by
+                                                             design — stall residual is entirely C3's
+                                                             chunking job (identity still holds:
+                                                             34.5 + 4.7 = 39.2 ~= 40.0)
+mean_ITL             5.00 / 4.98 ms     4.99 / 4.83 ms       (decode path untouched — unchanged, as designed)
+
+== Suite + band ==
+pytest: 39 passed (incl. test_varlen_graphs per-bucket bitwise, S+1 slot shape).
+bench.py band 8600-8650: 8604.61 / 8602.87 tok/s — IN BAND (loadavg ~9 during runs;
+earlier sub-band samples attributed to host CPU contention, see p11_host1.txt).
+P11 sanity after all changes: step1 302.1 ms, 1 frame, counters == dev-equivalent control.

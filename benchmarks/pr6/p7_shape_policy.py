@@ -1,7 +1,7 @@
 # p7: policy data at the exact long-prompt shape (2x2048) + interactive sanity (1024 bucket)
-# NOTE: varlen_ts[-1] is 2048, so the 4096-token step exceeds every bucket — run_model
-# takes the miss-fallback (paged eager). The old "graphed(4096)" label was wrong; the
-# miss counter is printed so the fallback is measured, not assumed.
+# NOTE: varlen_ts tops out at 2048 BY MEASUREMENT (P12): the 4096 replay floor is
+# ~32 ms ~= paged-eager on host1 (past the E2 crossover), so the 4096-token step
+# correctly takes the miss-fallback; the miss counter makes that measured, not assumed.
 import random, torch
 from probe_common import make_llm, ragged_step, timed
 from nanovllm.utils.context import set_context, reset_context
@@ -18,7 +18,7 @@ with torch.inference_mode():
                 ctx.max_seqlen_k, ctx.slot_mapping, None, None)
     t_fresh = timed(lambda: mr.model(ids, pos))
 print(f"P7 2x2048: fresh-eager {t_fresh:.1f} | paged-eager {t_paged:.1f} | "
-      f"run_model(miss->eager) {t_run:.1f} ms | miss {mr.varlen_miss}")
+      f"run_model {t_run:.1f} ms | miss {mr.varlen_miss}")
 reset_context(); llm.scheduler.cancel_all()
 
 ids, pos, ctx = ragged_step(llm, [64] * 16, 16384)            # the interactive-prefill shape

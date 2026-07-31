@@ -252,7 +252,7 @@ class ModelRunner:
         ns = ctx.cu_seqlens_q.numel() - 1
         use_graph = (not self.enforce_eager and hasattr(self, "varlen_graphs")
                      and ctx.block_tables is not None                 # excludes warmup
-                     and t <= self.varlen_ts[-1] and ns <= self.config.max_num_seqs)
+                     and t <= self.varlen_ts[-1] and ns <= self.config.max_num_seqs + 1)
         if not use_graph:
             if not self.enforce_eager and hasattr(self, "varlen_graphs") and ctx.block_tables is not None:
                 self.varlen_miss += 1
@@ -309,17 +309,22 @@ class ModelRunner:
     @torch.inference_mode()
     def capture_varlen_graphs(self):
         config = self.config
-        S = config.max_num_seqs
+        S1 = config.max_num_seqs + 1    # F3: +1 segment slot for C3's single partial chunk
         max_blocks = (config.max_model_len + self.block_size - 1) // self.block_size
-        self.varlen_ts = [128, 256, 512, 1024, 2048]
+        # bucket top-end 2048, NOT the F3-drafted 4096: P12 measured the 4096 replay at
+        # 32 ms best-case ~= paged-eager (host1 is past the E2 dispatch/GPU crossover at
+        # that T), so the graph buys nothing there; C3's chunking bounds mixed steps to
+        # the token budget anyway. Zero-length slot tax ~0.04 ms/slot at T=4096 (P12).
+        self.varlen_ts = [t for t in (128, 256, 512, 1024, 2048)
+                          if t <= config.max_num_batched_tokens]
         T = self.varlen_ts[-1]
         v = dict(
             input_ids=torch.zeros(T, dtype=torch.int64),
             positions=torch.zeros(T, dtype=torch.int64),
-            cu_q=torch.zeros(S + 1, dtype=torch.int32),
-            cu_k=torch.zeros(S + 1, dtype=torch.int32),
+            cu_q=torch.zeros(S1 + 1, dtype=torch.int32),
+            cu_k=torch.zeros(S1 + 1, dtype=torch.int32),
             slot_mapping=torch.full((T,), -1, dtype=torch.int32),
-            block_tables=torch.zeros(S, max_blocks, dtype=torch.int32),
+            block_tables=torch.zeros(S1, max_blocks, dtype=torch.int32),
             outputs=torch.zeros(T, config.hf_config.hidden_size),
         )
         self.varlen_graphs = {}
