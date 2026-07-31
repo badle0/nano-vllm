@@ -1,0 +1,48 @@
+# P10/P11 — step-1 compile investigation, host1 (EPYC, C.45901419), 2026-07-31
+# torch 2.10.0+cu128 / flash-attn 2.8.1. Instrument: p11_step1_compile.py (+ TORCH_LOGS=recompiles).
+
+== Phase 1: attribution (pre-fix code: pre-touch inside capture_varlen_graphs, bf16 window) ==
+arm       init(ms)  step1(ms)  new frames @step1
+varlen      7079.4     1075.3   6
+novarlen    6951.0      300.8   1
+pretouch    6712.1      291.0   1     <- H-pretouch FALSIFIED; H-buckets confirmed as posed
+
+TORCH_LOGS=recompiles, varlen arm, between STEP1 markers — the guard named:
+  rms_forward x2, rotary, add_rms_forward, activation, sampler recompile; reason on
+  every init-era cache entry: "GLOBAL_STATE changed: default_dtype".
+Mechanism (supersedes the shape-history hypothesis): __init__ compiles under the
+bf16/cuda default window and restores fp32/cpu after; every init-time entry carries a
+default_dtype guard. Without varlen graphs the small warmup prefill runs eager
+post-restore and absorbs the recompile storm invisibly. With varlen graphs the warmup
+REPLAYS a bucket, so the storm defers to the first bucket-MISS prefill = the 16k step-1.
+Not shapes, not the pre-touch, not paged attention: first-post-restore-eager-call timing.
+
+== Phase 2: fix v1 — pre-touch moved AFTER the default restore (own method) ==
+varlen      7947.4      548.6   2     <- partial: rotary residual
+Residual named by recompile log: rotary guard "positions dispatch key set mismatch
+(ADInplaceOrView)" — pre-touch inputs were inference tensors (@torch.inference_mode
+on the method); production creates inputs in run() OUTSIDE inference_mode.
+
+== Phase 3: fix v2 — inputs created outside inference_mode, model call inside ==
+varlen      8028.4      292.9   1     <- PREDICTION HIT: == novarlen control
+counters@step1 byte-identical to novarlen arm ({'frames':{'total':1,'ok':1},
+'stats':{'calls_captured':13,'unique_graphs':1}, ...}); the 1 frame is the sampler's
+automatic-dynamic 2nd-batch-size compile — dev-equivalent behavior, present in all arms.
+Cost accounting: ~+1.1 s one-time init (5 module compiles move into pre-touch), first
+bucket-miss step now clean.
+
+== Gates after fix ==
+pytest tests/ : 39 passed (incl. test_varlen_graphs per-bucket bitwise).
+bench.py (band 8600-8650, first run discarded): 8595.19 / 8612.04 / 8580.61 / 8575.58
+  -> band MISS, attributed before release of the hard stop:
+  interleaved A/B, 3 pairs (novarlen-stub vs varlen, same process pattern):
+    novarlen 8613.29 / 8563.87 / 8545.90
+    varlen   8586.71 / 8571.95 / 8544.15
+  arm delta sign-flips (-27/+8/-2, mean ~-7 tok/s <= P6a's paged-tax scale); BOTH arms
+  drift ~70 tok/s downward while loadavg ~10.6 (shared host, dispatch-bound workload
+  per E2/E3). Verdict: host CPU contention, not branch regression. C1's own gate record
+  accepted 8597.40 as "(band)" — floor-straddling predates C2. Re-run on a quiet host
+  before the headline numbers.
+
+Note: varlen_ts in the C2 wip is {128,256,512,1024,2048} — the F3 verdict's 4096 bucket
+is not currently captured; 16k bench prefill steps intentionally take the miss path.

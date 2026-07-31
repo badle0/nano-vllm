@@ -2,36 +2,22 @@
 # P11 — bisect step-1 compile cost across construction arms; count Dynamo work via
 # counters (a measurement) rather than log strings (a recollection).
 # usage: p11_step1_compile.py {novarlen|pretouch|varlen}
-#   novarlen  capture_varlen_graphs stubbed entirely   (= P10 control)
-#   pretouch  ONLY the budget-sized pre-touch forward  (buckets skipped)
+#   novarlen  bucket captures AND pre-touch stubbed    (= dev-equivalent control)
+#   pretouch  ONLY the post-restore pre-touch forward  (buckets stubbed)
 #   varlen    unmodified                               (= P10 treatment)
 # Step 1 (~16384 tok) > varlen_ts[-1] (2048): run_model takes the eager branch in
-# EVERY arm. The step-1 forward is identical; only __init__'s shape history differs.
+# EVERY arm. The step-1 forward is identical; only __init__'s compile state differs.
+# History: P11 originally bisected __init__'s *shape* history and falsified it —
+# the guard is GLOBAL_STATE default_dtype (see _pretouch_eager_prefill's comment);
+# the pre-touch now runs post-restore in production, and this probe verifies it.
 from probe_common import parse_arm, make_llm, bench_workload, clean_exit
 
 ARM = parse_arm("novarlen", "pretouch", "varlen")
 import copy, sys, time, torch
 from nanovllm.engine.model_runner import ModelRunner
-from nanovllm.utils.context import set_context, reset_context
-
-
-@torch.inference_mode()
-def _pretouch_only(self):
-    # verbatim tail of capture_varlen_graphs. Sets no varlen_* attrs, so run_model's
-    # hasattr gate and exit()'s guard both behave exactly as in the novarlen arm.
-    T = self.config.max_num_batched_tokens
-    L = min(self.config.max_model_len, T)
-    ns = (T + L - 1) // L
-    cu = torch.arange(0, ns + 1, dtype=torch.int32) * L
-    cu[-1] = T
-    set_context(True, cu, cu.clone(), L, L,
-                torch.full((T,), -1, dtype=torch.int32), None, None)
-    self.model(torch.zeros(T, dtype=torch.int64), torch.arange(T, dtype=torch.int64) % L)
-    torch.cuda.synchronize()
-    reset_context()
 
 if ARM == "pretouch":
-    ModelRunner.capture_varlen_graphs = _pretouch_only
+    ModelRunner.capture_varlen_graphs = lambda self: None   # production pre-touch kept
 
 import torch._dynamo.utils as du
 

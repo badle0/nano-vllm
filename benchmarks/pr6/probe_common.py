@@ -7,13 +7,15 @@ MODEL = os.path.expanduser("~/huggingface/Qwen3-0.6B")
 
 
 def parse_arm(*arms):
-    """Usage-gate first, GPU work second. 'novarlen' stubs capture_varlen_graphs
-    (class-level patch, applied before any LLM is constructed). Returns the arm."""
+    """Usage-gate first, GPU work second. 'novarlen' stubs the whole varlen init
+    (bucket captures AND the post-restore pre-touch) so the arm matches dev.
+    Class-level patch, applied before any LLM is constructed. Returns the arm."""
     if len(sys.argv) != 2 or sys.argv[1] not in arms:
         sys.exit(f"usage: {os.path.basename(sys.argv[0])} {{{'|'.join(arms)}}}")
     if sys.argv[1] == "novarlen":
         from nanovllm.engine.model_runner import ModelRunner
         ModelRunner.capture_varlen_graphs = lambda self: None
+        ModelRunner._pretouch_eager_prefill = lambda self: None
     return sys.argv[1]
 
 

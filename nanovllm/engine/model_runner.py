@@ -39,6 +39,8 @@ class ModelRunner:
             self.capture_varlen_graphs()
         torch.set_default_device("cpu")
         torch.set_default_dtype(default_dtype)
+        if not self.enforce_eager:
+            self._pretouch_eager_prefill()
 
         if self.world_size > 1:
             if rank == 0:
@@ -335,13 +337,26 @@ class ModelRunner:
             torch.cuda.synchronize()
             reset_context()
         self.varlen_vars = v
+
+    def _pretouch_eager_prefill(self):
+        # Must run AFTER __init__ restores the default dtype/device: init-time Dynamo
+        # compiles guard on default_dtype (GLOBAL_STATE), and with varlen graphs the
+        # small warmup prefills replay buckets, so the compiled modules' first eager
+        # call would otherwise be the first bucket-MISS step — paying the full
+        # recompile storm there (P10: ~750 ms on the 16k step-1; P11 named the guard).
+        # Inputs are created OUTSIDE inference_mode, mirroring run()'s prepare/model
+        # split — an inference-tensor input compiles a dispatch-keyset flavor that
+        # production never replays (P11 residual: rotary's ADInplaceOrView guard).
         T = self.config.max_num_batched_tokens
         L = min(self.config.max_model_len, T)
         ns = (T + L - 1) // L
-        cu = torch.arange(0, ns + 1, dtype=torch.int32) * L
+        cu = torch.arange(0, ns + 1, dtype=torch.int32, device="cuda") * L
         cu[-1] = T
+        input_ids = torch.zeros(T, dtype=torch.int64, device="cuda")
+        positions = torch.arange(T, dtype=torch.int64, device="cuda") % L
         set_context(True, cu, cu.clone(), L, L,
-                    torch.full((T,), -1, dtype=torch.int32), None, None)
-        self.model(torch.zeros(T, dtype=torch.int64), torch.arange(T, dtype=torch.int64) % L)
+                    torch.full((T,), -1, dtype=torch.int32, device="cuda"), None, None)
+        with torch.inference_mode():
+            self.model(input_ids, positions)
         torch.cuda.synchronize()
         reset_context()
