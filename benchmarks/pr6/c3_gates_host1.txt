@@ -1,0 +1,48 @@
+# C3 gate record — host1 (EPYC 7713, A100-40GB, C.45901419), 2026-07-31
+# C3 = decode-first mixed-step schedule() rewrite (F2 verdict), scheduler.py only.
+# Loadavg 12-14 during perf runs (shared host) — paired A/B used throughout.
+
+== Correctness gates ==
+pytest: 43 passed — all 39 pre-C3 tests UNMODIFIED (F2's postprocess-untouched proof
+holds on real code) + 4 new pins in test_mixed_steps.py: decode-first composition,
+decode-never-skips under chunk pressure, <=1 partial per step, multi-seq chunk
+emission, preemption-under-mixing (incl. the preempt-appendleft/mid-chunk-head
+interaction, fixed by the head-rotation in schedule()).
+Axis-2 token-gate, forced mixing (gate_generate_tau.py, tau=24, chunked+mixed steps):
+  self-consistent across processes; prompts 1-3 byte-match base.json; prompt 0 flips
+  at token 6 (553 -> 11). fp64 adjudication: gap +0.125000 in BOTH compositions,
+  pair is top-2 both sides; top1 logit 19.625 => bf16 spacing 0.0625, so the gap is
+  exactly TWO bf16 ULPs — inside the P4d-calibrated cross-composition envelope
+  (~0.3 at this magnitude). NOT an exact tie (C2's were): the decode-row kernel swap
+  (varlen vs kvcache) perturbs at ULP scale, as F5 axis-2 anticipates. PASS.
+
+== Throughput cost at default tau=16384 (bench.py, interleaved A/B, 3 pairs) ==
+  oldsched 8563.70 / 8559.26 / 8526.06   c3 8520.65 / 8513.22 / 8496.42
+  one-sided delta ~-40 tok/s (~0.5%). ATTRIBUTED via p9 phase split (paired):
+  prefill phase 1.19s -> 1.31s (+13 ms per mixed step x9, growing with running-decode
+  count); decode phase byte-identical code, 1023 steps both, delta = host drift.
+  Mechanism: decode segments inside 16k-token EAGER steps pay the short-segment
+  M-block tax (P12's mechanism at max_seqlen_q~16k). On this workload the piggybacked
+  decode tokens are off the critical path (trailing decode steps unchanged), so
+  default-tau bench sees only the cost — the designed chunked-prefill tradeoff at
+  max tau. BAND DECISION OPEN: accept ~0.5% at throughput-config and re-baseline the
+  8600-8650 band, or gate mixing on tau (< some threshold) to keep default-config
+  bench identical to dev. Both arms were sub-band under loadavg 13-14 regardless.
+
+== The payoff: bench_latency tau sweep (pinned 5b6f013; default = pinned protocol,
+   others tau-wrapped via bench_latency_tau.py) ==
+  tau      interactive TTFT p50   interactive max_ITL p50   long TTFT   mean_ITL
+  16384    14.6 ms                35.9 / 35.9 ms            35.8 ms     4.8 ms
+  2048     14.6                   30.2                      66.2        4.9
+  1024     14.6                   18.0                      73.7        5.0
+  512      16.4                   10.6                      86.8        4.9
+  (before C3, same instrument: max_ITL ~40-49 FLAT in tau; before PR: 44-46)
+  THE E2 INVERSION, MEASURED: max_ITL is now ~one step at tau, monotone in tau.
+  The identity broke as designed: 35.8 + 4.8 != 35.9 (decoders gap by one STEP, not
+  one prompt). Long TTFT pays the designed price as chunks serialize. mean_ITL flat
+  (decode path untouched, F1). Prediction scoring: D hit (default-tau max_ITL ~36,
+  identity broken); E hit in shape (monotone), residual at tau=512 is 10.6 vs the
+  6-8 headline band — dominated by the 513-slot zero-segment tax in the 512/1024
+  buckets (P12 rate). NEXT: per-bucket slot cap min(max_num_seqs+1, T_pad) — free
+  by the segments<=tokens argument (every real segment holds >=1 token) — predicted
+  to close most of the gap; re-gate captures after.

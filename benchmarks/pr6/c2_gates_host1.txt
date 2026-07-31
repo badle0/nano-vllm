@@ -20,8 +20,9 @@ T=4096 captures, replaying the exact 2x2048 load:
   slots=2:   32.4 ms   (k_ceil 4096 vs 2048: identical -> K-ceiling free)
   slots=8:   32.4 ms
   slots=64:  35.2 ms
-  slots=257: 42.8 ms   (~0.04 ms/slot; production capture with 1-segment-baked
-                        split plan measured 54.6 ms on the same load)
+  slots=257: 42.8 ms   (~0.04 ms/slot. CORRECTION: production slots are 513
+                        (max_num_seqs=512, +1), not 257 — and the linear model then
+                        exactly explains the in-engine 54.6 ms: 32.4 + 513*0.043)
 Floor 32.4 ms ~= paged-eager 34.4 ms: host1 is past the E2 dispatch/GPU crossover at
 T=4096 — no dispatch left for the graph to remove. F3's zero-length-padding cost
 assumption partially falsified (P1 proved correctness, never time). DECISION:
