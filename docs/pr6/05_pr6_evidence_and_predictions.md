@@ -137,3 +137,28 @@ Every gate that produces numbers writes them to `benchmarks/pr6/`; the artifacts
 branch (per the Fork-4 meta-decision) freezes the final record after the last
 amend, scripts smoke-run on their own checkout, per the standing rules the audit
 bought.
+
+## 3b. Scored (2026-08-03, host1 — the after-run happened on the EPYC box)
+
+§3's "today" column is host3-framed (Xeon: max_ITL 57.5, bench 8465); the
+implementation and after-run happened on host1, whose own "before" is
+before_host1.txt (max_ITL 45.8, TTFT_long 39.4, bench 8600-8650). The registered
+predictions above are untouched; each row is scored against host1's measured
+before/after, host-frame caveat applied. Full numbers: c2/c3/c4/c5_gates_host1.txt,
+after_host1.txt.
+
+| quantity | measured after (host1, τ=512 unless noted) | verdict |
+|---|---|---|
+| interactive max_ITL | **7.8 ms** (45.8 before, 5.9×) | **HIT** (in 6–8 band) — but only after P13's two-tier slot fix; first C3 cut measured 10.6 (513-slot tax) |
+| interactive mean_ITL | 4.7–4.9 ms (4.9–5.0 before) | HIT — flat, decode path untouched (F1) |
+| long TTFT | 64.3–64.9 ms (39.4 before) | **MISS as "a wash" on host1** (+63%): host1's eager monolithic was far cheaper than host3's, so chunk serialization costs net latency here; per-chunk cost itself ≈ the predicted 6–7 ms basis ✓. The explicit τ dial trade (c3_gates) |
+| identity | max_ITL == TTFT_long exactly (34.9 == 34.9 @ default τ) | **HIT, breaks by design** — stall and prefill are now the same mixed step (after_host1) |
+| bench.py throughput | −0.5% at default τ, attributed (short-segment tax); quiet-host band 8577–8595 confirmed | HIT (within ±1%) — accepted as the designed trade, band re-baselined 8560–8610 |
+| chunked prefill total | TTFT_long 64.3 ≈ 8×~7.5 ms chunk steps + decode rows | PARTIAL — above the 48–56 band: slot tax + decode rows ride each chunk step (P12/P13) |
+| graphed mixed-step time | ~7.8 ms wall at the 512 bucket (run_model 4.9 lean + sample/prepare) | HIT (6–8) — post-P13; pre-fix 10.6 |
+| bucket hit rate | miss counter 0 across τ=512 gate runs (16k default-τ steps miss BY DESIGN, past the E2 crossover) | HIT, counter-verified within scenario |
+
+Falsifier audit: "max_ITL stuck above ~12 ms ⇒ a serialization survives" — fired
+correctly at the first C3 cut (10.6 was slot tax, not serialization; the falsifier's
+named suspects didn't include capture-shape padding — P12/P13 extended the theory).
+No other falsifier fired.
