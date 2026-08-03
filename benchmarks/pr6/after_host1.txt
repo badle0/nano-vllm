@@ -1,0 +1,35 @@
+# PR6 "after" (headline E1 rerun) — instance C.45901419 (EPYC 7713), 2026-08-03,
+# checkout 3fbf72f (C1-C5 complete). Instrument: bench_latency.py pinned at
+# metrics-artifacts 5b6f013 (fetched via git show, run byte-identical, unmodified).
+# Protocol mirrors before_host1.txt: discard + 2 scored, same host, default config.
+host: A100-SXM4-40GB | 32 vCPU AMD EPYC 7713
+run1: interactive n=16 TTFT p50=9.2ms mean_ITL=4.87ms max_ITL p50=34.9ms | long TTFT=34.9ms
+run2: interactive n=16 TTFT p50=9.3ms mean_ITL=5.00ms max_ITL p50=35.2ms | long TTFT=35.1ms
+(discard run, for the record: 9.2 / 4.90 / 35.4 | long 35.4 — consistent)
+
+before -> after (default tau=16384):
+  interactive TTFT p50: 27.4 -> 9.2 ms   (3.0x)
+  interactive max_ITL:  45.8 -> 34.9 ms  (spike 8.9x -> 7.2x; the full ITL win is
+                        tau-tunable: 7.8 ms @ tau=512, 1.6x spike — c3_gates/P13)
+  long TTFT:            39.4 -> 34.9 ms
+  mean_ITL:             5.0 -> 4.9 ms    (unchanged; pure-decode path untouched, F1)
+
+identity shift (P-E1r.5 falsified as posed — designed mechanism confirmed):
+  before: long TTFT + mean_ITL ~= max_ITL (38.0 + 5.0 = 43.0 ~= 44.2) — interactive
+          seqs waited the whole prefill step PLUS their own decode step.
+  after:  max_ITL == long TTFT (34.9 == 34.9 run1 exact; 35.2 ~= 35.1 run2) — the
+          stall and the long prefill are now the SAME mixed step; decodes ride it.
+predictions P-E1r.1-4 HIT (registered pre-run: TTFT 9-10.5, ITL +-0.3, max_ITL
+33-38, long TTFT 33-40).
+
+throughput: band 8560-8610 CONFIRMED on this exact checkout at background loadavg
+~6 (c5_gates_host1.txt, 2026-08-03: 8595.47/8586.03/8576.83) vs before 8631/8601 —
+the accepted ~0.5% chunked-prefill trade. Not re-run in this session: external
+host load rose to loadavg 30-34 (69 runnable) mid-session; the C4 record
+establishes that regime produces attributable sub-band throughput samples, while
+the latency metrics above were load-stable (9.2/9.2/9.3 across loadavg 11->30).
+anomaly note: run2 long-group max_ITL read 30.4 vs 11.5/11.6 (n=2 metric, hit by
+the load spike); interactive group — the headline — unaffected.
+
+vs host3 (Xeon 12 vCPU, before: stall 11.2x, TTFT 47ms): after-numbers not
+collected; host1 is the single-host comparison per standing rules.

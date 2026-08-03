@@ -32,6 +32,7 @@ Before/after instrument: bench_latency.py byte-pinned at metrics-artifacts 5b6f0
 | id | file(s) | one-line result |
 |---|---|---|
 | E1 before | before_host1.txt, before_host3.txt | stall 8.9× (EPYC) / 11.2× (Xeon); identity holds on both |
+| E1 after (headline) | after_host1.txt | pinned instrument @ 3fbf72f: interactive TTFT 27.4→9.2 ms (3.0×); max_ITL 45.8→34.9 (spike 8.9→7.2× at default τ; 1.6× at τ=512 per C3/P13); mean_ITL unchanged; identity SHIFTS by design — max_ITL == long TTFT exactly (stall and prefill are now the same mixed step); P-E1r.1–4 HIT, .5 falsified-as-posed (the sum-identity's collapse IS the mechanism); throughput lines cite c5 band confirmation (external load hit loadavg 74 mid-session, latency metrics load-stable 11→30) |
 | E2 sweep | sweep_host1.txt, sweep_host3.txt | step time flat in C (~26 / ~47 ms); dispatch→GPU crossover at C≈2–4k visible on host1 only |
 | E3 dispatch probe | probe_host1.txt, probe_host3.txt | dispatch == wall (~25 / ~45 ms); prepare/sample plumbing 1–3 ms |
 | E4/E5 graph feasibility | graph_host1.txt, graph_probe_host3.txt | both attention branches capture; replay 6.29–6.51 / 6.06–6.26 ms |
