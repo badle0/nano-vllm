@@ -1,0 +1,41 @@
+# C5 gate record — host1 (EPYC 7713, A100-40GB, C.45901419), 2026-08-03
+# C5 = cleanup: delete the provably-redundant is_prefill conjunct from the
+# emission gate (scheduler.postprocess), and the parameter it existed to feed.
+# Blast radius: scheduler.py (signature + gate), llm_engine.py (call site). No
+# test callers existed.
+#
+# Mechanism (verified against source before the edit): after postprocess's
+# num_cached_tokens += num_scheduled_tokens, `cached < total` is exactly the
+# mid-prefill predicate. A decode-scheduled seq always arrives at equality:
+# it graduated to RUNNING when cached+scheduled == tokens (scheduler line ~73),
+# and each append_token/next-step pair re-establishes cached == tokens - 1 at
+# schedule time. Preemption cannot break it — deallocate zeroes cached
+# (block_manager) and the seq re-enters via the prefill path. Hence
+# `is_prefill and X == X` on every reachable state.
+#
+# Options rejected on record: do-nothing (leaves a dead conjecture C5 exists to
+# retire); conjunct-only removal (leaves is_prefill as a dead parameter, keeping
+# the false "emission depends on step type" coupling in the signature).
+#
+# Predictions registered before measurement:
+#   P-C5.1 byte-gate vs base.json IDENTICAL 4/4. Falsifier: any token diff.
+#   P-C5.2 45 tests pass unmodified. Falsifier: any failure.
+#   P-C5.3 bench.py in provisional band 8560-8610 on a quiet host (doubles as
+#          the standing band-confirmation caveat from the C3 decision; valid
+#          because C5 is token-identical and CPU-trivial). Falsifier <8560:
+#          HARD STOP. >8610: benign upward revision.
+
+Gates:
+  pytest: 45 passed unmodified. [P-C5.2 HIT]
+  byte-gate vs base.json: IDENTICAL 4/4 (gate_generate.py). [P-C5.1 HIT]
+  bench.py, discard + 3 scored: (8613.47 discarded) 8595.47 / 8586.03 / 8576.83,
+  median 8586.03 — all three inside 8560-8610. [P-C5.3 HIT]
+
+Band confirmation (closes the C3 caveat):
+  Background load at session start: loadavg 5.79 (1-min) on 256 cores, GPU idle —
+  the quietest regime recorded on this branch (C3/C4 samples ran at loadavg 9-14).
+  Pre-run 1-min readings (10.58 / 22.32 / 10.20) are inflated by the residue of my
+  own back-to-back bench processes; between-session floor readings were 5.8-7.0.
+  Decision: provisional post-C3 band 8560-8610 is CONFIRMED as the standing band.
+  The discard run at 8613 (and C2-era 8600-8650) suggests the true quiet ceiling
+  sits at the band top, consistent with the accepted ~0.5% chunked-prefill cost.

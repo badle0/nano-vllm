@@ -91,15 +91,17 @@ class Scheduler:
         self.block_manager.deallocate(seq)
         self.waiting.appendleft(seq)
 
-    def postprocess(self, seqs: list[Sequence], token_ids: list[int],
-                    is_prefill: bool) -> list[StreamOutput]:
+    def postprocess(self, seqs: list[Sequence], token_ids: list[int]) -> list[StreamOutput]:
         now = perf_counter()
         events: list[StreamOutput] = []
         for seq, token_id in zip(seqs, token_ids, strict=True):
             self.block_manager.hash_blocks(seq)
             seq.num_cached_tokens += seq.num_scheduled_tokens
             seq.num_scheduled_tokens = 0
-            if is_prefill and seq.num_cached_tokens < seq.num_tokens:
+            # emission gate: skip mid-prefill rows. After the increment above,
+            # cached < total is exact — decode rows always arrive at equality
+            # (preemption zeroes cached and re-enters via the prefill path)
+            if seq.num_cached_tokens < seq.num_tokens:
                 continue
             seq.append_token(token_id)
             if seq.first_token_time is None:

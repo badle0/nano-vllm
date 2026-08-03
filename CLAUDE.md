@@ -19,8 +19,9 @@
 - Engines are one-per-process (unconditional init_process_group, atexit-pinned memory).
 - bench.py band on host1 (EPYC, C.45901419): 8600–8650 tok/s through C2. Post-C3
   (decision accepted 2026-07-31: ~0.5% default-τ cost is the designed chunked-prefill
-  trade): provisional band 8560–8610, confirm on a quiet host (C3-era samples ran at
-  loadavg 9–14). A miss is a HARD STOP — no commit until attributed.
+  trade): band 8560–8610, CONFIRMED quiet-host 2026-08-03 (c5_gates_host1.txt:
+  8595/8586/8577 at background loadavg ~6). A miss is a HARD STOP — no commit until
+  attributed.
 - bench_latency.py exists ONLY at metrics-artifacts 5b6f013; fetch via `git show`, never edit.
 
 ## Environment constants
@@ -32,5 +33,5 @@ Any torch/flash bump invalidates graph evidence: re-run E4/E5, P1–P5 first.
 - benchmarks/pr6/status.md — live fork/commit/gate state and correction ledger.
 - docs/pr6/ — design docs 04–06 (forks, evidence & predictions, implementation plan).
 - benchmarks/pr6/*_host{1,3}.txt — the evidence ledger, host-labeled.
-Current phase: C2 blocked on a named Dynamo recompile investigation (P10); see
-status.md for the exact pending command before doing anything else.
+Current phase: C1–C5 complete and gated; band confirmed. Remaining: headline run
+(E1 rerun after-vs-before), pr6 validation record, pr6-artifacts cut, PR assembly.
