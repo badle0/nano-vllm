@@ -1,0 +1,39 @@
+# Post-freeze review fixes — host1 (EPYC 7713, C.45901419), 2026-08-03
+# Source: exhaustive PR6 review (36 redundancy claims hunted, each adversarially
+# verified; 10 confirmed, 16 refuted as load-bearing). Fixes applied on
+# feat/chunked-prefill AFTER the d2380be freeze (pr6-artifacts unchanged; no amend).
+
+Fixes applied:
+1. sequence.py __setstate__ now restores is_prefill (HIGH — real latent TP bug):
+   pickle bypasses __init__, so a TP-worker Sequence had NO is_prefill attribute
+   while prepare_ragged reads it on every row -> AttributeError on the first
+   prefill step at any world_size > 1. The wire payload already encodes the mode
+   (prefill ships token_ids list, decode ships last_token), so the restore is
+   derivable: is_prefill = isinstance(last_state, list). Upgrades the record's
+   "TP designed but unvalidated" caveat: the flag now survives the wire; TP>1
+   remains unvalidated end-to-end (single-GPU box). New fixture-free pickle
+   round-trip test in test_ragged.py (the coverage gap that let this survive).
+2. model_runner.run_model: hoisted the duplicated 3-conjunct graphable predicate;
+   dropped the redundant `not enforce_eager` conjunct (subsumed by
+   hasattr(varlen_graphs) — capture only runs when graphs are enabled).
+3. model_runner.__init__: merged the two consecutive identical
+   `if not self.enforce_eager:` capture blocks (pre-touch block stays separate —
+   deliberately post-restore).
+4. tests/test_streaming.py: dead imports removed (pytest, LLM, PATH/os —
+   leftovers from the pre-conftest era).
+5. tests/test_metrics.py: dead `import pytest, os` removed; the vacuous
+   assertion (`itls == [...] or len == 2` — unfalsifiable on values) replaced
+   with len + exact-value checks at 1e-12.
+6. status.md ledger: C1 row `<c1-sha>` placeholder -> 9f7bffe with a c1.json
+   provenance note (/tmp-era artifact, never committed); F3 verdict cell now
+   states the shipped two-tier slot design (was still claiming fixed S+1).
+
+Gates (all fixes are behavior-preserving at TP=1 by construction):
+  pytest: 46 passed (45 + new pickle round-trip test).
+  byte-gate vs base.json: IDENTICAL 4/4.
+  bench.py: 8588.90 / 8581.63 — IN BAND (8560-8610) at loadavg ~17.
+
+Notable review refutations kept on record (flagged then killed by verification):
+gate_greedy.py's byte-duplication of gate_generate.py is deliberate byte-pinning
+provenance; the scheduler's trailing partial-break and double waiting scans are
+load-bearing/noise-level; p12-p13 scaffolding overlap is era-pinned evidence.

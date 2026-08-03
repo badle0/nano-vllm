@@ -1,7 +1,5 @@
-import os, torch, pytest
-from nanovllm import LLM, SamplingParams
-
-PATH = os.path.expanduser("~/huggingface/Qwen3-0.6B")
+import torch
+from nanovllm import SamplingParams
 
 # TRAP 1 (prefix cache): equivalence runs generate() then stream() on ONE engine.
 # Prompts must stay under one KV block (256 tokens): can_allocate only consults

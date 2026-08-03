@@ -88,7 +88,11 @@ class Sequence:
 
     def __setstate__(self, state):
         self.num_tokens, self.num_prompt_tokens, self.num_cached_tokens, self.num_scheduled_tokens, self.block_table, last_state = state
-        if isinstance(last_state, list):
+        # the payload already encodes the mode: prefill ships the token list, decode
+        # ships last_token alone — prepare_ragged branches on is_prefill per row, so
+        # TP workers (pickle bypasses __init__) must get the flag restored here
+        self.is_prefill = isinstance(last_state, list)
+        if self.is_prefill:
             self.token_ids = last_state
             self.last_token = self.token_ids[-1]
         else:
