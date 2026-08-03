@@ -101,3 +101,18 @@ flavor production never replays.
 status.md (fork/commit/gate ledger) · c2/c3/c4/c5_gates_host1.txt ·
 p11_host1.txt (recompile storm) · after_host1.txt (headline) ·
 pr5_noregression_host1.txt · probes p1–p13 with host-labeled outputs.
+
+## Freeze smoke record (every script executed on the frozen checkout, 2026-08-03)
+
+19/21 scripts pass as-is (probes p1-p3, p4b, p5-p13, dispatch/graph-feasibility
+pair, sweep-era instruments, all four gate scripts, all three arm instruments,
+bench_latency_tau). Two findings, both resolved before the cut:
+- p4_paged_vs_fresh.py asserts BY DESIGN on post-C2 trees (its premise — the fresh
+  branch — was abolished by F3b); header now pins it historical, evidence-era
+  checkout <= 9f7bffe. Not a defect.
+- p13_small_bucket_tax.py Part B indexed varlen_graphs by bare bucket (pre-two-tier
+  key); now routes the tier exactly as run_model does. Post-fix it measures the
+  CURRENT production path: replay 4.89 / run_model 5.27 ms at the 512 bucket —
+  independently re-confirming the ~2.6 ms two-tier recovery on the production path.
+Notable smoke numbers on this checkout: p9 varlen 8646.96 tok/s; p7 graphed(1024)
+9.1 ms; bench_latency_tau 512 long TTFT 63.9 ms — all consistent with the ledger.

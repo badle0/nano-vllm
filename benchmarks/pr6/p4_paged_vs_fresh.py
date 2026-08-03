@@ -1,4 +1,8 @@
 # benchmarks/pr6/p4_paged_vs_fresh.py
+# HISTORICAL (pre-C2 era): the line-14 assert pins the fresh-branch premise this
+# probe measured (block_tables None unless prefix-cached). C2's F3b unification
+# made real steps always-paged, so on post-C2 trees the assert fires BY DESIGN —
+# run this probe at its evidence-era checkout (<= 9f7bffe). Not a defect.
 import os, random, torch
 from nanovllm import LLM, SamplingParams
 from nanovllm.utils.context import get_context, set_context, reset_context

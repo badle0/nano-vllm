@@ -33,11 +33,15 @@ for T in (512, 1024):
         print(f"P13a T={T} slots={slots:3d}: replay {t:.2f} ms")
 reset_context(); llm.scheduler.cancel_all()
 
-# B — decompose the production bucket-512 path (513-slot captures) on the same shape
+# B — decompose the production bucket-512 path on the same shape. Routes the tier
+# exactly as run_model does, so the instrument tracks the production path as it
+# evolves (original evidence predates two-tier and measured the 513-slot graph;
+# post-P13 trees route this 1-segment step to the lean tier).
 ids, pos, ctx = ragged_step(llm, [500], 16384)
 with torch.inference_mode():
     tp = mr._fill_varlen(ids, pos, ctx)
-    t_replay = timed(lambda: mr.varlen_graphs[tp].replay())
+    sl = next(s for s in mr.varlen_slots if s >= ctx.cu_seqlens_q.numel() - 1)
+    t_replay = timed(lambda: mr.varlen_graphs[(tp, sl)].replay())
     t_fill   = timed(lambda: mr._fill_varlen(ids, pos, ctx))
     t_logits = timed(lambda: mr.model.compute_logits(mr.varlen_vars["outputs"][:ids.size(0)]))
     t_run    = timed(lambda: mr.run_model(ids, pos, True))

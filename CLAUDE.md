@@ -33,5 +33,6 @@ Any torch/flash bump invalidates graph evidence: re-run E4/E5, P1–P5 first.
 - benchmarks/pr6/status.md — live fork/commit/gate state and correction ledger.
 - docs/pr6/ — design docs 04–06 (forks, evidence & predictions, implementation plan).
 - benchmarks/pr6/*_host{1,3}.txt — the evidence ledger, host-labeled.
-Current phase: C1–C5 complete and gated; band confirmed; headline E1 rerun done
-(after_host1.txt). Remaining: pr6 validation record, pr6-artifacts cut, PR assembly.
+Current phase: PR6 FROZEN — validation record benchmarks/pr6/pr6_chunked_prefill.md;
+pr6-artifacts cut (smoke: 19/21 + 2 explained; NO --amend on this branch anymore).
+Remaining: upstream PR assembly/submission only.
