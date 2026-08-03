@@ -1,0 +1,29 @@
+# PR5 streaming no-regression rerun under PR6 (C1-C5 complete) — host1 (EPYC 7713,
+# A100-40GB, C.45901419), 2026-08-03, checkout 737b5eb. Eval-plan item 5 (doc 05 §4).
+# Protocol: pr5's own — interleaved in-process, first run discarded, second kept.
+# pr5_raw_results.txt absolutes came from a different host state (9174 tok/s box),
+# so claims are scored by SHAPE (deltas/ratios), not absolutes. Loadavg 15-22 during
+# runs — every result below survived a heavily loaded host.
+
+ttft_caller (claim: stream first event decouples from batch return):
+  batch 798.0 ms | stream first event 3.5 ms | collapse 230.3x   (pr5 record: 26.3x)
+  raw batch=[797.8, 798.0, 813.4] stream=[3.5, 3.5, 3.5]
+  P-R5.1 HIT AND EXCEEDED (predicted 10-16 ms): the 3-prompt ~20-token prefill now
+  replays the lean-tier 128 bucket (~2-3 ms) + sample. PR6 multiplied pr5's headline
+  claim by ~9x. Batch return unchanged (~800 ms) as predicted.
+
+null_consumer (claim: streaming delivery is throughput-free):
+  generate() 9510.3 tok/s | stream() null 9588.3 | delta +0.82%
+  P-R5.2 HIT — inside pr5's own recorded range (+0.46% / +0.97%). Mixing did not
+  leak into the delivery path.
+
+slow_consumer (claim: sync design puts consumer time on the critical path, cleanly):
+  sleep 0.0 -> 3.03 / 3.04 ms | 2.0 -> 19.76 ms | 10.0 -> 84.81 ms
+  P-R5.3 HIT — shape byte-nearly-identical to the pr5 record (3.01-3.58 / 19.75-19.91
+  / 84.75-84.87). Emission ordering under the C5-reduced gate is intact.
+
+example_stream.py visual check: coherent incremental text, clean <|im_end|>
+termination. PASS.
+
+Verdict: all three pinned pr5 claims survive PR6 unchanged or improved; the
+streaming-TTFT claim is the PR6 story in miniature (26x -> 230x).
