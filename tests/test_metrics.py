@@ -1,6 +1,5 @@
 # tests/test_metrics.py
 import importlib.util, pathlib
-import pytest, os
 
 _p = pathlib.Path(__file__).resolve().parents[1] / "nanovllm/metrics.py"
 _s = importlib.util.spec_from_file_location("metrics", _p)
@@ -21,7 +20,8 @@ def test_exact_values():
     assert abs(m["e2e_latency"] - 2.0) < 1e-12
     assert abs(m["mean_itl"] - 0.5) < 1e-12
     assert abs(m["max_itl"] - 0.6) < 1e-12
-    assert m["itls"] == [0.3999999999999986, 0.6000000000000014] or len(m["itls"]) == 2
+    assert len(m["itls"]) == 2
+    assert abs(m["itls"][0] - 0.4) < 1e-12 and abs(m["itls"][1] - 0.6) < 1e-12
     assert m["num_prompt_tokens"] == 100 and m["num_completion_tokens"] == 3
 
 def test_single_token_sequence():
