@@ -279,7 +279,7 @@ class LLMEngine:
         num_prefill_tokens = sum(seq.num_scheduled_tokens for seq in seqs if seq.is_prefill)
         num_decode_tokens = sum(1 for seq in seqs if not seq.is_prefill)
         token_ids = self.model_runner.call("run", seqs, is_prefill)
-        events = self.scheduler.postprocess(seqs, token_ids, is_prefill)
+        events = self.scheduler.postprocess(seqs, token_ids)
         finished = [seq for seq in seqs if seq.is_finished]
         return StepOutput(
             events,
