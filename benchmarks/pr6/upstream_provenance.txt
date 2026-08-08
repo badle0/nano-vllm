@@ -1,0 +1,16 @@
+# Upstream provenance — pr6-artifacts <-> feat/chunked-prefill-upstream
+# (house convention per pr1/pr2-artifacts: the invariant is CODE BYTE-IDENTITY
+# with the shipped branch, not literal ancestry; this frozen branch is never
+# rewritten — provenance lands as a normal commit.)
+
+upstream branch: feat/chunked-prefill-upstream, tip aae74a4 (6 commits off dev 317e6f0:
+C1 refactor / C2 graphs / C3 mixed-step scheduler + two-tier / C4 accounting /
+C5 emission-gate cleanup / review fix: __setstate__ is_prefill restore).
+Each commit is an arc-end snapshot of a gated tree (38/39/44/45/45/46 tests).
+
+byte-identity check, 2026-08-03:
+  git diff feat/chunked-prefill feat/chunked-prefill-upstream -- nanovllm tests  -> EMPTY
+  git diff 317e6f0 feat/chunked-prefill-upstream --stat -> 9 files, all nanovllm/+tests/
+  pytest on the assembled checkout: 46 passed
+Working-branch tip at assembly: 33f7016
+(evidence trail: this branch @ d2380be + feat/chunked-prefill through 33f7016)
