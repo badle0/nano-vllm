@@ -106,3 +106,19 @@ def test_preempt_under_mixing(llm, monkeypatch):
     assert sum(1 for s in llm.scheduler.waiting if s.block_table) <= 1
     _drain(llm)                                  # preempted seq recovers and completes
     assert llm.scheduler.is_finished()
+
+
+def test_step_shim_convention(llm, monkeypatch):
+    # C4 contract: step() keeps (finished, num_tokens); pure steps keep the legacy
+    # signed value, a mixed step reports +num_prefill_tokens (decode rows excluded).
+    torch.manual_seed(1234); torch.cuda.manual_seed_all(1234)
+    monkeypatch.setattr(llm.scheduler, "max_num_batched_tokens", 256)
+    llm.add_request([27] * 100, SamplingParams(temperature=0.6, max_tokens=8, ignore_eos=True))
+    _, n = llm.step()
+    assert n == 100                              # pure prefill: +tokens (legacy)
+    _, n = llm.step()
+    assert n == -1                               # pure decode: -num_seqs (legacy)
+    llm.add_request([29] * 600, SamplingParams(temperature=0.6, max_tokens=2, ignore_eos=True))
+    _, n = llm.step()
+    assert n == 255                              # mixed: budget 256 - 1 decode = 255 chunk
+    _drain(llm)

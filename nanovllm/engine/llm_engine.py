@@ -22,7 +22,8 @@ from nanovllm.metrics import compute_metrics
 class StepOutput(NamedTuple):
     events: list[StreamOutput]
     finished: list[Sequence]
-    num_tokens: int
+    num_prefill_tokens: int    # chunk tokens scheduled this step (0 for a pure-decode step)
+    num_decode_tokens: int     # decode rows this step (0 for a pure-prefill step)
 
 
 class StreamSession(Iterator[StreamOutput]):
@@ -275,15 +276,26 @@ class LLMEngine:
     def _step(self) -> StepOutput:
         seqs, is_prefill = self.scheduler.schedule()
         # must precede postprocess: it zeroes num_scheduled_tokens
-        num_tokens = sum(seq.num_scheduled_tokens for seq in seqs) if is_prefill else -len(seqs)
+        num_prefill_tokens = sum(seq.num_scheduled_tokens for seq in seqs if seq.is_prefill)
+        num_decode_tokens = sum(1 for seq in seqs if not seq.is_prefill)
         token_ids = self.model_runner.call("run", seqs, is_prefill)
         events = self.scheduler.postprocess(seqs, token_ids, is_prefill)
         finished = [seq for seq in seqs if seq.is_finished]
-        return StepOutput(events, finished, num_tokens)
+        return StepOutput(
+            events,
+            finished,
+            num_prefill_tokens,
+            num_decode_tokens,
+        )
 
     def _execute_step(self):
         step_output = self._step()
-        return step_output.finished, step_output.num_tokens
+        num_tokens = (
+            step_output.num_prefill_tokens
+            if step_output.num_prefill_tokens
+            else -step_output.num_decode_tokens
+        )
+        return step_output.finished, num_tokens
 
     def step(self):
         """Advance the engine and preserve the legacy pair-valued output API."""
@@ -351,16 +363,17 @@ class LLMEngine:
             prefill_throughput = decode_throughput = 0.0
             while not self.is_finished():
                 t = self._clock()
-                output, num_tokens = self._execute_step()
-                if num_tokens > 0:
-                    prefill_throughput = num_tokens / (self._clock() - t)
-                else:
-                    decode_throughput = -num_tokens / (self._clock() - t)
+                step_output = self._step()
+                dt = self._clock() - t
+                if step_output.num_prefill_tokens:
+                    prefill_throughput = step_output.num_prefill_tokens / dt
+                if step_output.num_decode_tokens:
+                    decode_throughput = step_output.num_decode_tokens / dt
                 pbar.set_postfix({
                     "Prefill": f"{int(prefill_throughput)}tok/s",
                     "Decode": f"{int(decode_throughput)}tok/s",
                 })
-                for seq in output:
+                for seq in step_output.finished:
                     outputs[seq.seq_id] = seq
                     pbar.update(1)
 
