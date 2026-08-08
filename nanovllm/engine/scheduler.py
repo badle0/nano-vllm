@@ -26,39 +26,9 @@ class Scheduler:
 
     def schedule(self) -> tuple[list[Sequence], bool]:
         scheduled_seqs = []
-        num_batched_tokens = 0
 
-        # prefill
-        while self.waiting and len(scheduled_seqs) < self.max_num_seqs:
-            seq = self.waiting[0]
-            remaining = self.max_num_batched_tokens - num_batched_tokens
-            if remaining == 0:
-                break
-            if not seq.block_table:
-                num_cached_blocks = self.block_manager.can_allocate(seq)
-                if num_cached_blocks == -1:
-                    break
-                num_tokens = seq.num_tokens - num_cached_blocks * self.block_size
-            else:
-                num_tokens = seq.num_tokens - seq.num_cached_tokens
-            if remaining < num_tokens and scheduled_seqs:  # only allow chunked prefill for the first seq
-                break
-            if not seq.block_table:
-                self.block_manager.allocate(seq, num_cached_blocks)
-            seq.num_scheduled_tokens = min(num_tokens, remaining)
-            num_batched_tokens += seq.num_scheduled_tokens
-            if seq.num_cached_tokens + seq.num_scheduled_tokens == seq.num_tokens:
-                seq.status = SequenceStatus.RUNNING
-                self.waiting.popleft()
-                self.running.append(seq)
-            if seq.first_scheduled_time is None:
-                seq.first_scheduled_time = self._clock()
-            scheduled_seqs.append(seq)
-
-        if scheduled_seqs:
-            return scheduled_seqs, True
-
-        # decode
+        # decode admission first, unconditionally (F2): the ITL bound exists only if
+        # decodes never wait behind prefill work — the loop is dev's decode loop verbatim
         while self.running and len(scheduled_seqs) < self.max_num_seqs:
             seq = self.running.popleft()
             while not self.block_manager.can_append(seq):
@@ -72,9 +42,49 @@ class Scheduler:
                 seq.is_prefill = False
                 self.block_manager.may_append(seq)
                 scheduled_seqs.append(seq)
-        assert scheduled_seqs
+        num_decodes = len(scheduled_seqs)
+        num_batched_tokens = num_decodes    # decodes charge 1 each (F2 budget accounting)
         self.running.extendleft(reversed(scheduled_seqs))
-        return scheduled_seqs, False
+
+        # the unique mid-chunk seq (live block_table while waiting) re-takes the budget
+        # head even if a preemption appendleft-ed in front of it — this is what keeps
+        # the <=1-mid-chunk-system-wide invariant true under preemption (F2)
+        mid = next((s for s in self.waiting if s.block_table), None)
+        if mid is not None and self.waiting[0] is not mid:
+            self.waiting.remove(mid)
+            self.waiting.appendleft(mid)
+
+        # FIFO chunk fill to the remaining budget: each seq takes min(work, remaining),
+        # so only the last admitted seq can be partial (<=1 partial per step, F2)
+        while self.waiting and len(scheduled_seqs) < self.max_num_seqs:
+            remaining = self.max_num_batched_tokens - num_batched_tokens
+            if remaining == 0:
+                break
+            seq = self.waiting[0]
+            if not seq.block_table:
+                num_cached_blocks = self.block_manager.can_allocate(seq)
+                if num_cached_blocks == -1:
+                    break
+                num_tokens = seq.num_tokens - num_cached_blocks * self.block_size
+                self.block_manager.allocate(seq, num_cached_blocks)
+            else:
+                num_tokens = seq.num_tokens - seq.num_cached_tokens
+            seq.num_scheduled_tokens = min(num_tokens, remaining)
+            num_batched_tokens += seq.num_scheduled_tokens
+            if seq.num_cached_tokens + seq.num_scheduled_tokens == seq.num_tokens:
+                seq.status = SequenceStatus.RUNNING
+                self.waiting.popleft()
+                self.running.append(seq)
+            if seq.first_scheduled_time is None:
+                seq.first_scheduled_time = self._clock()
+            scheduled_seqs.append(seq)
+            if seq.num_scheduled_tokens < num_tokens:   # partial => budget exhausted
+                break
+
+        assert scheduled_seqs
+        assert sum(1 for s in self.waiting if s.block_table) <= 1   # <=1 mid-chunk (F2)
+        # is_prefill return semantics are now "ragged step": any prefill work present
+        return scheduled_seqs, len(scheduled_seqs) > num_decodes
 
     def preempt(self, seq: Sequence):
         seq.status = SequenceStatus.WAITING
