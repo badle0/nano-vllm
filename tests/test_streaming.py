@@ -8,7 +8,6 @@ from nanovllm import LLM, SamplingParams
 from nanovllm.engine.llm_engine import LLMEngine, StepOutput
 from nanovllm.engine.sequence import SequenceStatus, StreamOutput
 
-
 MODEL_PATH = "/workspace/models/Qwen3-0.6B"
 PROMPTS = [
     "The capital of France is",

@@ -35,7 +35,6 @@ class ModelRunner:
         self.allocate_kv_cache()
         if not self.enforce_eager:
             self.capture_cudagraph()
-        if not self.enforce_eager:
             self.capture_varlen_graphs()
         torch.set_default_device("cpu")
         torch.set_default_dtype(default_dtype)
@@ -357,11 +356,11 @@ class ModelRunner:
         t = input_ids.size(0)
         ctx = get_context()
         ns = ctx.cu_seqlens_q.numel() - 1
-        use_graph = (not self.enforce_eager and hasattr(self, "varlen_graphs")
-                     and ctx.block_tables is not None                 # excludes warmup
-                     and t <= self.varlen_ts[-1] and ns <= self.config.max_num_seqs + 1)
-        if not use_graph:
-            if not self.enforce_eager and hasattr(self, "varlen_graphs") and ctx.block_tables is not None:
+        # hasattr subsumes enforce_eager (capture only runs when graphs are enabled);
+        # block_tables None excludes warmup
+        graphable = hasattr(self, "varlen_graphs") and ctx.block_tables is not None
+        if not (graphable and t <= self.varlen_ts[-1] and ns <= self.config.max_num_seqs + 1):
+            if graphable:
                 self.varlen_miss += 1
             return self.model.compute_logits(self.model(input_ids, positions))
         tp = self._fill_varlen(input_ids, positions, ctx)

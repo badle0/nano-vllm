@@ -8,7 +8,6 @@ from nanovllm.engine.llm_engine import LLMEngine
 from nanovllm.engine.sequence import Sequence, SequenceStatus
 from nanovllm.metrics import compute_metrics
 
-
 class StubSequence:
 
     def __init__(self):
