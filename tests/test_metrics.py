@@ -4,7 +4,7 @@ from threading import Lock
 import pytest
 
 from nanovllm import SamplingParams
-from nanovllm.engine.llm_engine import LLMEngine
+from nanovllm.engine.llm_engine import LLMEngine, StepOutput
 from nanovllm.engine.sequence import Sequence, SequenceStatus
 from nanovllm.metrics import compute_metrics
 
@@ -185,9 +185,10 @@ def test_generate_uses_common_batch_submission_and_final_delivery_clock():
             seq.finish_time = clock()
             seq.status = SequenceStatus.FINISHED
         self.scheduler.finished = True
-        return list(self.scheduler.sequences), -len(self.scheduler.sequences)
+        sequences = list(self.scheduler.sequences)
+        return StepOutput([], sequences, 0, len(sequences))
 
-    engine._execute_step = MethodType(execute_step, engine)
+    engine._step = MethodType(execute_step, engine)
     outputs = engine.generate(
         ["first", "second"],
         SamplingParams(max_tokens=2),

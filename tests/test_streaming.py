@@ -102,7 +102,7 @@ def make_fake_engine():
                 self.scheduler.sequences.remove(sequence)
                 finished.append(sequence)
             events.append(StreamOutput(sequence.seq_id, token_id, is_finished))
-        return StepOutput(events, finished, -len(events))
+        return StepOutput(events, finished, 0, len(events))
 
     engine._step = MethodType(fake_step, engine)
     return engine, clock
