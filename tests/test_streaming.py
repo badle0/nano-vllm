@@ -186,6 +186,23 @@ def test_stream_validates_lengths_before_admission():
 
 
 @pytest.mark.parametrize("method", ["stream", "generate"])
+def test_length_validation_precedes_initialized_engine_state(method):
+    engine = object.__new__(LLMEngine)
+    with pytest.raises(ValueError, match="same length"):
+        if method == "stream":
+            engine.stream(
+                ["first", "second"],
+                [SamplingParams(max_tokens=1)],
+            )
+        else:
+            engine.generate(
+                ["first", "second"],
+                [SamplingParams(max_tokens=1)],
+                use_tqdm=False,
+            )
+
+
+@pytest.mark.parametrize("method", ["stream", "generate"])
 def test_admission_failure_rolls_back_only_admitted_ids(method):
     engine, _ = make_fake_engine()
     params = SamplingParams(max_tokens=1)
