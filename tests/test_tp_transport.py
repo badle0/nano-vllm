@@ -1,5 +1,7 @@
 import pickle
+from multiprocessing import get_context as get_mp_context
 from multiprocessing.reduction import ForkingPickler
+from multiprocessing.shared_memory import SharedMemory
 from types import SimpleNamespace
 
 import pytest
@@ -36,6 +38,25 @@ class FakeEvent:
 class FakeSharedMemory:
     def __init__(self, size):
         self.buf = bytearray(size)
+
+
+def spawned_transport_reader(shm_name, event, connection):
+    """Read frames in a spawned process without initializing CUDA/NCCL."""
+
+    runner = object.__new__(ModelRunner)
+    runner.world_size = 2
+    runner.rank = 1
+    runner.event = event
+    runner.shm = SharedMemory(name=shm_name)
+    try:
+        while True:
+            method_name, args = runner.read_shm()
+            connection.send((method_name, args))
+            if method_name == "exit":
+                break
+    finally:
+        connection.close()
+        runner.shm.close()
 
 
 def make_sequence(total, cached, scheduled, *, block_base=0, is_prefill=True):
@@ -162,6 +183,52 @@ def test_write_read_run_payload_uses_dto_without_mutating_rank_zero_sequence():
     assert remote_seqs == [ScheduledSequence.from_sequence(seq)]
     assert event.wait_calls == 1
     assert event.clear_calls == 1
+
+
+def test_transport_crosses_spawned_process_with_real_shm_and_reused_event():
+    """Exercise framing, pickle resolution, and handoff across a real process."""
+
+    ctx = get_mp_context("spawn")
+    event = ctx.Event()
+    receive_connection, send_connection = ctx.Pipe(duplex=False)
+    shm = SharedMemory(create=True, size=64 * 1024)
+    writer = make_runner(rank=0, size=len(shm.buf), events=[event])
+    writer.shm = shm
+    process = ctx.Process(
+        target=spawned_transport_reader,
+        args=(shm.name, event, send_connection),
+    )
+    process.start()
+    send_connection.close()
+    try:
+        prefill = make_sequence(512, 256, 256, block_base=10)
+        writer.write_shm("run", [prefill], True)
+        assert receive_connection.poll(30), "spawned worker did not read prefill"
+        method_name, args = receive_connection.recv()
+        assert method_name == "run"
+        assert args == [[ScheduledSequence.from_sequence(prefill)], True]
+
+        decode = make_sequence(
+            257, 256, 1, block_base=30, is_prefill=False
+        )
+        writer.write_shm("run", [decode], False)
+        assert receive_connection.poll(30), "spawned worker did not read decode"
+        method_name, args = receive_connection.recv()
+        assert method_name == "run"
+        assert args == [[ScheduledSequence.from_sequence(decode)], False]
+
+        writer.write_shm("exit")
+        assert receive_connection.poll(30), "spawned worker did not read exit"
+        assert receive_connection.recv() == ("exit", [])
+        process.join(30)
+        assert process.exitcode == 0
+    finally:
+        if process.is_alive():
+            process.terminate()
+            process.join(30)
+        receive_connection.close()
+        shm.close()
+        shm.unlink()
 
 
 def test_rank_zero_call_keeps_original_sequence_for_local_run():
