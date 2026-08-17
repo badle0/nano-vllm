@@ -2,6 +2,8 @@
 import os, random, torch
 from flash_attn import flash_attn_varlen_func
 from nanovllm import LLM, SamplingParams
+from nanovllm.utils.context import reset_context
+from probe_common import clean_exit
 
 # ---- P4b-2 first: pure kernel A/B, no engine, no nano plumbing ----
 torch.manual_seed(0)
@@ -35,13 +37,28 @@ paged3 = flash_attn_varlen_func(q, pk2, pv2, block_table=bt2, **args)
 print("P4b-2c block_table honored (pages 2,3):", torch.equal(paged3, paged))
 
 # ---- P4b-1 + P4b-3: engine-level, one process ----
-llm = LLM(os.path.expanduser("~/huggingface/Qwen3-0.6B"), enforce_eager=False, max_model_len=4096)
 random.seed(0)
 prompt = [random.randint(1000, 150000) for _ in range(1500)]
 gsp = SamplingParams(temperature=0.0, max_tokens=16, ignore_eos=True)   # greedy on dev
-mono = llm.generate([prompt], gsp, use_tqdm=False)[0]["token_ids"]      # budget 16384: one prefill step
-llm.scheduler.max_num_batched_tokens = 512
-chunked = llm.generate([prompt], gsp, use_tqdm=False)[0]["token_ids"]   # chunks 512/512/476: paged path live
+mono_llm = LLM(
+    os.path.expanduser("~/huggingface/Qwen3-0.6B"), enforce_eager=False,
+    max_model_len=4096, max_num_batched_tokens=16384,
+)
+try:
+    mono = mono_llm.generate([prompt], gsp, use_tqdm=False)[0]["token_ids"]
+finally:
+    clean_exit(mono_llm)
+    reset_context()
+
+chunked_llm = LLM(
+    os.path.expanduser("~/huggingface/Qwen3-0.6B"), enforce_eager=False,
+    max_model_len=4096, max_num_batched_tokens=512,
+)
+try:
+    chunked = chunked_llm.generate([prompt], gsp, use_tqdm=False)[0]["token_ids"]
+finally:
+    clean_exit(chunked_llm)
+    reset_context()
 match = sum(a == b for a, b in zip(mono, chunked))
 print(f"P4b-3 production chunked vs monolithic (greedy): {match}/16 tokens match")
 print("       mono   :", mono)

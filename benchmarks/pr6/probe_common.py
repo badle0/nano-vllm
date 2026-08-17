@@ -19,9 +19,15 @@ def parse_arm(*arms):
     return sys.argv[1]
 
 
-def make_llm():
+def make_llm(max_num_batched_tokens=16384):
     from nanovllm import LLM
-    return LLM(MODEL, enforce_eager=False, max_model_len=4096)
+    return LLM(
+        MODEL,
+        enforce_eager=False,
+        max_model_len=4096,
+        max_num_batched_tokens=max_num_batched_tokens,
+        max_num_seqs=min(512, max_num_batched_tokens),
+    )
 
 
 def timed(fn, n=3):
@@ -57,8 +63,11 @@ def ragged_step(llm, lens, budget=None):
     import random
     from nanovllm import SamplingParams
     from nanovllm.utils.context import get_context
-    if budget is not None:
-        llm.scheduler.max_num_batched_tokens = budget
+    if budget is not None and llm.scheduler.max_num_batched_tokens != budget:
+        raise ValueError(
+            "ragged_step budget must be configured by make_llm before graph capture: "
+            f"configured={llm.scheduler.max_num_batched_tokens}, requested={budget}"
+        )
     sp = SamplingParams(temperature=0.6, max_tokens=1, ignore_eos=True)
     for L in lens:
         llm.add_request([random.randint(1000, 150000) for _ in range(L)], sp)

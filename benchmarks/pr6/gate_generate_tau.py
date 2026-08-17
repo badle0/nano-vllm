@@ -1,5 +1,5 @@
 # greedy token-gate under a forced budget: same prompts/params as gate_generate.py,
-# with the scheduler budget shrunk at runtime (the tests' established knob) so the
+# with the scheduler budget configured at construction so the
 # C3 scheduler must chunk the prompts and mix decodes into ragged steps.
 # usage: gate_generate_tau.py TAU OUTPUT.json
 import json, sys, os
@@ -7,8 +7,13 @@ if len(sys.argv) != 3 or not sys.argv[1].isdigit():
     sys.exit("usage: gate_generate_tau.py TAU OUTPUT.json")
 tau = int(sys.argv[1])
 from nanovllm import LLM, SamplingParams
-llm = LLM(os.path.expanduser("~/huggingface/Qwen3-0.6B"), enforce_eager=False, max_model_len=4096)
-llm.scheduler.max_num_batched_tokens = tau
+llm = LLM(
+    os.path.expanduser("~/huggingface/Qwen3-0.6B"),
+    enforce_eager=False,
+    max_model_len=4096,
+    max_num_batched_tokens=tau,
+    max_num_seqs=min(512, tau),
+)
 prompts = ["The history of the Roman Empire begins with",
            "In machine learning, gradient descent works by",
            "The recipe calls for two cups of flour and",

@@ -2,7 +2,10 @@ import os, random, torch
 from nanovllm import LLM, SamplingParams
 from nanovllm.utils.context import reset_context
 
-llm = LLM(os.path.expanduser("~/huggingface/Qwen3-0.6B"), enforce_eager=False, max_model_len=4096)
+llm = LLM(
+    os.path.expanduser("~/huggingface/Qwen3-0.6B"), enforce_eager=False,
+    max_model_len=4096, max_num_batched_tokens=512,
+)
 random.seed(0)
 GSP = SamplingParams(temperature=0.0, max_tokens=16, ignore_eos=True)   # greedy: on this branch now
 PROMPTS = ["The capital of France is", "def fibonacci(n):"]
@@ -10,7 +13,6 @@ greedy = lambda: [o["token_ids"] for o in llm.generate(PROMPTS, GSP, use_tqdm=Fa
 
 base = greedy()                                        # decode graphs, pre-capture
 
-llm.scheduler.max_num_batched_tokens = 512
 llm.add_request([random.randint(1000, 150000) for _ in range(3968)],
                 SamplingParams(temperature=0.6, max_tokens=1, ignore_eos=True))
 seqs, _ = llm.scheduler.schedule()
