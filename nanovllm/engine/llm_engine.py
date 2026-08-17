@@ -10,8 +10,6 @@ from typing import NamedTuple
 
 from tqdm.auto import tqdm
 from transformers import AutoTokenizer
-from typing import NamedTuple
-from collections.abc import Iterator
 import torch.multiprocessing as mp
 
 from nanovllm.config import Config

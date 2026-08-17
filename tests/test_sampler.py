@@ -13,10 +13,7 @@ from transformers.generation.logits_process import (
     TopPLogitsWarper,
 )
 
-_sp = pathlib.Path(__file__).resolve().parents[1] / "nanovllm/layers/sampler.py"
-_ss = importlib.util.spec_from_file_location("sampler", _sp)
-_sm = importlib.util.module_from_spec(_ss); _ss.loader.exec_module(_sm)
-Sampler = _sm.Sampler
+from nanovllm.sampling_params import SamplingParams
 
 _sp = pathlib.Path(__file__).resolve().parents[1] / "nanovllm/layers/sampler.py"
 _ss = importlib.util.spec_from_file_location("sampler", _sp)
@@ -175,7 +172,7 @@ def test_greedy_does_not_advance_cuda_rng():
 def test_mixed_batch_routes_per_row():
     logits = torch.randn(6, 1000, dtype=torch.bfloat16)
     temps = torch.tensor([0., 0.6, 0., 1.0, 0., 0.6])
-    out = S(logits.clone(), temps, _disabled(6))
+    out = Sampler()(logits.clone(), temps)
     g = temps == 0
     assert torch.equal(out[g], logits.argmax(-1)[g])
 

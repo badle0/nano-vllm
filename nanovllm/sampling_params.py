@@ -5,8 +5,6 @@ from math import isfinite
 @dataclass(slots=True)
 class SamplingParams:
     temperature: float = 1.0
-    top_k: int = -1          # -1 = disabled (consider all tokens)
-    top_p: float = 1.0       # 1.0 = disabled (full nucleus)
     max_tokens: int = 64
     ignore_eos: bool = False
     top_k: int = -1          # -1 = disabled (consider all tokens)
