@@ -1,5 +1,7 @@
+import dataclasses
 import importlib.util
 import pathlib
+import pickle
 import subprocess
 import sys
 
@@ -22,6 +24,51 @@ def test_temperature_zero_is_permitted():
 def test_negative_temperature_rejected():
     with pytest.raises(ValueError):
         SamplingParams(temperature=-1.0)
+
+def test_legacy_positional_arguments_keep_their_mapping():
+    params = SamplingParams(0.6, 128, True)
+    assert params.temperature == 0.6
+    assert params.max_tokens == 128
+    assert params.ignore_eos is True
+    assert params.top_k == -1
+
+def test_sampling_params_round_trip():
+    params = SamplingParams(0.6, 128, True, 17)
+    assert dataclasses.asdict(params) == {
+        "temperature": 0.6,
+        "max_tokens": 128,
+        "ignore_eos": True,
+        "top_k": 17,
+    }
+    assert pickle.loads(pickle.dumps(params)) == params
+
+@pytest.mark.parametrize("top_k", [True, 1.9, "5", None])
+def test_topk_rejects_non_integer_values(top_k):
+    with pytest.raises(TypeError):
+        SamplingParams(top_k=top_k)
+
+def test_validation_survives_optimized_python():
+    code = """
+from nanovllm.sampling_params import SamplingParams
+
+invalid = (
+    {"temperature": -1.0},
+    {"top_k": True},
+    {"top_k": 1.9},
+    {"top_k": 0},
+)
+for kwargs in invalid:
+    try:
+        SamplingParams(**kwargs)
+    except (TypeError, ValueError):
+        continue
+    raise SystemExit(f"accepted invalid parameters: {kwargs}")
+"""
+    subprocess.run(
+        [sys.executable, "-O", "-c", code],
+        cwd=pathlib.Path(__file__).resolve().parents[1],
+        check=True,
+    )
 
 def test_greedy_is_argmax():
     logits = torch.randn(8, 1000, dtype=torch.bfloat16)
@@ -77,23 +124,6 @@ def test_stochastic_path_is_fixed_seed_equivalent_to_main():
     torch.manual_seed(42)
     actual = Sampler()(logits.clone(), temperatures.clone(), None)
     assert torch.equal(actual, expected)
-
-def test_validation_survives_optimized_python():
-    code = """
-from nanovllm.sampling_params import SamplingParams
-
-for temperature in (-1.0, True, "cold"):
-    try:
-        SamplingParams(temperature=temperature)
-    except (TypeError, ValueError):
-        continue
-    raise SystemExit(f"accepted invalid temperature: {temperature!r}")
-"""
-    subprocess.run(
-        [sys.executable, "-O", "-c", code],
-        cwd=pathlib.Path(__file__).resolve().parents[1],
-        check=True,
-    )
 
 def _pr1_reference(logits, temperatures):
     greedy = logits.argmax(dim=-1)
@@ -152,5 +182,5 @@ def test_topk_one_with_tied_maxima_samples_among_ties():
 
 def test_topk_params_validation():
     SamplingParams(top_k=-1); SamplingParams(top_k=5)
-    with pytest.raises(AssertionError):
+    with pytest.raises(ValueError):
         SamplingParams(top_k=0)
