@@ -59,6 +59,31 @@ Low-level callers retain the original `step()` contract of
 `(seq_id, token_ids)` pairs. Use `step_with_metrics()` to opt in to completed
 triples of `(seq_id, token_ids, metrics)`.
 
+### Token streaming
+
+Only one synchronous `generate()` or `stream()` session can own an engine at a
+time. Use the stream as a context manager when iteration may stop early:
+
+```python
+from nanovllm import StreamingDetokenizer
+
+detokenizer = StreamingDetokenizer(llm.tokenizer)
+rendered = {}
+with llm.stream(prompts, sampling_params) as stream:
+    for event in stream:
+        text = rendered.get(event.seq_id, "")
+        text = detokenizer.feed(event.seq_id, event.token_id).apply(text)
+        if event.finished:
+            text = detokenizer.flush(event.seq_id).apply(text)
+        rendered[event.seq_id] = text
+```
+
+`StreamOutput` contains `(seq_id, token_id, finished)`. Text updates can replace
+an earlier suffix because tokenizer cleanup and normalization are not always
+append-only. Completed caller-delivery metrics are available in
+`stream.metrics[seq_id]`. A retained iterator is not closed by `break` alone;
+the context manager or explicit `stream.close()` performs ID-scoped cleanup.
+
 ## Benchmark
 
 See `bench.py` for benchmark.

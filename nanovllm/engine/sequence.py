@@ -11,6 +11,7 @@ class SequenceStatus(Enum):
     WAITING = auto()
     RUNNING = auto()
     FINISHED = auto()
+    CANCELLED = auto()
 
 class StreamOutput(NamedTuple):
     seq_id: int
@@ -53,6 +54,8 @@ class Sequence:
         self.first_scheduled_time = None
         self.first_token_time = None
         self.finish_time = None
+        self.first_delivery_time = None
+        self.delivery_time = None
         self.token_times = []
 
     def __len__(self):

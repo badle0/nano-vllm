@@ -1,4 +1,6 @@
 import os
+import sys
+
 from nanovllm import LLM, SamplingParams, StreamingDetokenizer
 from transformers import AutoTokenizer
 
@@ -8,6 +10,16 @@ tok = AutoTokenizer.from_pretrained(path)
 detok = StreamingDetokenizer(tok)
 prompt = tok.apply_chat_template([{"role": "user", "content": "introduce yourself"}],
                                  tokenize=False, add_generation_prompt=True)
-for ev in llm.stream([prompt], SamplingParams(temperature=0.6, max_tokens=256)):
-    print(detok.feed(ev.seq_id, ev.token_id), end="", flush=True)
-    if ev.finished: print(detok.flush(ev.seq_id))
+rendered = ""
+with llm.stream(
+    [prompt],
+    SamplingParams(temperature=0.6, max_tokens=256),
+) as stream:
+    for event in stream:
+        rendered = detok.feed(event.seq_id, event.token_id).apply(rendered)
+        if event.finished:
+            rendered = detok.flush(event.seq_id).apply(rendered)
+        preview = rendered.replace("\n", "\\n")
+        sys.stdout.write("\r\033[2K" + preview)
+        sys.stdout.flush()
+print()

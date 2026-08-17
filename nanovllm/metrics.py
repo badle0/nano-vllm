@@ -1,4 +1,8 @@
-def compute_metrics(seq, delivery_time: float | None = None) -> dict:
+def compute_metrics(
+    seq,
+    delivery_time: float | None = None,
+    first_delivery_time: float | None = None,
+) -> dict:
     """Compute durations with explicit engine and caller boundaries.
 
     Engine durations start after tokenization when the sequence is ready for the
@@ -19,6 +23,15 @@ def compute_metrics(seq, delivery_time: float | None = None) -> dict:
         "num_prompt_tokens": seq.num_prompt_tokens,
         "num_completion_tokens": seq.num_completion_tokens,
     }
+    if first_delivery_time is None:
+        first_delivery_time = getattr(seq, "first_delivery_time", None)
+    if delivery_time is None:
+        delivery_time = getattr(seq, "delivery_time", None)
+    if first_delivery_time is not None:
+        metrics["first_token_to_delivery"] = (
+            first_delivery_time - seq.first_token_time
+        )
+        metrics["caller_ttft"] = first_delivery_time - seq.submission_time
     if delivery_time is not None:
         metrics["engine_finish_to_delivery"] = delivery_time - seq.finish_time
         metrics["caller_e2e"] = delivery_time - seq.submission_time

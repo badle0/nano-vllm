@@ -105,10 +105,36 @@ class Scheduler:
                 self.running.remove(seq)
             events.append(StreamOutput(seq.seq_id, token_id, finished))
         return events
-    
+
+    def cancel(self, seq_ids) -> list[int]:
+        """Cancel only the queued sequences named by ``seq_ids``.
+
+        A partially prefetched sequence can still be in ``waiting`` while it
+        owns KV blocks, so both scheduler queues must use the same deallocation
+        rule. Unknown and duplicate IDs are harmless.
+        """
+        targets = set(seq_ids)
+        if not targets:
+            return []
+
+        cancelled = []
+        for queue in (self.waiting, self.running):
+            retained = deque()
+            while queue:
+                seq = queue.popleft()
+                if seq.seq_id not in targets:
+                    retained.append(seq)
+                    continue
+                if seq.block_table:
+                    self.block_manager.deallocate(seq)
+                seq.num_scheduled_tokens = 0
+                seq.status = SequenceStatus.CANCELLED
+                cancelled.append(seq.seq_id)
+            queue.extend(retained)
+        return cancelled
+
     def cancel_all(self):
-        for seq in (*self.running, *self.waiting):
-            if seq.block_table:
-                self.block_manager.deallocate(seq)
-        self.running.clear()
-        self.waiting.clear()
+        """Administrative compatibility wrapper; request cleanup uses cancel."""
+        return self.cancel(
+            seq.seq_id for seq in (*self.running, *self.waiting)
+        )

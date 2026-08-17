@@ -1,4 +1,5 @@
 from types import MethodType
+from threading import Lock
 
 import pytest
 
@@ -53,13 +54,21 @@ class FakeScheduler:
 
     def __init__(self):
         self.sequences = []
-        self.finished = False
+        self.finished = True
 
     def add(self, seq):
         self.sequences.append(seq)
+        self.finished = False
 
     def is_finished(self):
         return self.finished
+
+    def cancel(self, seq_ids):
+        targets = set(seq_ids)
+        self.sequences = [
+            seq for seq in self.sequences if seq.seq_id not in targets
+        ]
+        self.finished = not self.sequences
 
 
 def make_finished_sequence():
@@ -82,6 +91,8 @@ def make_finished_sequence():
 def make_fake_engine(clock):
     engine = LLMEngine.__new__(LLMEngine)
     engine._clock = clock
+    engine._session_lock = Lock()
+    engine._active_session = None
     engine.tokenizer = FakeTokenizer(clock)
     engine.scheduler = FakeScheduler()
     return engine
@@ -139,6 +150,8 @@ def test_step_preserves_pairs_and_step_with_metrics_is_opt_in():
     seq = make_finished_sequence()
     engine = LLMEngine.__new__(LLMEngine)
     engine._clock = lambda: 7.0
+    engine._session_lock = Lock()
+    engine._active_session = None
     engine._execute_step = lambda: ([seq], -1)
 
     outputs, num_tokens = engine.step()
