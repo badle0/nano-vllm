@@ -5,6 +5,10 @@ from torch import nn
 class Sampler(nn.Module):
 
     @torch.compile
+    def greedy(self, logits: torch.Tensor):
+        return logits.argmax(dim=-1)
+
+    @torch.compile
     def forward(self, logits: torch.Tensor, temperatures: torch.Tensor):
         greedy_tokens = logits.argmax(dim=-1)
         logits = logits.float().div_(temperatures.clamp_min(1e-10).unsqueeze(dim=1))

@@ -8,4 +8,7 @@ class SamplingParams:
     ignore_eos: bool = False
 
     def __post_init__(self):
-        assert self.temperature >= 0.0, "temperature must be non-negative"
+        if isinstance(self.temperature, bool) or not isinstance(self.temperature, (int, float)):
+            raise TypeError("temperature must be a number")
+        if self.temperature < 0.0:
+            raise ValueError("temperature must be non-negative")

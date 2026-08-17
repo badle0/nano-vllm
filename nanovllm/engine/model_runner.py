@@ -98,6 +98,12 @@ class ModelRunner:
         for seq in seqs:
             seq.num_scheduled_tokens = seq_len
         self.run(seqs, True)
+        if self.rank == 0:
+            greedy_warmup_batches = (1,) if self.config.max_num_seqs == 1 else (1, 2)
+            for batch_size in greedy_warmup_batches:
+                greedy_logits = torch.zeros(batch_size, self.config.hf_config.vocab_size)
+                self.sampler.greedy(greedy_logits)
+            del greedy_logits
         torch.cuda.empty_cache()
 
     def allocate_kv_cache(self):
@@ -189,8 +195,11 @@ class ModelRunner:
 
     def prepare_sample(self, seqs: list[Sequence]):
         temperatures = [seq.temperature for seq in seqs]
+        all_greedy = all(temperature == 0.0 for temperature in temperatures)
+        if all_greedy:
+            return None, True
         temperatures = torch.tensor(temperatures, dtype=torch.float32, pin_memory=True).cuda(non_blocking=True)
-        return temperatures
+        return temperatures, False
 
     @torch.inference_mode()
     def run_model(self, input_ids: torch.Tensor, positions: torch.Tensor, is_prefill: bool):
@@ -213,9 +222,13 @@ class ModelRunner:
 
     def run(self, seqs: list[Sequence], is_prefill: bool) -> list[int]:
         input_ids, positions = self.prepare_prefill(seqs) if is_prefill else self.prepare_decode(seqs)
-        temperatures = self.prepare_sample(seqs) if self.rank == 0 else None
+        temperatures, all_greedy = self.prepare_sample(seqs) if self.rank == 0 else (None, False)
         logits = self.run_model(input_ids, positions, is_prefill)
-        token_ids = self.sampler(logits, temperatures).tolist() if self.rank == 0 else None
+        if self.rank == 0:
+            tokens = self.sampler.greedy(logits) if all_greedy else self.sampler(logits, temperatures)
+            token_ids = tokens.tolist()
+        else:
+            token_ids = None
         reset_context()
         return token_ids
 
