@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from math import isfinite
 
 
 @dataclass(slots=True)
@@ -11,6 +12,8 @@ class SamplingParams:
     def __post_init__(self):
         if isinstance(self.temperature, bool) or not isinstance(self.temperature, (int, float)):
             raise TypeError("temperature must be a number")
+        if not isfinite(self.temperature):
+            raise ValueError("temperature must be finite")
         if self.temperature < 0.0:
             raise ValueError("temperature must be non-negative")
         if type(self.top_k) is not int:

@@ -15,8 +15,12 @@ _ss = importlib.util.spec_from_file_location("sampler", _sp)
 _sm = importlib.util.module_from_spec(_ss); _ss.loader.exec_module(_sm)
 Sampler = _sm.Sampler
 
-def _disabled(n):
-    return torch.full((n,), -1, dtype=torch.int64)
+def _filter_top_k(logits, *buckets):
+    sampler = Sampler()
+    for top_k, rows in buckets:
+        row_indices = torch.tensor(rows, dtype=torch.int64, device=logits.device)
+        logits = sampler.filter_top_k(logits, row_indices, top_k)
+    return logits
 
 def test_temperature_zero_is_permitted():
     SamplingParams(temperature=0.0)
@@ -24,6 +28,11 @@ def test_temperature_zero_is_permitted():
 def test_negative_temperature_rejected():
     with pytest.raises(ValueError):
         SamplingParams(temperature=-1.0)
+
+@pytest.mark.parametrize("temperature", [float("nan"), float("inf"), float("-inf")])
+def test_non_finite_temperature_rejected(temperature):
+    with pytest.raises(ValueError, match="finite"):
+        SamplingParams(temperature=temperature)
 
 def test_legacy_positional_arguments_keep_their_mapping():
     params = SamplingParams(0.6, 128, True)
@@ -53,6 +62,8 @@ from nanovllm.sampling_params import SamplingParams
 
 invalid = (
     {"temperature": -1.0},
+    {"temperature": float("nan")},
+    {"temperature": float("inf")},
     {"top_k": True},
     {"top_k": 1.9},
     {"top_k": 0},
@@ -101,13 +112,13 @@ def test_greedy_does_not_advance_cuda_rng():
 def test_mixed_batch_routes_per_row():
     logits = torch.randn(6, 1000, dtype=torch.bfloat16)
     temps = torch.tensor([0., 0.6, 0., 1.0, 0., 0.6])
-    out = Sampler()(logits.clone(), temps, _disabled(6))
+    out = Sampler()(logits.clone(), temps)
     g = temps == 0
     assert torch.equal(out[g], logits.argmax(-1)[g])
 
 def test_stochastic_path_is_not_constant():
     logits = torch.randn(1, 1000, dtype=torch.bfloat16)
-    draws = {Sampler()(logits.clone(), torch.ones(1), None).item() for _ in range(200)}
+    draws = {Sampler()(logits.clone(), torch.ones(1)).item() for _ in range(200)}
     assert len(draws) > 1
 
 def _main_sampler(logits, temperatures):
@@ -122,7 +133,7 @@ def test_stochastic_path_is_fixed_seed_equivalent_to_main():
     torch.manual_seed(42)
     expected = reference(logits.clone(), temperatures.clone())
     torch.manual_seed(42)
-    actual = Sampler()(logits.clone(), temperatures.clone(), None)
+    actual = Sampler()(logits.clone(), temperatures.clone())
     assert torch.equal(actual, expected)
 
 def _pr1_reference(logits, temperatures):
@@ -137,47 +148,115 @@ def test_disabled_topk_is_seed_equivalent_to_pr1():
     temps = torch.tensor([0., .6, 1., .6, 1.3, .9, .6, 0.])
     ref = torch.compile(_pr1_reference)
     torch.manual_seed(42); a = ref(logits.clone(), temps.clone())
-    torch.manual_seed(42); b = Sampler()(logits.clone(), temps.clone(), torch.full((8,), -1, dtype=torch.int64))
+    torch.manual_seed(42); b = Sampler()(logits.clone(), temps.clone())
     assert torch.equal(a, b)
 
-def test_none_topk_is_seed_equivalent_to_pr1():
-    # fast path: with top_ks=None the compiled graph is op-for-op the PR1 sampler
-    logits = torch.randn(8, 1000, dtype=torch.bfloat16)
-    temps = torch.tensor([0., .6, 1., .6, 1.3, .9, .6, 0.])
-    ref = torch.compile(_pr1_reference)
-    torch.manual_seed(42); a = ref(logits.clone(), temps.clone())
-    torch.manual_seed(42); b = Sampler()(logits.clone(), temps.clone(), None)
-    assert torch.equal(a, b)
+def test_topk_prefilter_only_mutates_active_rows():
+    logits = torch.randn(4, 1000, dtype=torch.bfloat16)
+    original = logits.clone()
+    filtered = _filter_top_k(logits, (5, (2,)))
+    threshold = original[2].float().topk(5).values.amin()
 
-def test_none_and_all_disabled_tensor_agree():
+    assert torch.equal(filtered[[0, 1, 3]], original[[0, 1, 3]])
+    assert torch.equal(torch.isfinite(filtered[2]), original[2].float() >= threshold)
+
+def test_topk_prefilter_selects_only_active_rows(monkeypatch):
+    observed_shapes = []
+    torch_topk = torch.topk
+
+    def track_topk(tensor, *args, **kwargs):
+        observed_shapes.append(tuple(tensor.shape))
+        return torch_topk(tensor, *args, **kwargs)
+
+    monkeypatch.setattr(torch, "topk", track_topk)
+    _filter_top_k(torch.randn(8, 1000), (50, (3,)))
+
+    assert observed_shapes == [(1, 1000)]
+
+def test_topk_prefilter_accepts_model_inference_tensors():
+    with torch.inference_mode():
+        logits = torch.randn(2, 1000, dtype=torch.bfloat16)
+
+    filtered = _filter_top_k(logits, (5, (0,)))
+
+    assert filtered is logits
+    assert torch.isfinite(filtered[0]).sum() >= 5
+
+def test_topk_prefilter_buckets_heterogeneous_k_values():
+    logits = torch.randn(4, 1000, dtype=torch.bfloat16)
+    original = logits.clone()
+    filtered = _filter_top_k(logits, (1, (0,)), (5, (1, 3)))
+
+    assert torch.equal(filtered[2], original[2])
+    for row, top_k in ((0, 1), (1, 5), (3, 5)):
+        threshold = original[row].float().topk(top_k).values.amin()
+        assert torch.equal(torch.isfinite(filtered[row]), original[row].float() >= threshold)
+
+def test_one_active_topk_row_preserves_inactive_draws_and_cpu_rng_state():
     logits = torch.randn(8, 1000, dtype=torch.bfloat16)
-    torch.manual_seed(9); a = Sampler()(logits.clone(), torch.ones(8), None)
-    torch.manual_seed(9); b = Sampler()(logits.clone(), torch.ones(8), torch.full((8,), -1, dtype=torch.int64))
-    assert torch.equal(a, b)
+    temperatures = torch.ones(8)
+    sampler = Sampler()
+    sampler(logits.clone(), temperatures)
+
+    torch.manual_seed(17)
+    disabled = sampler(logits.clone(), temperatures)
+    disabled_state = torch.get_rng_state().clone()
+
+    torch.manual_seed(17)
+    filtered = _filter_top_k(logits.clone(), (50, (0,)))
+    enabled = sampler(filtered, temperatures)
+    enabled_state = torch.get_rng_state().clone()
+
+    assert torch.equal(enabled[1:], disabled[1:])
+    assert torch.equal(enabled_state, disabled_state)
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA is unavailable")
+def test_one_active_topk_row_preserves_inactive_draws_and_cuda_rng_state():
+    logits = torch.arange(8000, dtype=torch.float32, device="cuda").reshape(8, 1000)
+    temperatures = torch.ones(8, device="cuda")
+    sampler = Sampler().cuda()
+    sampler(logits.clone(), temperatures)
+
+    torch.cuda.manual_seed(17)
+    disabled = sampler(logits.clone(), temperatures)
+    disabled_state = torch.cuda.get_rng_state().clone()
+
+    torch.cuda.manual_seed(17)
+    filtered = _filter_top_k(logits.clone(), (50, (0,)))
+    enabled = sampler(filtered, temperatures)
+    enabled_state = torch.cuda.get_rng_state().clone()
+
+    assert torch.equal(enabled[1:], disabled[1:])
+    assert torch.equal(enabled_state, disabled_state)
 
 def test_topk_support():
     logits = torch.randn(4, 1000, dtype=torch.bfloat16)
     kth = logits.float().sort(-1, descending=True).values[:, 4:5]   # value threshold, not topk indices
     allowed = logits.float() >= kth
+    filtered = _filter_top_k(logits.clone(), (5, range(4)))
     for _ in range(500):
-        s = Sampler()(logits.clone(), torch.ones(4), torch.full((4,), 5, dtype=torch.int64))
+        s = Sampler()(filtered.clone(), torch.ones(4))
         assert bool(allowed.gather(1, s.unsqueeze(1)).all())
 
 def test_topk_tie_at_boundary_keeps_all():
     row = torch.full((1, 10), -10.0); row[0, :2] = 5.0; row[0, 2:5] = 3.0
-    seen = {int(Sampler()(row.clone(), torch.ones(1), torch.tensor([3]))) for _ in range(2000)}
+    filtered = _filter_top_k(row.clone(), (3, (0,)))
+    assert torch.isfinite(filtered).nonzero(as_tuple=False)[:, 1].tolist() == [0, 1, 2, 3, 4]
+    seen = {int(Sampler()(filtered.clone(), torch.ones(1))) for _ in range(2000)}
     assert seen == {0, 1, 2, 3, 4}
 
 def test_topk_one_samples_a_maximum():
     torch.manual_seed(3)
     logits = torch.randn(8, 1000, dtype=torch.bfloat16)
-    out = Sampler()(logits.clone(), torch.ones(8), torch.ones(8, dtype=torch.int64))
+    filtered = _filter_top_k(logits.clone(), (1, range(8)))
+    out = Sampler()(filtered, torch.ones(8))
     lf = logits.float()
     assert torch.equal(lf.gather(1, out.unsqueeze(1)).squeeze(1), lf.max(-1).values)
 
 def test_topk_one_with_tied_maxima_samples_among_ties():
     row = torch.full((1, 10), -10.0); row[0, 2] = 5.0; row[0, 7] = 5.0
-    seen = {int(Sampler()(row.clone(), torch.ones(1), torch.tensor([1]))) for _ in range(500)}
+    filtered = _filter_top_k(row.clone(), (1, (0,)))
+    seen = {int(Sampler()(filtered.clone(), torch.ones(1))) for _ in range(500)}
     assert seen == {2, 7}
 
 def test_topk_params_validation():

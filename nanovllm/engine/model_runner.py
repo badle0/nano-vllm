@@ -99,11 +99,22 @@ class ModelRunner:
             seq.num_scheduled_tokens = seq_len
         self.run(seqs, True)
         if self.rank == 0:
-            greedy_warmup_batches = (1,) if self.config.max_num_seqs == 1 else (1, 2)
-            for batch_size in greedy_warmup_batches:
-                greedy_logits = torch.zeros(batch_size, self.config.hf_config.vocab_size)
-                self.sampler.greedy(greedy_logits)
-            del greedy_logits
+            sampler_warmup_batches = (1,) if self.config.max_num_seqs == 1 else (1, 2)
+            vocab_size = self.config.hf_config.vocab_size
+            cuda_rng_state = torch.cuda.get_rng_state()
+            for batch_size in sampler_warmup_batches:
+                warmup_logits = torch.zeros(batch_size, vocab_size)
+                warmup_temperatures = torch.ones(batch_size, dtype=torch.float32)
+                self.sampler(warmup_logits, warmup_temperatures)
+                self.sampler.greedy(warmup_logits)
+            torch.cuda.set_rng_state(cuda_rng_state)
+            for top_k in sorted({min(1, vocab_size), min(50, vocab_size)}):
+                warmup_logits = torch.zeros(2, vocab_size)
+                row_indices = torch.zeros(1, dtype=torch.int64)
+                self.sampler.filter_top_k(warmup_logits, row_indices, top_k)
+                warmup_logits = torch.zeros(2, vocab_size)
+                self.sampler.filter_top_k(warmup_logits, None, top_k)
+            del warmup_logits
         torch.cuda.empty_cache()
 
     def allocate_kv_cache(self):
@@ -193,16 +204,52 @@ class ModelRunner:
         set_context(False, slot_mapping=slot_mapping, context_lens=context_lens, block_tables=block_tables)
         return input_ids, positions
 
-    def prepare_sample(self, seqs: list[Sequence]):
-        temperatures = [seq.temperature for seq in seqs]
+    @staticmethod
+    def _prepare_sample_metadata(seqs: list[Sequence], vocab_size: int):
+        temperatures = tuple(seq.temperature for seq in seqs)
         all_greedy = all(temperature == 0.0 for temperature in temperatures)
         if all_greedy:
-            return None, None, True
+            return temperatures, (), True
+
+        rows_by_top_k = {}
+        for row, (seq, temperature) in enumerate(zip(seqs, temperatures)):
+            if temperature == 0.0 or seq.top_k == -1:
+                continue
+            effective_top_k = min(seq.top_k, vocab_size)
+            if effective_top_k == vocab_size:
+                continue
+            rows_by_top_k.setdefault(effective_top_k, []).append(row)
+
+        top_k_buckets = tuple(
+            (
+                top_k,
+                None if len(rows_by_top_k[top_k]) == len(seqs)
+                else tuple(rows_by_top_k[top_k]),
+            )
+            for top_k in sorted(rows_by_top_k)
+        )
+        return temperatures, top_k_buckets, False
+
+    def prepare_sample(self, seqs: list[Sequence]):
+        temperatures, host_top_k_buckets, all_greedy = self._prepare_sample_metadata(
+            seqs, self.config.hf_config.vocab_size
+        )
+        if all_greedy:
+            return None, (), True
+
         temperatures = torch.tensor(temperatures, dtype=torch.float32, pin_memory=True).cuda(non_blocking=True)
-        top_ks = None
-        if any(seq.top_k != -1 for seq in seqs):
-            top_ks = torch.tensor([seq.top_k for seq in seqs], dtype=torch.int64, pin_memory=True).cuda(non_blocking=True)
-        return temperatures, top_ks, False
+        top_k_buckets = tuple(
+            (
+                top_k,
+                (
+                    None
+                    if rows is None
+                    else torch.tensor(rows, dtype=torch.int64, pin_memory=True).cuda(non_blocking=True)
+                ),
+            )
+            for top_k, rows in host_top_k_buckets
+        )
+        return temperatures, top_k_buckets, False
 
     @torch.inference_mode()
     def run_model(self, input_ids: torch.Tensor, positions: torch.Tensor, is_prefill: bool):
@@ -225,10 +272,15 @@ class ModelRunner:
 
     def run(self, seqs: list[Sequence], is_prefill: bool) -> list[int]:
         input_ids, positions = self.prepare_prefill(seqs) if is_prefill else self.prepare_decode(seqs)
-        temperatures, top_ks, all_greedy = self.prepare_sample(seqs) if self.rank == 0 else (None, None, False)
+        temperatures, top_k_buckets, all_greedy = self.prepare_sample(seqs) if self.rank == 0 else (None, (), False)
         logits = self.run_model(input_ids, positions, is_prefill)
         if self.rank == 0:
-            tokens = self.sampler.greedy(logits) if all_greedy else self.sampler(logits, temperatures, top_ks)
+            if all_greedy:
+                tokens = self.sampler.greedy(logits)
+            else:
+                for top_k, row_indices in top_k_buckets:
+                    logits = self.sampler.filter_top_k(logits, row_indices, top_k)
+                tokens = self.sampler(logits, temperatures)
             token_ids = tokens.tolist()
         else:
             token_ids = None
