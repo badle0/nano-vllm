@@ -8,7 +8,10 @@ import sys
 
 import pytest
 import torch
-from transformers.generation.logits_process import TopPLogitsWarper
+from transformers.generation.logits_process import (
+    TopKLogitsWarper,
+    TopPLogitsWarper,
+)
 
 from nanovllm.sampling_params import SamplingParams
 
@@ -46,6 +49,18 @@ def _transformers_top_p_support(logits, temperatures, top_ps):
         scores = logits[row:row + 1].float() / temperatures[row]
         warped = TopPLogitsWarper(float(top_p))(input_ids, scores)
         support.append(torch.isfinite(warped))
+    return torch.cat(support, dim=0)
+
+def _transformers_top_k_top_p_support(
+    logits, temperatures, top_ks, top_ps
+):
+    support = []
+    input_ids = torch.zeros(1, 1, dtype=torch.int64, device=logits.device)
+    for row, (top_k, top_p) in enumerate(zip(top_ks, top_ps)):
+        scores = logits[row:row + 1].float() / temperatures[row]
+        scores = TopKLogitsWarper(int(top_k))(input_ids, scores)
+        scores = TopPLogitsWarper(float(top_p))(input_ids, scores)
+        support.append(torch.isfinite(scores))
     return torch.cat(support, dim=0)
 
 def test_temperature_zero_is_permitted():
@@ -352,10 +367,9 @@ def test_topp_host_cutoff_rounding_matches_transformers(device):
 @pytest.mark.parametrize("dtype", [torch.float32, torch.bfloat16])
 def test_topp_random_support_matches_transformers(dtype):
     torch.manual_seed(29)
-    logits = torch.randn(64, 257).to(dtype)
+    logits = torch.randn(600, 257).to(dtype)
     temperatures = torch.linspace(0.5, 1.5, logits.size(0))
-    top_ps = [0.1, 0.5, 0.8, 0.9, 0.95, 0.99] * 11
-    top_ps = top_ps[:logits.size(0)]
+    top_ps = [0.1, 0.5, 0.8, 0.9, 0.95, 0.99] * 100
 
     actual = torch.isfinite(
         _filter_top_p(logits.clone(), temperatures, top_ps)
@@ -367,9 +381,9 @@ def test_topp_random_support_matches_transformers(dtype):
 @pytest.mark.parametrize("dtype", [torch.float32, torch.bfloat16])
 def test_topp_forced_tie_support_matches_transformers(dtype):
     torch.manual_seed(31)
-    logits = torch.randint(-3, 4, (64, 257)).to(dtype)
+    logits = torch.randint(-3, 4, (600, 257)).to(dtype)
     temperatures = torch.linspace(0.5, 1.5, logits.size(0))
-    top_ps = [0.2, 0.5, 0.8, 0.9] * 16
+    top_ps = [0.2, 0.5, 0.8, 0.9] * 150
 
     actual = torch.isfinite(
         _filter_top_p(logits.clone(), temperatures, top_ps)
@@ -388,10 +402,16 @@ def test_topp_prefilter_selects_only_active_rows(monkeypatch):
 
     monkeypatch.setattr(torch, "sort", track_sort)
     logits = torch.randn(8, 1000)
+    original_logits = logits.clone()
     temperatures = torch.ones(8)
     _filter_top_p(logits, temperatures, [0.9], rows=(3,))
 
     assert observed_shapes == [(1, 1000)]
+    inactive_rows = torch.tensor([0, 1, 2, 4, 5, 6, 7])
+    assert torch.equal(
+        logits.index_select(0, inactive_rows),
+        original_logits.index_select(0, inactive_rows),
+    )
 
 def test_topp_chunks_all_active_rows_without_changing_transformers_support(
     monkeypatch,
@@ -475,16 +495,36 @@ def test_topp_adaptive_collapse_on_peaked_row():
     seen = {int(Sampler()(filtered.clone(), temperatures)) for _ in range(500)}
     assert seen == {7}
 
-def test_topk_topp_combined_containment():
-    logits = torch.randn(8, 1000, dtype=torch.bfloat16)
-    temperatures = torch.ones(8)
-    filtered = _filter_top_k(logits.clone(), (5, range(8)))
-    filtered = _filter_top_p(filtered, temperatures, [0.9] * 8)
-    kth = logits.float().sort(-1, descending=True).values[:, 4:5]
-    allowed = logits.float() >= kth
-    for _ in range(300):
-        sampled = Sampler()(filtered.clone(), temperatures)
-        assert bool(allowed.gather(1, sampled.unsqueeze(1)).all())
+def test_topp_tiny_probability_keeps_one_token_and_matches_transformers():
+    logits = torch.zeros(1, 17)
+    temperatures = torch.ones(1)
+    actual = torch.isfinite(
+        _filter_top_p(logits.clone(), temperatures, [1e-9])
+    )
+    expected = _transformers_top_p_support(logits, temperatures, [1e-9])
+
+    assert torch.equal(actual, expected)
+    assert actual.sum() == 1
+
+@pytest.mark.parametrize("dtype", [torch.float32, torch.bfloat16])
+def test_topk_then_topp_support_matches_transformers(dtype):
+    torch.manual_seed(41)
+    logits = torch.randint(-20, 21, (120, 257)).to(dtype)
+    temperatures = torch.linspace(0.5, 1.5, logits.size(0))
+    top_ks = [5, 17, 50] * 40
+    top_ps = [0.5, 0.8, 0.9, 0.95] * 30
+    filtered = logits.clone()
+    for top_k in sorted(set(top_ks)):
+        rows = tuple(row for row, value in enumerate(top_ks) if value == top_k)
+        filtered = _filter_top_k(filtered, (top_k, rows))
+    actual = torch.isfinite(
+        _filter_top_p(filtered, temperatures, top_ps)
+    )
+    expected = _transformers_top_k_top_p_support(
+        logits, temperatures, top_ks, top_ps
+    )
+
+    assert torch.equal(actual, expected)
 
 def test_topp_params_validation():
     SamplingParams(top_p=1.0)
