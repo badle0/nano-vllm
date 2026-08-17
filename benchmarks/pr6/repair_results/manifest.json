@@ -1,0 +1,1456 @@
+{
+  "schema_version": 1,
+  "bundle": {
+    "name": "PR6 repaired chunked-prefill evidence",
+    "assembled_date_utc": "2026-08-17",
+    "purpose": "Preserve byte-identical repaired benchmark outputs and the two off-tree benchmark harnesses that produced the tau and stock results.",
+    "artifact_count": 46,
+    "byte_preservation": "Every listed artifact is copied byte-for-byte from source and pinned by SHA-256 and byte count."
+  },
+  "provenance_policy": {
+    "embedded": "A value serialized inside a raw result. For commit fields this is still only a caller-supplied --commit label because the harness did not resolve or verify Git HEAD.",
+    "post_run_reconstruction": "Context recovered after execution from repository history, local model metadata, source filenames/mtimes, the audit ledger, or the operator report. It is not represented as embedded run metadata.",
+    "no_generated_at_commit_claim": "The manifest resolves embedded short labels to Git objects but does not claim the process executed at those commits."
+  },
+  "selection": {
+    "tau_adjudication": "Use the final interleaved reruns for tau 128 and 16384 and the only same-host baseline/fixed sets for tau 1024.",
+    "constructor_sweep": "Use the initial fixed seed1..3 sets at tau 128/256/512/1024/2048/16384. At tau 128 and 16384 these support only the fixed constructor-sweep table; later paired reruns supersede them for A/B adjudication.",
+    "excluded_sources": [
+      {
+        "paths": [
+          "/workspace/.feat_bench/results/chunk_base_tau16384_seed1.json",
+          "/workspace/.feat_bench/results/chunk_base_tau16384_seed2.json",
+          "/workspace/.feat_bench/results/chunk_base_tau16384_seed3.json"
+        ],
+        "reason": "Preliminary baseline set superseded by pair1..3 for the tau-16384 A/B and not used by the fixed constructor sweep."
+      },
+      {
+        "pattern": "/workspace/.feat_bench/results/token_gate_*.json",
+        "reason": "Legacy aliases cover other branches and include ambiguous names; the four explicit token_{dev,chunk}_{stochastic,greedy} files are the selected repaired gates."
+      }
+    ]
+  },
+  "environment": {
+    "embedded_tau_and_stock_values": {
+      "gpu": "NVIDIA A100-SXM4-40GB",
+      "torch": "2.10.0+cu128",
+      "torch_cuda": "12.8",
+      "status": "embedded in every tau and stock JSON"
+    },
+    "token_and_smoke_environment": {
+      "status": "not embedded",
+      "reconstruction": "The audit/operator context places them in the same A100 repair session; this is not independently encoded by those payloads."
+    },
+    "post_run_observation": {
+      "status": "post_run_reconstruction",
+      "observed_date_utc": "2026-08-17",
+      "python": "3.12.13",
+      "flash_attn": "2.8.1",
+      "transformers": "5.14.1",
+      "tokenizers": "0.22.2",
+      "safetensors": "0.8.0",
+      "platform": "Linux-5.15.0-1079-nvidia-x86_64-with-glibc2.39",
+      "caveat": "These versions were observed after the runs and supplement, but do not replace, the values embedded in raw JSON."
+    }
+  },
+  "model": {
+    "tau_argument": {
+      "value": "/workspace/models/Qwen3-0.6B",
+      "status": "embedded caller-supplied --model path in every tau JSON"
+    },
+    "stock_and_token_context": {
+      "value": "/workspace/models/Qwen3-0.6B",
+      "status": "post_run_reconstruction; model path is absent from stock and token JSON"
+    },
+    "post_run_snapshot_observation": {
+      "status": "post_run_reconstruction; does not prove the run-time bytes",
+      "repository_id": "Qwen/Qwen3-0.6B",
+      "local_path": "/workspace/models/Qwen3-0.6B",
+      "huggingface_revision_from_local_metadata": "c1899de289a04d12100db370d81485cdf75e47ca",
+      "smoke_model_path": "/root/huggingface/Qwen3-0.6B",
+      "smoke_path_resolution": "/root/huggingface/Qwen3-0.6B was observed after the run as a symlink to /workspace/models/Qwen3-0.6B",
+      "files": [
+        {
+          "path": ".gitattributes",
+          "sha256": "34448b82c17d60fec9b65b1f093c115ddbaadc04beb1b0140b6bfed2e012a930",
+          "bytes": 1570
+        },
+        {
+          "path": "LICENSE",
+          "sha256": "832dd9e00a68dd83b3c3fb9f5588dad7dcf337a0db50f7d9483f310cd292e92e",
+          "bytes": 11343
+        },
+        {
+          "path": "README.md",
+          "sha256": "1ab64a26fcb3b461423b89a433a8c858f1bf8d4086f979cbb3ff878d47cf20e9",
+          "bytes": 13965
+        },
+        {
+          "path": "config.json",
+          "sha256": "660db3b73d788119c04535e48cf9be5f55bc3100841a718637ae695b442f27dd",
+          "bytes": 726
+        },
+        {
+          "path": "generation_config.json",
+          "sha256": "2325da0f15bb848e018c5ae071b7943332e9f871d6b60e2ed22ca97d4cb993d2",
+          "bytes": 239
+        },
+        {
+          "path": "merges.txt",
+          "sha256": "8831e4f1a044471340f7c0a83d7bd71306a5b867e95fd870f74d0c5308a904d5",
+          "bytes": 1671853
+        },
+        {
+          "path": "model.safetensors",
+          "sha256": "f47f71177f32bcd101b7573ec9171e6a57f4f4d31148d38e382306f42996874b",
+          "bytes": 1503300328
+        },
+        {
+          "path": "tokenizer.json",
+          "sha256": "aeb13307a71acd8fe81861d94ad54ab689df773318809eed3cbe794b4492dae4",
+          "bytes": 11422654
+        },
+        {
+          "path": "tokenizer_config.json",
+          "sha256": "d5d09f07b48c3086c508b30d1c9114bd1189145b74e982a265350c923acd8101",
+          "bytes": 9732
+        },
+        {
+          "path": "vocab.json",
+          "sha256": "ca10d7e9fb3ed18575dd1e277a2579c16d108e32f27439684afa0e10b1440910",
+          "bytes": 2776833
+        }
+      ]
+    }
+  },
+  "git": {
+    "short_labels_embedded_in_results": {
+      "baseline_tau": "1ef1ab5",
+      "fixed_tau_and_stock": "631a346",
+      "dev_stock": "edb997e"
+    },
+    "post_run_resolution": {
+      "status": "post_run_reconstruction from the local Git object database; short labels remain caller-supplied artifact fields",
+      "objects": {
+        "1ef1ab5": {
+          "full_sha": "1ef1ab5790ecde1841ca10b527f4091a3454234f",
+          "subject": "test: adapt sessions to mixed step accounting"
+        },
+        "631a346": {
+          "full_sha": "631a346768e5f8ad74af45a8179b38f7f66a2a36",
+          "subject": "test: strengthen ragged graph configuration matrix"
+        },
+        "edb997e": {
+          "full_sha": "edb997ec93e8d456f57f2225f816084e727cc28a",
+          "subject": "merge: streaming validation follow-up"
+        }
+      }
+    },
+    "token_gate_context": {
+      "dev": "edb997e (post-run inference from filenames/session; not embedded)",
+      "chunk": "631a346 (post-run inference from filenames/session; not embedded)"
+    }
+  },
+  "protocols": {
+    "tau_mixed_workload": {
+      "harness": "harnesses/chunked_prefill_fixed_bench.py",
+      "harness_sha256": "d4bc1c0035420bc2f6e49647f786efbe01a1a106fdc0066f2fffddbed2fc79e2",
+      "harness_status": "exact off-tree bytes",
+      "command_template_status": "post_run_reconstruction; command line was not embedded",
+      "command_template": "PYTHONPATH=. /venv/main/bin/python /workspace/.feat_bench/chunked_prefill_fixed_bench.py --model /workspace/models/Qwen3-0.6B --tau {tau} --seed {seed} --commit {caller_supplied_short_label} --output /workspace/.feat_bench/results/{filename}",
+      "worktree_context": {
+        "baseline": "/workspace/nano-vllm-chunk-baseline (post-run reconstruction)",
+        "fixed": "/workspace/nano-vllm-chunk (post-run reconstruction)"
+      },
+      "fresh_processes_per_set": 3,
+      "workload": "16 interactive 64-token prompts; 40 decode steps; then two 2048-token prompts; temperature 0.6; 256 completion tokens."
+    },
+    "stock_throughput": {
+      "harness": "harnesses/chunk_stock_bench.py",
+      "harness_sha256": "6463915098a513d1cfa70598f602ab18378d252be1f40c41d6a3accf6003de18",
+      "harness_status": "exact off-tree bytes",
+      "command_template_status": "post_run_reconstruction; command line was not embedded",
+      "command_template": "PYTHONPATH=. /venv/main/bin/python /workspace/.feat_bench/chunk_stock_bench.py --model /workspace/models/Qwen3-0.6B --seed {seed} --commit {caller_supplied_short_label} --output /workspace/.feat_bench/results/{filename}",
+      "worktree_context": {
+        "dev": "/workspace/nano-vllm-dev (post-run reconstruction)",
+        "chunk": "/workspace/nano-vllm-chunk (post-run reconstruction)"
+      },
+      "ordering": "three alternating dev/chunk fresh-process runs",
+      "ordering_status": "post-run reconstruction from source mtimes; not embedded"
+    },
+    "token_gate": {
+      "harness_status": "No authoritative token-gate generator was preserved under the scoped off-tree evidence root; no exact command is claimed.",
+      "payload_integrity": "Each JSON embeds SHA-256 of the canonical compact token matrix; the bundle validator recomputes it."
+    },
+    "tau128_post_repair_smoke": {
+      "result": "smoke/tau128_post_repair.json",
+      "run_class": "single-process smoke; not multi-process performance evidence",
+      "operator_report_status": "post-run operator report; result JSON embeds token arrays only",
+      "reported_command": "PYTHONPATH=. /venv/main/bin/python benchmarks/pr6/gate_generate_tau.py 128 /tmp/pr6_tau128_repaired.json",
+      "reported_elapsed_seconds": 15.54,
+      "reported_branch_context": "fix/chunked-prefill after 4c3e1d2",
+      "reported_context_status": "operator report; not embedded in result JSON",
+      "harness": "../gate_generate_tau.py",
+      "harness_sha256_at_4c3e1d2": "a7509b53fcf2ed5b76e5ec5d72726c2b70518e48962c9f8e1e9d99540b404b97",
+      "outputs": 4,
+      "tokens_per_output": 48,
+      "result_sha256": "34f5638cafba25e30bbbc56a4bea7e939794660437b3f4234e3cdcd7ec166827"
+    }
+  },
+  "sets": {
+    "tau_adjudication": {
+      "128": {
+        "baseline": [
+          "tau/chunk_base_tau128_seed1.json",
+          "tau/chunk_base_tau128_seed2.json",
+          "tau/chunk_base_tau128_seed3.json"
+        ],
+        "fixed": [
+          "tau/chunk_fix_tau128_seed1b.json",
+          "tau/chunk_fix_tau128_seed2b.json",
+          "tau/chunk_fix_tau128_seed3b.json"
+        ],
+        "ordering": "interleaved paired rerun",
+        "ordering_provenance": "post-run reconstruction from source filenames and filesystem mtimes; not embedded in JSON",
+        "summary": {
+          "throughput_tokens_per_s": {
+            "baseline_median": 3064.949883181904,
+            "fixed_median": 3083.8239915295712,
+            "delta_percent": 0.6158047950876266
+          },
+          "interactive_ttft_p50_ms": {
+            "baseline_median": 20.314907655119896,
+            "fixed_median": 20.376557484269142,
+            "delta_percent": 0.30347088057625093
+          },
+          "interactive_max_itl_p50_ms": {
+            "baseline_median": 6.463140249252319,
+            "fixed_median": 5.547503009438515,
+            "delta_percent": -14.167064375861704
+          },
+          "long_ttft_p50_ms": {
+            "baseline_median": 150.36294423043728,
+            "fixed_median": 137.0152747258544,
+            "delta_percent": -8.876967375769818
+          }
+        }
+      },
+      "1024": {
+        "baseline": [
+          "tau/chunk_base_tau1024_seed1.json",
+          "tau/chunk_base_tau1024_seed2.json",
+          "tau/chunk_base_tau1024_seed3.json"
+        ],
+        "fixed": [
+          "tau/chunk_fix_tau1024_seed1.json",
+          "tau/chunk_fix_tau1024_seed2.json",
+          "tau/chunk_fix_tau1024_seed3.json"
+        ],
+        "ordering": "same-host sequential branch sets",
+        "ordering_provenance": "post-run reconstruction from source filesystem mtimes; not embedded in JSON",
+        "summary": {
+          "throughput_tokens_per_s": {
+            "baseline_median": 2902.2735078251208,
+            "fixed_median": 2900.258854688117,
+            "delta_percent": -0.06941637759404484
+          },
+          "interactive_ttft_p50_ms": {
+            "baseline_median": 11.507458053529263,
+            "fixed_median": 11.53124962002039,
+            "delta_percent": 0.20674910462810114
+          },
+          "interactive_max_itl_p50_ms": {
+            "baseline_median": 15.357181429862976,
+            "fixed_median": 15.455767512321472,
+            "delta_percent": 0.6419542733719918
+          },
+          "long_ttft_p50_ms": {
+            "baseline_median": 53.01123298704624,
+            "fixed_median": 53.86029090732336,
+            "delta_percent": 1.6016566158432832
+          }
+        }
+      },
+      "16384": {
+        "baseline": [
+          "tau/chunk_base_tau16384_pair1.json",
+          "tau/chunk_base_tau16384_pair2.json",
+          "tau/chunk_base_tau16384_pair3.json"
+        ],
+        "fixed": [
+          "tau/chunk_fix_tau16384_pair1.json",
+          "tau/chunk_fix_tau16384_pair2.json",
+          "tau/chunk_fix_tau16384_pair3.json"
+        ],
+        "ordering": "interleaved pairs",
+        "ordering_provenance": "post-run reconstruction from source filenames and filesystem mtimes; not embedded in JSON",
+        "summary": {
+          "throughput_tokens_per_s": {
+            "baseline_median": 3304.7299212257167,
+            "fixed_median": 3321.601621784019,
+            "delta_percent": 0.5105319030743738
+          },
+          "interactive_ttft_p50_ms": {
+            "baseline_median": 9.262449108064175,
+            "fixed_median": 9.628505446016788,
+            "delta_percent": 3.95204695520448
+          },
+          "interactive_max_itl_p50_ms": {
+            "baseline_median": 34.82509218156338,
+            "fixed_median": 35.33019311726093,
+            "delta_percent": 1.450393678971973
+          },
+          "long_ttft_p50_ms": {
+            "baseline_median": 34.78812798857689,
+            "fixed_median": 35.2924270555377,
+            "delta_percent": 1.44962979073322
+          }
+        }
+      }
+    },
+    "constructor_sweep": {
+      "artifacts": {
+        "128": [
+          "tau/chunk_fix_tau128_seed1.json",
+          "tau/chunk_fix_tau128_seed2.json",
+          "tau/chunk_fix_tau128_seed3.json"
+        ],
+        "256": [
+          "tau/chunk_fix_tau256_seed1.json",
+          "tau/chunk_fix_tau256_seed2.json",
+          "tau/chunk_fix_tau256_seed3.json"
+        ],
+        "512": [
+          "tau/chunk_fix_tau512_seed1.json",
+          "tau/chunk_fix_tau512_seed2.json",
+          "tau/chunk_fix_tau512_seed3.json"
+        ],
+        "1024": [
+          "tau/chunk_fix_tau1024_seed1.json",
+          "tau/chunk_fix_tau1024_seed2.json",
+          "tau/chunk_fix_tau1024_seed3.json"
+        ],
+        "2048": [
+          "tau/chunk_fix_tau2048_seed1.json",
+          "tau/chunk_fix_tau2048_seed2.json",
+          "tau/chunk_fix_tau2048_seed3.json"
+        ],
+        "16384": [
+          "tau/chunk_fix_tau16384_seed1.json",
+          "tau/chunk_fix_tau16384_seed2.json",
+          "tau/chunk_fix_tau16384_seed3.json"
+        ]
+      },
+      "summary_medians": {
+        "128": {
+          "throughput_tokens_per_s": 3098.7818715305716,
+          "interactive_ttft_p50_ms": 20.1759310439229,
+          "interactive_max_itl_p50_ms": 7.000569254159927,
+          "long_ttft_p50_ms": 133.27691424638033
+        },
+        "256": {
+          "throughput_tokens_per_s": 3185.85818177834,
+          "interactive_ttft_p50_ms": 14.847883023321629,
+          "interactive_max_itl_p50_ms": 7.099272683262825,
+          "long_ttft_p50_ms": 72.70640414208174
+        },
+        "512": {
+          "throughput_tokens_per_s": 3165.7780281489836,
+          "interactive_ttft_p50_ms": 10.566283017396927,
+          "interactive_max_itl_p50_ms": 9.058022871613503,
+          "long_ttft_p50_ms": 58.21196082979441
+        },
+        "1024": {
+          "throughput_tokens_per_s": 2900.258854688117,
+          "interactive_ttft_p50_ms": 11.53124962002039,
+          "interactive_max_itl_p50_ms": 15.455767512321472,
+          "long_ttft_p50_ms": 53.86029090732336
+        },
+        "2048": {
+          "throughput_tokens_per_s": 2953.7024668048457,
+          "interactive_ttft_p50_ms": 11.572291143238544,
+          "interactive_max_itl_p50_ms": 19.516924396157265,
+          "long_ttft_p50_ms": 41.79055709391832
+        },
+        "16384": {
+          "throughput_tokens_per_s": 3274.962419954285,
+          "interactive_ttft_p50_ms": 11.10099721699953,
+          "interactive_max_itl_p50_ms": 36.740658804774284,
+          "long_ttft_p50_ms": 36.705583333969116
+        }
+      },
+      "note": "The initial tau-128 and tau-16384 fixed sets are retained here only because they support this sweep. Their later paired reruns are the A/B artifacts."
+    },
+    "stock": {
+      "artifacts": {
+        "dev": [
+          "stock/stock_dev_seed1.json",
+          "stock/stock_dev_seed2.json",
+          "stock/stock_dev_seed3.json"
+        ],
+        "chunk": [
+          "stock/stock_chunk_seed1.json",
+          "stock/stock_chunk_seed2.json",
+          "stock/stock_chunk_seed3.json"
+        ]
+      },
+      "summary": {
+        "dev_median_tokens_per_s": 8779.67249425459,
+        "chunk_median_tokens_per_s": 8761.926558131894,
+        "delta_ratio_of_medians_percent": -0.2021252630358239,
+        "paired_deltas_percent": [
+          -0.37448164412581253,
+          -0.02019659470912094,
+          -0.05298730532190543
+        ],
+        "median_paired_delta_percent": -0.05298730532190543
+      }
+    },
+    "tokens": {
+      "artifacts": {
+        "dev_stochastic": "tokens/token_dev_stochastic.json",
+        "chunk_stochastic": "tokens/token_chunk_stochastic.json",
+        "dev_greedy": "tokens/token_dev_greedy.json",
+        "chunk_greedy": "tokens/token_chunk_greedy.json"
+      },
+      "summary": {
+        "stochastic": {
+          "dev_payload_sha256": "5919fcde302485f1451f6be5c23a4ce109a31a8da099e5be50a5fd962d88fb4e",
+          "chunk_payload_sha256": "b8526e490891b21111320c240cc3847c2cb7554d5cfeb133d2c1238afb8312a1",
+          "divergent_sequences": [
+            {
+              "sequence_index": 4,
+              "first_completion_index_zero_based": 15,
+              "differing_positions": [
+                15,
+                17,
+                18,
+                23,
+                28,
+                29,
+                30
+              ],
+              "differing_position_count": 7
+            }
+          ]
+        },
+        "greedy": {
+          "dev_payload_sha256": "1e10d050c87fd8b7fc49932a31c2cc28cb959737b7ebe73569315c7ba3b73d51",
+          "chunk_payload_sha256": "6d9cd726cee967d843af37faa7ac07f701e7c1716c7d9c615968f19be358ca0b",
+          "divergent_sequences": [
+            {
+              "sequence_index": 3,
+              "first_completion_index_zero_based": 28,
+              "differing_positions": [
+                28,
+                29,
+                30,
+                31
+              ],
+              "differing_position_count": 4
+            }
+          ]
+        }
+      }
+    },
+    "supplemental_smoke": {
+      "artifact": "smoke/tau128_post_repair.json",
+      "summary": {
+        "outputs": 4,
+        "tokens_per_output": 48,
+        "sha256": "34f5638cafba25e30bbbc56a4bea7e939794660437b3f4234e3cdcd7ec166827",
+        "classification": "single-process smoke only"
+      }
+    }
+  },
+  "artifacts": [
+    {
+      "path": "harnesses/chunk_stock_bench.py",
+      "source_path": "/workspace/.feat_bench/chunk_stock_bench.py",
+      "sha256": "6463915098a513d1cfa70598f602ab18378d252be1f40c41d6a3accf6003de18",
+      "bytes": 1872,
+      "roles": [
+        "external_harness"
+      ],
+      "source_mtime_utc": "2026-08-17T05:53:00.160821+00:00",
+      "source_mtime_status": "post-run filesystem observation; not an embedded run timestamp"
+    },
+    {
+      "path": "harnesses/chunked_prefill_fixed_bench.py",
+      "source_path": "/workspace/.feat_bench/chunked_prefill_fixed_bench.py",
+      "sha256": "d4bc1c0035420bc2f6e49647f786efbe01a1a106fdc0066f2fffddbed2fc79e2",
+      "bytes": 3736,
+      "roles": [
+        "external_harness"
+      ],
+      "source_mtime_utc": "2026-08-17T05:53:00.156821+00:00",
+      "source_mtime_status": "post-run filesystem observation; not an embedded run timestamp"
+    },
+    {
+      "path": "smoke/tau128_post_repair.json",
+      "source_path": "/tmp/pr6_tau128_repaired.json",
+      "sha256": "34f5638cafba25e30bbbc56a4bea7e939794660437b3f4234e3cdcd7ec166827",
+      "bytes": 1079,
+      "roles": [
+        "supplemental_smoke"
+      ],
+      "source_mtime_utc": "2026-08-17T10:50:46.095419+00:00",
+      "source_mtime_status": "post-run filesystem observation; not an embedded run timestamp",
+      "embedded_fields": [
+        "token_id_arrays_only"
+      ]
+    },
+    {
+      "path": "stock/stock_chunk_seed1.json",
+      "source_path": "/workspace/.feat_bench/results/stock_chunk_seed1.json",
+      "sha256": "2d84f7e8be657d95cabaf8430fa7354a3458951bfa2cd1efc85f426b85272525",
+      "bytes": 233,
+      "roles": [
+        "stock_result"
+      ],
+      "source_mtime_utc": "2026-08-17T06:07:48.447670+00:00",
+      "source_mtime_status": "post-run filesystem observation; not an embedded run timestamp",
+      "embedded_fields": [
+        "commit",
+        "torch",
+        "cuda",
+        "gpu",
+        "seed",
+        "measurements"
+      ]
+    },
+    {
+      "path": "stock/stock_chunk_seed2.json",
+      "source_path": "/workspace/.feat_bench/results/stock_chunk_seed2.json",
+      "sha256": "0a5fddfc158f30c4c6f7b596fa0d827ad321783aadd2e17484fd28df1390e9e2",
+      "bytes": 233,
+      "roles": [
+        "stock_result"
+      ],
+      "source_mtime_utc": "2026-08-17T06:08:59.320849+00:00",
+      "source_mtime_status": "post-run filesystem observation; not an embedded run timestamp",
+      "embedded_fields": [
+        "commit",
+        "torch",
+        "cuda",
+        "gpu",
+        "seed",
+        "measurements"
+      ]
+    },
+    {
+      "path": "stock/stock_chunk_seed3.json",
+      "source_path": "/workspace/.feat_bench/results/stock_chunk_seed3.json",
+      "sha256": "9a797b076b2804a3e65f1e91d848bb0fe7e1b00dc25c310196fa970deb4a4b81",
+      "bytes": 234,
+      "roles": [
+        "stock_result"
+      ],
+      "source_mtime_utc": "2026-08-17T06:10:09.770022+00:00",
+      "source_mtime_status": "post-run filesystem observation; not an embedded run timestamp",
+      "embedded_fields": [
+        "commit",
+        "torch",
+        "cuda",
+        "gpu",
+        "seed",
+        "measurements"
+      ]
+    },
+    {
+      "path": "stock/stock_dev_seed1.json",
+      "source_path": "/workspace/.feat_bench/results/stock_dev_seed1.json",
+      "sha256": "d83849d5dfefaa854de92cf057dcb31e0472b96eb77dcebb4d33454ea15ee63f",
+      "bytes": 233,
+      "roles": [
+        "stock_result"
+      ],
+      "source_mtime_utc": "2026-08-17T06:06:58.910847+00:00",
+      "source_mtime_status": "post-run filesystem observation; not an embedded run timestamp",
+      "embedded_fields": [
+        "commit",
+        "torch",
+        "cuda",
+        "gpu",
+        "seed",
+        "measurements"
+      ]
+    },
+    {
+      "path": "stock/stock_dev_seed2.json",
+      "source_path": "/workspace/.feat_bench/results/stock_dev_seed2.json",
+      "sha256": "ceccbbcb74feec42ad989e165ae18ebcc5591dc74942b6e94aff91df78552a20",
+      "bytes": 233,
+      "roles": [
+        "stock_result"
+      ],
+      "source_mtime_utc": "2026-08-17T06:08:23.708257+00:00",
+      "source_mtime_status": "post-run filesystem observation; not an embedded run timestamp",
+      "embedded_fields": [
+        "commit",
+        "torch",
+        "cuda",
+        "gpu",
+        "seed",
+        "measurements"
+      ]
+    },
+    {
+      "path": "stock/stock_dev_seed3.json",
+      "source_path": "/workspace/.feat_bench/results/stock_dev_seed3.json",
+      "sha256": "249566ee7791c4d56692d2d5f9fccd1af86894b75828e4e0af62534451e9a295",
+      "bytes": 233,
+      "roles": [
+        "stock_result"
+      ],
+      "source_mtime_utc": "2026-08-17T06:09:34.469434+00:00",
+      "source_mtime_status": "post-run filesystem observation; not an embedded run timestamp",
+      "embedded_fields": [
+        "commit",
+        "torch",
+        "cuda",
+        "gpu",
+        "seed",
+        "measurements"
+      ]
+    },
+    {
+      "path": "tau/chunk_base_tau1024_seed1.json",
+      "source_path": "/workspace/.feat_bench/results/chunk_base_tau1024_seed1.json",
+      "sha256": "6f673f9f41bea1deacea49292071d5d28d73c1ca1b0b1ae6dd574d36c1a8ac70",
+      "bytes": 867,
+      "roles": [
+        "tau_result",
+        "tau_adjudication"
+      ],
+      "source_mtime_utc": "2026-08-17T06:02:15.730161+00:00",
+      "source_mtime_status": "post-run filesystem observation; not an embedded run timestamp",
+      "embedded_fields": [
+        "commit",
+        "torch",
+        "cuda",
+        "gpu",
+        "model",
+        "tau",
+        "max_num_seqs",
+        "seed",
+        "measurements"
+      ]
+    },
+    {
+      "path": "tau/chunk_base_tau1024_seed2.json",
+      "source_path": "/workspace/.feat_bench/results/chunk_base_tau1024_seed2.json",
+      "sha256": "9b87a95955d8364fd8e273360f9e5c754dcfd203ad59eeb286eab911a45a5ca7",
+      "bytes": 865,
+      "roles": [
+        "tau_result",
+        "tau_adjudication"
+      ],
+      "source_mtime_utc": "2026-08-17T06:02:36.050496+00:00",
+      "source_mtime_status": "post-run filesystem observation; not an embedded run timestamp",
+      "embedded_fields": [
+        "commit",
+        "torch",
+        "cuda",
+        "gpu",
+        "model",
+        "tau",
+        "max_num_seqs",
+        "seed",
+        "measurements"
+      ]
+    },
+    {
+      "path": "tau/chunk_base_tau1024_seed3.json",
+      "source_path": "/workspace/.feat_bench/results/chunk_base_tau1024_seed3.json",
+      "sha256": "924907e56c52bfb6ce6189210e6baa817c0ea6fd3b13534a6200be2c9cb06acc",
+      "bytes": 866,
+      "roles": [
+        "tau_result",
+        "tau_adjudication"
+      ],
+      "source_mtime_utc": "2026-08-17T06:02:58.450866+00:00",
+      "source_mtime_status": "post-run filesystem observation; not an embedded run timestamp",
+      "embedded_fields": [
+        "commit",
+        "torch",
+        "cuda",
+        "gpu",
+        "model",
+        "tau",
+        "max_num_seqs",
+        "seed",
+        "measurements"
+      ]
+    },
+    {
+      "path": "tau/chunk_base_tau128_seed1.json",
+      "source_path": "/workspace/.feat_bench/results/chunk_base_tau128_seed1.json",
+      "sha256": "3ec5bff456da37d64164d6289bbbb6220f0db056578a99a2768b51e47a96fde2",
+      "bytes": 862,
+      "roles": [
+        "tau_result",
+        "tau_adjudication"
+      ],
+      "source_mtime_utc": "2026-08-17T05:56:47.884652+00:00",
+      "source_mtime_status": "post-run filesystem observation; not an embedded run timestamp",
+      "embedded_fields": [
+        "commit",
+        "torch",
+        "cuda",
+        "gpu",
+        "model",
+        "tau",
+        "max_num_seqs",
+        "seed",
+        "measurements"
+      ]
+    },
+    {
+      "path": "tau/chunk_base_tau128_seed2.json",
+      "source_path": "/workspace/.feat_bench/results/chunk_base_tau128_seed2.json",
+      "sha256": "41438e7e14ab977434f7359c68dfbf489b1bad2e04463dd7228b8e88ea7603da",
+      "bytes": 864,
+      "roles": [
+        "tau_result",
+        "tau_adjudication"
+      ],
+      "source_mtime_utc": "2026-08-17T05:57:38.673506+00:00",
+      "source_mtime_status": "post-run filesystem observation; not an embedded run timestamp",
+      "embedded_fields": [
+        "commit",
+        "torch",
+        "cuda",
+        "gpu",
+        "model",
+        "tau",
+        "max_num_seqs",
+        "seed",
+        "measurements"
+      ]
+    },
+    {
+      "path": "tau/chunk_base_tau128_seed3.json",
+      "source_path": "/workspace/.feat_bench/results/chunk_base_tau128_seed3.json",
+      "sha256": "a5d92356fa52bccfddecaac885b727e19141333cbeae431477613e4377fcca14",
+      "bytes": 861,
+      "roles": [
+        "tau_result",
+        "tau_adjudication"
+      ],
+      "source_mtime_utc": "2026-08-17T05:58:16.698146+00:00",
+      "source_mtime_status": "post-run filesystem observation; not an embedded run timestamp",
+      "embedded_fields": [
+        "commit",
+        "torch",
+        "cuda",
+        "gpu",
+        "model",
+        "tau",
+        "max_num_seqs",
+        "seed",
+        "measurements"
+      ]
+    },
+    {
+      "path": "tau/chunk_base_tau16384_pair1.json",
+      "source_path": "/workspace/.feat_bench/results/chunk_base_tau16384_pair1.json",
+      "sha256": "eb1e127557050c788bddda11483af4f057f56844410a1bf2188c278f45bbf0ce",
+      "bytes": 863,
+      "roles": [
+        "tau_result",
+        "tau_adjudication"
+      ],
+      "source_mtime_utc": "2026-08-17T06:16:27.432326+00:00",
+      "source_mtime_status": "post-run filesystem observation; not an embedded run timestamp",
+      "embedded_fields": [
+        "commit",
+        "torch",
+        "cuda",
+        "gpu",
+        "model",
+        "tau",
+        "max_num_seqs",
+        "seed",
+        "measurements"
+      ]
+    },
+    {
+      "path": "tau/chunk_base_tau16384_pair2.json",
+      "source_path": "/workspace/.feat_bench/results/chunk_base_tau16384_pair2.json",
+      "sha256": "0c5837311842d9c709cb95879f05919a5a6c7398a2d8e247a9497cd063ea04d5",
+      "bytes": 859,
+      "roles": [
+        "tau_result",
+        "tau_adjudication"
+      ],
+      "source_mtime_utc": "2026-08-17T06:17:22.601249+00:00",
+      "source_mtime_status": "post-run filesystem observation; not an embedded run timestamp",
+      "embedded_fields": [
+        "commit",
+        "torch",
+        "cuda",
+        "gpu",
+        "model",
+        "tau",
+        "max_num_seqs",
+        "seed",
+        "measurements"
+      ]
+    },
+    {
+      "path": "tau/chunk_base_tau16384_pair3.json",
+      "source_path": "/workspace/.feat_bench/results/chunk_base_tau16384_pair3.json",
+      "sha256": "f376cc625f9f70c5a02f3d84a8d86d73bb2c1bafed509a46baa6310c7e63c5a3",
+      "bytes": 865,
+      "roles": [
+        "tau_result",
+        "tau_adjudication"
+      ],
+      "source_mtime_utc": "2026-08-17T06:18:02.353914+00:00",
+      "source_mtime_status": "post-run filesystem observation; not an embedded run timestamp",
+      "embedded_fields": [
+        "commit",
+        "torch",
+        "cuda",
+        "gpu",
+        "model",
+        "tau",
+        "max_num_seqs",
+        "seed",
+        "measurements"
+      ]
+    },
+    {
+      "path": "tau/chunk_fix_tau1024_seed1.json",
+      "source_path": "/workspace/.feat_bench/results/chunk_fix_tau1024_seed1.json",
+      "sha256": "68c880e849ecd3c4fe2dd2f8c853134dd5c24e9603374a3895f347359b7fb0b0",
+      "bytes": 862,
+      "roles": [
+        "tau_result",
+        "tau_adjudication",
+        "constructor_sweep"
+      ],
+      "source_mtime_utc": "2026-08-17T06:00:43.484614+00:00",
+      "source_mtime_status": "post-run filesystem observation; not an embedded run timestamp",
+      "embedded_fields": [
+        "commit",
+        "torch",
+        "cuda",
+        "gpu",
+        "model",
+        "tau",
+        "max_num_seqs",
+        "seed",
+        "measurements"
+      ]
+    },
+    {
+      "path": "tau/chunk_fix_tau1024_seed2.json",
+      "source_path": "/workspace/.feat_bench/results/chunk_fix_tau1024_seed2.json",
+      "sha256": "de9a7ef06d6f34694edca46256cff66b6bb11daf48ae6f3676a41dab2beec859",
+      "bytes": 865,
+      "roles": [
+        "tau_result",
+        "tau_adjudication",
+        "constructor_sweep"
+      ],
+      "source_mtime_utc": "2026-08-17T06:01:04.284964+00:00",
+      "source_mtime_status": "post-run filesystem observation; not an embedded run timestamp",
+      "embedded_fields": [
+        "commit",
+        "torch",
+        "cuda",
+        "gpu",
+        "model",
+        "tau",
+        "max_num_seqs",
+        "seed",
+        "measurements"
+      ]
+    },
+    {
+      "path": "tau/chunk_fix_tau1024_seed3.json",
+      "source_path": "/workspace/.feat_bench/results/chunk_fix_tau1024_seed3.json",
+      "sha256": "5485ee4e4cce96a7f8194199f3a7762a3952ca27fa76922a70744a24c16ea611",
+      "bytes": 867,
+      "roles": [
+        "tau_result",
+        "tau_adjudication",
+        "constructor_sweep"
+      ],
+      "source_mtime_utc": "2026-08-17T06:01:25.697324+00:00",
+      "source_mtime_status": "post-run filesystem observation; not an embedded run timestamp",
+      "embedded_fields": [
+        "commit",
+        "torch",
+        "cuda",
+        "gpu",
+        "model",
+        "tau",
+        "max_num_seqs",
+        "seed",
+        "measurements"
+      ]
+    },
+    {
+      "path": "tau/chunk_fix_tau128_seed1.json",
+      "source_path": "/workspace/.feat_bench/results/chunk_fix_tau128_seed1.json",
+      "sha256": "525def30a26ed072092c7fa1f28e20588a451aae9758d1f554dd7d1a4457bd0f",
+      "bytes": 862,
+      "roles": [
+        "tau_result",
+        "constructor_sweep"
+      ],
+      "source_mtime_utc": "2026-08-17T05:53:37.657452+00:00",
+      "source_mtime_status": "post-run filesystem observation; not an embedded run timestamp",
+      "embedded_fields": [
+        "commit",
+        "torch",
+        "cuda",
+        "gpu",
+        "model",
+        "tau",
+        "max_num_seqs",
+        "seed",
+        "measurements"
+      ]
+    },
+    {
+      "path": "tau/chunk_fix_tau128_seed1b.json",
+      "source_path": "/workspace/.feat_bench/results/chunk_fix_tau128_seed1b.json",
+      "sha256": "a9f24d67526f5bf8c84b008b9f0adc4f50882d5651b133758ec705702ff0ac45",
+      "bytes": 862,
+      "roles": [
+        "tau_result",
+        "tau_adjudication"
+      ],
+      "source_mtime_utc": "2026-08-17T05:57:19.909191+00:00",
+      "source_mtime_status": "post-run filesystem observation; not an embedded run timestamp",
+      "embedded_fields": [
+        "commit",
+        "torch",
+        "cuda",
+        "gpu",
+        "model",
+        "tau",
+        "max_num_seqs",
+        "seed",
+        "measurements"
+      ]
+    },
+    {
+      "path": "tau/chunk_fix_tau128_seed2.json",
+      "source_path": "/workspace/.feat_bench/results/chunk_fix_tau128_seed2.json",
+      "sha256": "507ec47538f8c0c8e34906cc8917464dda0a9686ac076d6030746b122f61f75f",
+      "bytes": 863,
+      "roles": [
+        "tau_result",
+        "constructor_sweep"
+      ],
+      "source_mtime_utc": "2026-08-17T05:54:14.646075+00:00",
+      "source_mtime_status": "post-run filesystem observation; not an embedded run timestamp",
+      "embedded_fields": [
+        "commit",
+        "torch",
+        "cuda",
+        "gpu",
+        "model",
+        "tau",
+        "max_num_seqs",
+        "seed",
+        "measurements"
+      ]
+    },
+    {
+      "path": "tau/chunk_fix_tau128_seed2b.json",
+      "source_path": "/workspace/.feat_bench/results/chunk_fix_tau128_seed2b.json",
+      "sha256": "98532922522c82bec88dcd5677c824fc4d8a8343b5839a1e71646919d36d147e",
+      "bytes": 861,
+      "roles": [
+        "tau_result",
+        "tau_adjudication"
+      ],
+      "source_mtime_utc": "2026-08-17T05:57:57.621825+00:00",
+      "source_mtime_status": "post-run filesystem observation; not an embedded run timestamp",
+      "embedded_fields": [
+        "commit",
+        "torch",
+        "cuda",
+        "gpu",
+        "model",
+        "tau",
+        "max_num_seqs",
+        "seed",
+        "measurements"
+      ]
+    },
+    {
+      "path": "tau/chunk_fix_tau128_seed3.json",
+      "source_path": "/workspace/.feat_bench/results/chunk_fix_tau128_seed3.json",
+      "sha256": "fdf2c2bbf784454111a818a44323a56ee3559df4d460bf6a82c4b9c7d010260f",
+      "bytes": 862,
+      "roles": [
+        "tau_result",
+        "constructor_sweep"
+      ],
+      "source_mtime_utc": "2026-08-17T05:54:33.634394+00:00",
+      "source_mtime_status": "post-run filesystem observation; not an embedded run timestamp",
+      "embedded_fields": [
+        "commit",
+        "torch",
+        "cuda",
+        "gpu",
+        "model",
+        "tau",
+        "max_num_seqs",
+        "seed",
+        "measurements"
+      ]
+    },
+    {
+      "path": "tau/chunk_fix_tau128_seed3b.json",
+      "source_path": "/workspace/.feat_bench/results/chunk_fix_tau128_seed3b.json",
+      "sha256": "59c4b07835caef19d16e4bdb7225e7400030aef2aecb6ec417a302a933e8adaf",
+      "bytes": 867,
+      "roles": [
+        "tau_result",
+        "tau_adjudication"
+      ],
+      "source_mtime_utc": "2026-08-17T05:58:37.594497+00:00",
+      "source_mtime_status": "post-run filesystem observation; not an embedded run timestamp",
+      "embedded_fields": [
+        "commit",
+        "torch",
+        "cuda",
+        "gpu",
+        "model",
+        "tau",
+        "max_num_seqs",
+        "seed",
+        "measurements"
+      ]
+    },
+    {
+      "path": "tau/chunk_fix_tau16384_pair1.json",
+      "source_path": "/workspace/.feat_bench/results/chunk_fix_tau16384_pair1.json",
+      "sha256": "d0bcfd228910a28bc16be39c8164cca3bb59354b3425cf2f3a2e2922540b1c86",
+      "bytes": 865,
+      "roles": [
+        "tau_result",
+        "tau_adjudication"
+      ],
+      "source_mtime_utc": "2026-08-17T06:17:02.376911+00:00",
+      "source_mtime_status": "post-run filesystem observation; not an embedded run timestamp",
+      "embedded_fields": [
+        "commit",
+        "torch",
+        "cuda",
+        "gpu",
+        "model",
+        "tau",
+        "max_num_seqs",
+        "seed",
+        "measurements"
+      ]
+    },
+    {
+      "path": "tau/chunk_fix_tau16384_pair2.json",
+      "source_path": "/workspace/.feat_bench/results/chunk_fix_tau16384_pair2.json",
+      "sha256": "cd08789c3e9f4246d9e8b0d40e50c8b74388645454121561e4593550e3f3b3ea",
+      "bytes": 864,
+      "roles": [
+        "tau_result",
+        "tau_adjudication"
+      ],
+      "source_mtime_utc": "2026-08-17T06:17:42.593583+00:00",
+      "source_mtime_status": "post-run filesystem observation; not an embedded run timestamp",
+      "embedded_fields": [
+        "commit",
+        "torch",
+        "cuda",
+        "gpu",
+        "model",
+        "tau",
+        "max_num_seqs",
+        "seed",
+        "measurements"
+      ]
+    },
+    {
+      "path": "tau/chunk_fix_tau16384_pair3.json",
+      "source_path": "/workspace/.feat_bench/results/chunk_fix_tau16384_pair3.json",
+      "sha256": "956c3289bea7a77bc9e1e80e3493d40ff6ad057836feb01883ed7bc094b97ed8",
+      "bytes": 859,
+      "roles": [
+        "tau_result",
+        "tau_adjudication"
+      ],
+      "source_mtime_utc": "2026-08-17T06:18:22.994259+00:00",
+      "source_mtime_status": "post-run filesystem observation; not an embedded run timestamp",
+      "embedded_fields": [
+        "commit",
+        "torch",
+        "cuda",
+        "gpu",
+        "model",
+        "tau",
+        "max_num_seqs",
+        "seed",
+        "measurements"
+      ]
+    },
+    {
+      "path": "tau/chunk_fix_tau16384_seed1.json",
+      "source_path": "/workspace/.feat_bench/results/chunk_fix_tau16384_seed1.json",
+      "sha256": "ebfd9fe5b2f5ee6c232bcf36cb537fe70c7e5cd792b792404a211d2389eb4c2f",
+      "bytes": 862,
+      "roles": [
+        "tau_result",
+        "constructor_sweep"
+      ],
+      "source_mtime_utc": "2026-08-17T06:05:02.740921+00:00",
+      "source_mtime_status": "post-run filesystem observation; not an embedded run timestamp",
+      "embedded_fields": [
+        "commit",
+        "torch",
+        "cuda",
+        "gpu",
+        "model",
+        "tau",
+        "max_num_seqs",
+        "seed",
+        "measurements"
+      ]
+    },
+    {
+      "path": "tau/chunk_fix_tau16384_seed2.json",
+      "source_path": "/workspace/.feat_bench/results/chunk_fix_tau16384_seed2.json",
+      "sha256": "11ca76c4a36de38c4af3c1a4b3bdc741d974f25e571d6b39d33fd0cf740ed363",
+      "bytes": 867,
+      "roles": [
+        "tau_result",
+        "constructor_sweep"
+      ],
+      "source_mtime_utc": "2026-08-17T06:05:22.233244+00:00",
+      "source_mtime_status": "post-run filesystem observation; not an embedded run timestamp",
+      "embedded_fields": [
+        "commit",
+        "torch",
+        "cuda",
+        "gpu",
+        "model",
+        "tau",
+        "max_num_seqs",
+        "seed",
+        "measurements"
+      ]
+    },
+    {
+      "path": "tau/chunk_fix_tau16384_seed3.json",
+      "source_path": "/workspace/.feat_bench/results/chunk_fix_tau16384_seed3.json",
+      "sha256": "4778a0049c38d2943b3012eabb373b79fea5138de237aec23b096fcdf0b27645",
+      "bytes": 864,
+      "roles": [
+        "tau_result",
+        "constructor_sweep"
+      ],
+      "source_mtime_utc": "2026-08-17T06:05:43.705600+00:00",
+      "source_mtime_status": "post-run filesystem observation; not an embedded run timestamp",
+      "embedded_fields": [
+        "commit",
+        "torch",
+        "cuda",
+        "gpu",
+        "model",
+        "tau",
+        "max_num_seqs",
+        "seed",
+        "measurements"
+      ]
+    },
+    {
+      "path": "tau/chunk_fix_tau2048_seed1.json",
+      "source_path": "/workspace/.feat_bench/results/chunk_fix_tau2048_seed1.json",
+      "sha256": "be0a88ad6fb6ddaf469d0da10eb5c690a853a739b2590eca241f22f0debb0cb6",
+      "bytes": 868,
+      "roles": [
+        "tau_result",
+        "constructor_sweep"
+      ],
+      "source_mtime_utc": "2026-08-17T06:03:44.695629+00:00",
+      "source_mtime_status": "post-run filesystem observation; not an embedded run timestamp",
+      "embedded_fields": [
+        "commit",
+        "torch",
+        "cuda",
+        "gpu",
+        "model",
+        "tau",
+        "max_num_seqs",
+        "seed",
+        "measurements"
+      ]
+    },
+    {
+      "path": "tau/chunk_fix_tau2048_seed2.json",
+      "source_path": "/workspace/.feat_bench/results/chunk_fix_tau2048_seed2.json",
+      "sha256": "5d17e38615ee20a05d8ee17f57e5c2d4da4ed85f18290d22e0082f0d97a4626b",
+      "bytes": 867,
+      "roles": [
+        "tau_result",
+        "constructor_sweep"
+      ],
+      "source_mtime_utc": "2026-08-17T06:04:06.203985+00:00",
+      "source_mtime_status": "post-run filesystem observation; not an embedded run timestamp",
+      "embedded_fields": [
+        "commit",
+        "torch",
+        "cuda",
+        "gpu",
+        "model",
+        "tau",
+        "max_num_seqs",
+        "seed",
+        "measurements"
+      ]
+    },
+    {
+      "path": "tau/chunk_fix_tau2048_seed3.json",
+      "source_path": "/workspace/.feat_bench/results/chunk_fix_tau2048_seed3.json",
+      "sha256": "d75dcad0f602bd32536bfbf55ee1457daaa0579ec473f35188088b944475f472",
+      "bytes": 867,
+      "roles": [
+        "tau_result",
+        "constructor_sweep"
+      ],
+      "source_mtime_utc": "2026-08-17T06:04:28.124348+00:00",
+      "source_mtime_status": "post-run filesystem observation; not an embedded run timestamp",
+      "embedded_fields": [
+        "commit",
+        "torch",
+        "cuda",
+        "gpu",
+        "model",
+        "tau",
+        "max_num_seqs",
+        "seed",
+        "measurements"
+      ]
+    },
+    {
+      "path": "tau/chunk_fix_tau256_seed1.json",
+      "source_path": "/workspace/.feat_bench/results/chunk_fix_tau256_seed1.json",
+      "sha256": "5e858b9023c5e3df40d315fb52b757f424e3933f151c7884719888a348d2f568",
+      "bytes": 857,
+      "roles": [
+        "tau_result",
+        "constructor_sweep"
+      ],
+      "source_mtime_utc": "2026-08-17T05:55:04.870919+00:00",
+      "source_mtime_status": "post-run filesystem observation; not an embedded run timestamp",
+      "embedded_fields": [
+        "commit",
+        "torch",
+        "cuda",
+        "gpu",
+        "model",
+        "tau",
+        "max_num_seqs",
+        "seed",
+        "measurements"
+      ]
+    },
+    {
+      "path": "tau/chunk_fix_tau256_seed2.json",
+      "source_path": "/workspace/.feat_bench/results/chunk_fix_tau256_seed2.json",
+      "sha256": "ff9a6b8e838fd9d429195b717e28a451f8baa9a1a4886fe26a4d4c963c920629",
+      "bytes": 863,
+      "roles": [
+        "tau_result",
+        "constructor_sweep"
+      ],
+      "source_mtime_utc": "2026-08-17T05:55:24.667252+00:00",
+      "source_mtime_status": "post-run filesystem observation; not an embedded run timestamp",
+      "embedded_fields": [
+        "commit",
+        "torch",
+        "cuda",
+        "gpu",
+        "model",
+        "tau",
+        "max_num_seqs",
+        "seed",
+        "measurements"
+      ]
+    },
+    {
+      "path": "tau/chunk_fix_tau256_seed3.json",
+      "source_path": "/workspace/.feat_bench/results/chunk_fix_tau256_seed3.json",
+      "sha256": "5b874563265cf64d323da1dbbbc23d049c68ae6a56ff19f993db4bb87d47b9b3",
+      "bytes": 863,
+      "roles": [
+        "tau_result",
+        "constructor_sweep"
+      ],
+      "source_mtime_utc": "2026-08-17T05:55:43.759573+00:00",
+      "source_mtime_status": "post-run filesystem observation; not an embedded run timestamp",
+      "embedded_fields": [
+        "commit",
+        "torch",
+        "cuda",
+        "gpu",
+        "model",
+        "tau",
+        "max_num_seqs",
+        "seed",
+        "measurements"
+      ]
+    },
+    {
+      "path": "tau/chunk_fix_tau512_seed1.json",
+      "source_path": "/workspace/.feat_bench/results/chunk_fix_tau512_seed1.json",
+      "sha256": "aa5aa1f413315e747ca5a6fabf14aa1a6b7bb725dc46a693c313757d6f657049",
+      "bytes": 863,
+      "roles": [
+        "tau_result",
+        "constructor_sweep"
+      ],
+      "source_mtime_utc": "2026-08-17T05:59:27.783341+00:00",
+      "source_mtime_status": "post-run filesystem observation; not an embedded run timestamp",
+      "embedded_fields": [
+        "commit",
+        "torch",
+        "cuda",
+        "gpu",
+        "model",
+        "tau",
+        "max_num_seqs",
+        "seed",
+        "measurements"
+      ]
+    },
+    {
+      "path": "tau/chunk_fix_tau512_seed2.json",
+      "source_path": "/workspace/.feat_bench/results/chunk_fix_tau512_seed2.json",
+      "sha256": "22a0d51176f6724d1f5413f4863540ca896739040864467f51d3eea17820f615",
+      "bytes": 862,
+      "roles": [
+        "tau_result",
+        "constructor_sweep"
+      ],
+      "source_mtime_utc": "2026-08-17T05:59:48.335687+00:00",
+      "source_mtime_status": "post-run filesystem observation; not an embedded run timestamp",
+      "embedded_fields": [
+        "commit",
+        "torch",
+        "cuda",
+        "gpu",
+        "model",
+        "tau",
+        "max_num_seqs",
+        "seed",
+        "measurements"
+      ]
+    },
+    {
+      "path": "tau/chunk_fix_tau512_seed3.json",
+      "source_path": "/workspace/.feat_bench/results/chunk_fix_tau512_seed3.json",
+      "sha256": "d49c18bdeee2fbbdca9c99fe1c183ae770ddb5b5587c8f9c71ff5e966c43349e",
+      "bytes": 865,
+      "roles": [
+        "tau_result",
+        "constructor_sweep"
+      ],
+      "source_mtime_utc": "2026-08-17T06:00:10.076053+00:00",
+      "source_mtime_status": "post-run filesystem observation; not an embedded run timestamp",
+      "embedded_fields": [
+        "commit",
+        "torch",
+        "cuda",
+        "gpu",
+        "model",
+        "tau",
+        "max_num_seqs",
+        "seed",
+        "measurements"
+      ]
+    },
+    {
+      "path": "tokens/token_chunk_greedy.json",
+      "source_path": "/workspace/.feat_bench/results/token_chunk_greedy.json",
+      "sha256": "cbc47eb422b61f42e1c2be8c0f068d7421f4021daf4598d3a5dc284e0bf5a7de",
+      "bytes": 3166,
+      "roles": [
+        "token_gate"
+      ],
+      "source_mtime_utc": "2026-08-17T06:24:32.104439+00:00",
+      "source_mtime_status": "post-run filesystem observation; not an embedded run timestamp",
+      "embedded_fields": [
+        "seed",
+        "prompt_lengths",
+        "temperature",
+        "max_tokens",
+        "sha256",
+        "tokens"
+      ]
+    },
+    {
+      "path": "tokens/token_chunk_stochastic.json",
+      "source_path": "/workspace/.feat_bench/results/token_chunk_stochastic.json",
+      "sha256": "9c689fb3d14b08f63517902c624061b57492fc809fb8a0e9615007a4433690b3",
+      "bytes": 3113,
+      "roles": [
+        "token_gate"
+      ],
+      "source_mtime_utc": "2026-08-17T06:23:28.979382+00:00",
+      "source_mtime_status": "post-run filesystem observation; not an embedded run timestamp",
+      "embedded_fields": [
+        "seed",
+        "prompt_lengths",
+        "temperature",
+        "max_tokens",
+        "sha256",
+        "tokens"
+      ]
+    },
+    {
+      "path": "tokens/token_dev_greedy.json",
+      "source_path": "/workspace/.feat_bench/results/token_dev_greedy.json",
+      "sha256": "0409e28823d02abb8b80847b6ce856ab618b4c5fede56b0a3507e0c031d1cd3d",
+      "bytes": 3167,
+      "roles": [
+        "token_gate"
+      ],
+      "source_mtime_utc": "2026-08-17T06:23:58.571878+00:00",
+      "source_mtime_status": "post-run filesystem observation; not an embedded run timestamp",
+      "embedded_fields": [
+        "seed",
+        "prompt_lengths",
+        "temperature",
+        "max_tokens",
+        "sha256",
+        "tokens"
+      ]
+    },
+    {
+      "path": "tokens/token_dev_stochastic.json",
+      "source_path": "/workspace/.feat_bench/results/token_dev_stochastic.json",
+      "sha256": "21515aad99ae9a30df8eaa98f7c93d5d8ef450d8d046d658bef21842d31c7c9f",
+      "bytes": 3113,
+      "roles": [
+        "token_gate"
+      ],
+      "source_mtime_utc": "2026-08-17T06:22:55.062814+00:00",
+      "source_mtime_status": "post-run filesystem observation; not an embedded run timestamp",
+      "embedded_fields": [
+        "seed",
+        "prompt_lengths",
+        "temperature",
+        "max_tokens",
+        "sha256",
+        "tokens"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,31 @@
+{
+  "after_long_admission_s": 1.4049856550991535,
+  "commit": "631a346",
+  "completion_tokens_per_s": 2948.6751612492426,
+  "cuda": "12.8",
+  "gpu": "NVIDIA A100-SXM4-40GB",
+  "groups": {
+    "interactive": {
+      "count": 16,
+      "max_itl_max_ms": 15.4521893709898,
+      "max_itl_p50_ms": 15.4521893709898,
+      "mean_itl_p50_ms": 4.968879525275791,
+      "ttft_max_ms": 11.528244242072105,
+      "ttft_p50_ms": 11.506475508213043
+    },
+    "long": {
+      "count": 2,
+      "max_itl_max_ms": 138.20085301995277,
+      "max_itl_p50_ms": 76.82652119547129,
+      "mean_itl_p50_ms": 5.02308543187146,
+      "ttft_max_ms": 64.58183750510216,
+      "ttft_p50_ms": 53.44503466039896
+    }
+  },
+  "max_num_seqs": 512,
+  "model": "/workspace/models/Qwen3-0.6B",
+  "seed": 20260814,
+  "tau": 1024,
+  "torch": "2.10.0+cu128",
+  "whole_run_s": 1.5627357196062803
+}

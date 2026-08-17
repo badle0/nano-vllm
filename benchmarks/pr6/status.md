@@ -31,6 +31,22 @@ two-GPU inference/NCCL run remains unavailable on this one-A100 host, so TP safe
 is still explicitly **unverified**; spawn-boundary transport coverage is not a
 substitute for that gate.
 
+The repaired performance and token evidence is now preserved byte-for-byte in
+the [`repair_results/` bundle](repair_results/README.md), with a machine-readable
+SHA-256/environment/model/commit/protocol manifest and a CPU-only validator. Its
+focused tau A/B uses final paired reruns at tau 128 and 16384 and the same-host
+sequential sets at tau 1024; the fixed constructor sweep is recorded separately.
+The stock three-pair medians are 8,779.672 dev versus 8,761.927 chunk tok/s
+(-0.20% by ratio of medians), inside the <=1% gate. Embedded commit values remain
+caller-supplied harness labels, not verified execution-HEAD claims.
+
+A supplemental post-repair smoke run from `fix/chunked-prefill` after `4c3e1d2`
+used `PYTHONPATH=. /venv/main/bin/python benchmarks/pr6/gate_generate_tau.py 128
+/tmp/pr6_tau128_repaired.json`. It completed in 15.54 seconds with four 48-token
+outputs; the result SHA-256 is
+`34f5638cafba25e30bbbc56a4bea7e939794660437b3f4234e3cdcd7ec166827`.
+This is a single-process generation smoke, not multi-process evidence.
+
 The old post-construction tau mutation used by eleven scripts became invalid when
 the repaired scheduler made its configured budget read-only. Commit `66c735c`
 updates those instruments (and the shared P5 caller) to pass tau through `LLM(...)`,

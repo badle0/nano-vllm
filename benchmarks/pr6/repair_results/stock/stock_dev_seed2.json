@@ -1,0 +1,10 @@
+{
+  "commit": "edb997e",
+  "cuda": "12.8",
+  "elapsed_s": 16.670781295746565,
+  "gpu": "NVIDIA A100-SXM4-40GB",
+  "seed": 20260815,
+  "throughput_tokens_per_s": 8779.67249425459,
+  "torch": "2.10.0+cu128",
+  "total_tokens": 146364
+}
