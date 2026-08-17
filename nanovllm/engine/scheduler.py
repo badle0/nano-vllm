@@ -1,13 +1,15 @@
 from collections import deque
+from time import perf_counter
 
 from nanovllm.config import Config
-from nanovllm.engine.sequence import Sequence, SequenceStatus
+from nanovllm.engine.sequence import Sequence, SequenceStatus, StreamOutput
 from nanovllm.engine.block_manager import BlockManager
 
 
 class Scheduler:
 
-    def __init__(self, config: Config):
+    def __init__(self, config: Config, clock=None):
+        self._clock = perf_counter if clock is None else clock
         self.max_num_seqs = config.max_num_seqs
         self.max_num_batched_tokens = config.max_num_batched_tokens
         self.eos = config.eos
@@ -49,6 +51,8 @@ class Scheduler:
                 seq.status = SequenceStatus.RUNNING
                 self.waiting.popleft()
                 self.running.append(seq)
+            if seq.first_scheduled_time is None:
+                seq.first_scheduled_time = self._clock()
             scheduled_seqs.append(seq)
 
         if scheduled_seqs:
@@ -78,15 +82,59 @@ class Scheduler:
         self.block_manager.deallocate(seq)
         self.waiting.appendleft(seq)
 
-    def postprocess(self, seqs: list[Sequence], token_ids: list[int], is_prefill: bool):
-        for seq, token_id in zip(seqs, token_ids):
+    def postprocess(self, seqs: list[Sequence], token_ids: list[int],
+                    is_prefill: bool) -> list[StreamOutput]:
+        now = self._clock()
+        events: list[StreamOutput] = []
+        for seq, token_id in zip(seqs, token_ids, strict=True):
             self.block_manager.hash_blocks(seq)
             seq.num_cached_tokens += seq.num_scheduled_tokens
             seq.num_scheduled_tokens = 0
             if is_prefill and seq.num_cached_tokens < seq.num_tokens:
                 continue
             seq.append_token(token_id)
-            if (not seq.ignore_eos and token_id == self.eos) or seq.num_completion_tokens == seq.max_tokens:
+            if seq.first_token_time is None:
+                seq.first_token_time = now
+            seq.token_times.append(now)
+            finished = (not seq.ignore_eos and token_id == self.eos) \
+                    or seq.num_completion_tokens == seq.max_tokens
+            if finished:
+                seq.finish_time = now
                 seq.status = SequenceStatus.FINISHED
                 self.block_manager.deallocate(seq)
                 self.running.remove(seq)
+            events.append(StreamOutput(seq.seq_id, token_id, finished))
+        return events
+
+    def cancel(self, seq_ids) -> list[int]:
+        """Cancel only the queued sequences named by ``seq_ids``.
+
+        A partially prefetched sequence can still be in ``waiting`` while it
+        owns KV blocks, so both scheduler queues must use the same deallocation
+        rule. Unknown and duplicate IDs are harmless.
+        """
+        targets = set(seq_ids)
+        if not targets:
+            return []
+
+        cancelled = []
+        for queue in (self.waiting, self.running):
+            retained = deque()
+            while queue:
+                seq = queue.popleft()
+                if seq.seq_id not in targets:
+                    retained.append(seq)
+                    continue
+                if seq.block_table:
+                    self.block_manager.deallocate(seq)
+                seq.num_scheduled_tokens = 0
+                seq.status = SequenceStatus.CANCELLED
+                cancelled.append(seq.seq_id)
+            queue.extend(retained)
+        return cancelled
+
+    def cancel_all(self):
+        """Administrative compatibility wrapper; request cleanup uses cancel."""
+        return self.cancel(
+            seq.seq_id for seq in (*self.running, *self.waiting)
+        )
