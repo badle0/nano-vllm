@@ -15,7 +15,8 @@ from nanovllm.metrics import compute_metrics
 
 class LLMEngine:
 
-    def __init__(self, model, **kwargs):
+    def __init__(self, model, *, _clock=None, **kwargs):
+        self._clock = perf_counter if _clock is None else _clock
         config_fields = {field.name for field in fields(Config)}
         config_kwargs = {k: v for k, v in kwargs.items() if k in config_fields}
         config = Config(model, **config_kwargs)
@@ -32,7 +33,7 @@ class LLMEngine:
         self.model_runner = ModelRunner(config, 0, self.events)
         self.tokenizer = AutoTokenizer.from_pretrained(config.model, use_fast=True)
         config.eos = self.tokenizer.eos_token_id
-        self.scheduler = Scheduler(config)
+        self.scheduler = Scheduler(config, clock=self._clock)
         atexit.register(self.exit)
 
     def exit(self):
@@ -41,18 +42,49 @@ class LLMEngine:
         for p in self.ps:
             p.join()
 
-    def add_request(self, prompt: str | list[int], sampling_params: SamplingParams):
+    def add_request(
+        self,
+        prompt: str | list[int],
+        sampling_params: SamplingParams,
+        submission_time: float | None = None,
+    ):
+        if submission_time is None:
+            submission_time = self._clock()
         if isinstance(prompt, str):
             prompt = self.tokenizer.encode(prompt)
-        seq = Sequence(prompt, sampling_params)
+        seq = Sequence(
+            prompt,
+            sampling_params,
+            submission_time=submission_time,
+            engine_arrival_time=self._clock(),
+        )
         self.scheduler.add(seq)
 
-    def step(self):
+    def _execute_step(self):
         seqs, is_prefill = self.scheduler.schedule()
         num_tokens = sum(seq.num_scheduled_tokens for seq in seqs) if is_prefill else -len(seqs)
         token_ids = self.model_runner.call("run", seqs, is_prefill)
         self.scheduler.postprocess(seqs, token_ids, is_prefill)
-        outputs = [(seq.seq_id, seq.completion_token_ids, compute_metrics(seq)) for seq in seqs if seq.is_finished]
+        return [seq for seq in seqs if seq.is_finished], num_tokens
+
+    def step(self):
+        """Advance the engine and preserve the legacy pair-valued output API."""
+        seqs, num_tokens = self._execute_step()
+        outputs = [(seq.seq_id, seq.completion_token_ids) for seq in seqs]
+        return outputs, num_tokens
+
+    def step_with_metrics(self):
+        """Advance the engine and opt in to metrics on completed sequences."""
+        seqs, num_tokens = self._execute_step()
+        delivery_time = self._clock()
+        outputs = [
+            (
+                seq.seq_id,
+                seq.completion_token_ids,
+                compute_metrics(seq, delivery_time=delivery_time),
+            )
+            for seq in seqs
+        ]
         return outputs, num_tokens
 
     def is_finished(self):
@@ -63,29 +95,43 @@ class LLMEngine:
         prompts: list[str] | list[list[int]],
         sampling_params: SamplingParams | list[SamplingParams],
         use_tqdm: bool = True,
-    ) -> list[str]:
-        pbar = tqdm(total=len(prompts), desc="Generating", dynamic_ncols=True, disable=not use_tqdm)
+    ) -> list[dict]:
+        submission_time = self._clock()
         if not isinstance(sampling_params, list):
             sampling_params = [sampling_params] * len(prompts)
+        elif len(sampling_params) != len(prompts):
+            raise ValueError(
+                "prompts and sampling_params must contain the same number of items"
+            )
+        pbar = tqdm(total=len(prompts), desc="Generating", dynamic_ncols=True, disable=not use_tqdm)
         for prompt, sp in zip(prompts, sampling_params):
-            self.add_request(prompt, sp)
+            self.add_request(prompt, sp, submission_time=submission_time)
         outputs = {}
         prefill_throughput = decode_throughput = 0.
         while not self.is_finished():
-            t = perf_counter()
-            output, num_tokens = self.step()
+            t = self._clock()
+            output, num_tokens = self._execute_step()
             if num_tokens > 0:
-                prefill_throughput = num_tokens / (perf_counter() - t)
+                prefill_throughput = num_tokens / (self._clock() - t)
             else:
-                decode_throughput = -num_tokens / (perf_counter() - t)
+                decode_throughput = -num_tokens / (self._clock() - t)
             pbar.set_postfix({
                 "Prefill": f"{int(prefill_throughput)}tok/s",
                 "Decode": f"{int(decode_throughput)}tok/s",
             })
-            for seq_id, token_ids, metrics in output:
-                outputs[seq_id] = (token_ids, metrics)
+            for seq in output:
+                outputs[seq.seq_id] = seq
                 pbar.update(1)
         pbar.close()
         outputs = [outputs[seq_id] for seq_id in sorted(outputs.keys())]
-        outputs = [{"text": self.tokenizer.decode(token_ids), "token_ids": token_ids, "metrics": metrics} for token_ids, metrics in outputs]
-        return outputs
+        results = [
+            {
+                "text": self.tokenizer.decode(seq.completion_token_ids),
+                "token_ids": seq.completion_token_ids,
+            }
+            for seq in outputs
+        ]
+        delivery_time = self._clock()
+        for result, seq in zip(results, outputs):
+            result["metrics"] = compute_metrics(seq, delivery_time=delivery_time)
+        return results

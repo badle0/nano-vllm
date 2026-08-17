@@ -43,6 +43,22 @@ outputs = llm.generate(prompts, sampling_params)
 outputs[0]["text"]
 ```
 
+### Request metrics
+
+Each `generate()` result includes a `metrics` dictionary. Fields prefixed with
+`engine_` start when tokenization has finished and the sequence is ready for the
+scheduler. `submission_to_*` fields start at the public API boundary, while
+`caller_e2e` ends after the returned text has been decoded and assembled.
+
+All prompts passed to one `generate()` call share one submission timestamp and
+one final delivery timestamp. This models the call as a batch: later prompts do
+not get an artificially younger submission time merely because tokenization is
+sequential.
+
+Low-level callers retain the original `step()` contract of
+`(seq_id, token_ids)` pairs. Use `step_with_metrics()` to opt in to completed
+triples of `(seq_id, token_ids, metrics)`.
+
 ## Benchmark
 
 See `bench.py` for benchmark.

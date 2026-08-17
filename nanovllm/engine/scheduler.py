@@ -8,7 +8,8 @@ from nanovllm.engine.block_manager import BlockManager
 
 class Scheduler:
 
-    def __init__(self, config: Config):
+    def __init__(self, config: Config, clock=None):
+        self._clock = perf_counter if clock is None else clock
         self.max_num_seqs = config.max_num_seqs
         self.max_num_batched_tokens = config.max_num_batched_tokens
         self.eos = config.eos
@@ -51,7 +52,7 @@ class Scheduler:
                 self.waiting.popleft()
                 self.running.append(seq)
             if seq.first_scheduled_time is None:
-                seq.first_scheduled_time = perf_counter()
+                seq.first_scheduled_time = self._clock()
             scheduled_seqs.append(seq)
 
         if scheduled_seqs:
@@ -82,7 +83,7 @@ class Scheduler:
         self.waiting.appendleft(seq)
 
     def postprocess(self, seqs: list[Sequence], token_ids: list[int], is_prefill: bool):
-        now = perf_counter()
+        now = self._clock()
         for seq, token_id in zip(seqs, token_ids):
             self.block_manager.hash_blocks(seq)
             seq.num_cached_tokens += seq.num_scheduled_tokens

@@ -16,7 +16,14 @@ class Sequence:
     block_size = 256
     counter = count()
 
-    def __init__(self, token_ids: list[int], sampling_params = SamplingParams()):
+    def __init__(
+        self,
+        token_ids: list[int],
+        sampling_params=SamplingParams(),
+        *,
+        submission_time: float | None = None,
+        engine_arrival_time: float | None = None,
+    ):
         self.seq_id = next(Sequence.counter)
         self.status = SequenceStatus.WAITING
         self.token_ids = copy(token_ids)
@@ -30,7 +37,14 @@ class Sequence:
         self.temperature = sampling_params.temperature
         self.max_tokens = sampling_params.max_tokens
         self.ignore_eos = sampling_params.ignore_eos
-        self.arrival_time = perf_counter()
+        if submission_time is None or engine_arrival_time is None:
+            now = perf_counter()
+            if submission_time is None:
+                submission_time = now
+            if engine_arrival_time is None:
+                engine_arrival_time = now
+        self.submission_time = submission_time
+        self.engine_arrival_time = engine_arrival_time
         self.first_scheduled_time = None
         self.first_token_time = None
         self.finish_time = None
