@@ -1,0 +1,59 @@
+{
+  "batches": {
+    "256": {
+      "cold": {
+        "elapsed_s": 0.47455040737986565,
+        "output_tokens_per_s": 17262.655078583695,
+        "repetition": 0
+      },
+      "median_output_tokens_per_s": 17320.06782614906,
+      "steady": [
+        {
+          "elapsed_s": 0.47104911133646965,
+          "output_tokens_per_s": 17390.96795397299,
+          "repetition": 1
+        },
+        {
+          "elapsed_s": 0.4768907092511654,
+          "output_tokens_per_s": 17177.94002081407,
+          "repetition": 2
+        },
+        {
+          "elapsed_s": 0.4729773625731468,
+          "output_tokens_per_s": 17320.06782614906,
+          "repetition": 3
+        }
+      ]
+    },
+    "64": {
+      "cold": {
+        "elapsed_s": 0.39994101971387863,
+        "output_tokens_per_s": 5120.755058996343,
+        "repetition": 0
+      },
+      "median_output_tokens_per_s": 11212.558852701912,
+      "steady": [
+        {
+          "elapsed_s": 0.17921044491231441,
+          "output_tokens_per_s": 11427.905337783535,
+          "repetition": 1
+        },
+        {
+          "elapsed_s": 0.18332235142588615,
+          "output_tokens_per_s": 11171.578283120423,
+          "repetition": 2
+        },
+        {
+          "elapsed_s": 0.18265233002603054,
+          "output_tokens_per_s": 11212.558852701912,
+          "repetition": 3
+        }
+      ]
+    }
+  },
+  "cuda": "12.8",
+  "gpu": "NVIDIA A100-SXM4-40GB",
+  "label": "fix-request-metrics",
+  "seed": 20260818,
+  "torch": "2.10.0+cu128"
+}
