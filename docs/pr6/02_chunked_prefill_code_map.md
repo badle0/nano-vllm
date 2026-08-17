@@ -213,6 +213,15 @@ Properties 68–78 give the block arithmetic (`num_blocks`, `last_block_num_toke
 allowlisted pickle — metrics fields and anything streaming added never cross the shm
 boundary.
 
+> **Repaired-state note (2026-08-17):** the paragraph above describes the pinned
+> `dev@317e6f0` snapshot mapped by this document. The repaired chunk branch fixes
+> this cost in `67d654f`: rank zero serializes a compact `ScheduledSequence` DTO
+> with the scheduled token slice, mode/counts, last token, and block table. The
+> transport now has derived page-rounded capacity, a validated frame header, and
+> checked reads/writes. Commit `6a98622` exercises those frames across a real
+> spawned process and OS shared-memory segment. TP2 model execution remains
+> unverified on the one-GPU audit host.
+
 ### A6. `nanovllm/engine/block_manager.py` (120 lines) — paged memory under chunks
 
 - 36–41 `compute_hash`: xxhash chained with the previous block's digest — the Merkle

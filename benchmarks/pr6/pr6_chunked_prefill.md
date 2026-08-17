@@ -8,6 +8,13 @@ Protocol: byte-pinned instruments (bench_latency.py fetched from metrics-artifac
 interleaved A/B for every throughput claim; predictions registered with falsifiers
 before each measurement and scored after (docs/pr6/05 §3/§3b).
 
+> **Repaired-state note (2026-08-17).** This document preserves the original PR6
+> feature-arc evidence. The repaired merge candidate adds bounded admission,
+> O(1) mid-chunk state, validated constructor-only tau, low-tau graph fallbacks,
+> compact checked TP frames, and broader graph oracles. See `status.md`'s repaired
+> addendum for commit pins and current gates; do not read the historical 46-test
+> ledger or its byte-identity wording as a result from the repaired tip.
+
 ## What this adds
 
 Decode-first mixed-step scheduling (Sarathi-style) with CUDA-graphed ragged steps:
@@ -88,9 +95,12 @@ flavor production never replays.
 - **Host-class framing**: every number above is host1/EPYC. The graph win is
   dispatch-bound and host3 (Xeon, dispatch ~45 ms, stall 11.2×) should see larger
   gains, but post-fix host3 numbers are unmeasured.
-- **TP > 1 is designed but unvalidated** (world_size=1 throughout); the per-seq
-  serialization branch makes it structurally safe; the O(n·T) token-shipping cost
-  per chunk is a known, documented TP-only tax.
+- **TP > 1 remains unvalidated** (world_size=1 throughout). The repaired branch no
+  longer ships full prompt state per chunk: it uses a compact `ScheduledSequence`
+  frame containing only the scheduled slice and required metadata, with derived
+  shared-memory sizing, framing, and bounds checks. A real spawn/shared-memory
+  handoff test passes, but a two-GPU inference/NCCL run is still required before
+  claiming TP safety.
 - **Long-prompt TTFT rises at small τ** — the explicit dial: τ=16384 preserves
   throughput-optimal behavior (mixing costs ~0.5%), τ≈512 buys the 7.8 ms ITL bound.
 - Prediction misses are recorded alongside hits in docs/pr6/05 §3b (notably:

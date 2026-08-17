@@ -2,9 +2,55 @@
 
 Living tracker; update per commit. Terminology: forks F1–F5 and commits C1–C5 per the
 design doc set (04_design_forks, 05_evidence_predictions, 06_implementation_plan).
-Branch: feat/chunked-prefill off dev @ 317e6f0.
+The ledger below is the historical feature-arc record for `feat/chunked-prefill`
+off `dev@317e6f0`; its commit IDs, test counts, and host outputs are retained as
+provenance rather than rewritten as if they came from the repaired branch.
 Before/after instrument: bench_latency.py byte-pinned at metrics-artifacts 5b6f013
 (always fetched via `git show`, never copy-edited; one host per comparison).
+
+## Repaired-state addendum — 2026-08-17
+
+The merge candidate is now split between `fix/chunked-prefill-upstream` (code and
+tests) and `fix/chunked-prefill` (the same source/tests plus this evidence). The
+repair sequence is:
+
+- `cb65ce2`: bounded transactional admission, explicit retryable capacity error,
+  O(1) `mid_chunk_seq` state, constructor-coherent/read-only tau, and the
+  `remaining <= 0` guard;
+- `ea15b73` + `631a346`: safe low-tau eager routing, sparse graph-key selection,
+  structural replay guards, and the tau 64/128 × max-model-length
+  512/1024/4096 fresh-process matrix;
+- `67d654f` + `6a98622`: compact scheduled-slice TP frames with checked bounds,
+  followed by a real spawned-process/shared-memory/event handoff test;
+- `73dce74`: seeded variable-length graph replay compared with valid unpadded
+  eager execution on live greedy token IDs across the 128/256/512 buckets.
+
+At `73dce74`, the full upstream suite is **149 passed**. The full evidence branch
+has the same `nanovllm/` and `tests/` content after merging that commit. A real
+two-GPU inference/NCCL run remains unavailable on this one-A100 host, so TP safety
+is still explicitly **unverified**; spawn-boundary transport coverage is not a
+substitute for that gate.
+
+The old post-construction tau mutation used by eleven scripts became invalid when
+the repaired scheduler made its configured budget read-only. Commit `66c735c`
+updates those instruments (and the shared P5 caller) to pass tau through `LLM(...)`,
+sets `max_num_seqs <= tau`, and constructs a fresh engine for each point in a
+multi-tau sweep. Historical host output files below remain historical; they have
+not been relabeled as regenerated repaired-tip measurements.
+
+Fresh repaired-branch gates found one numerical tie-class divergence in eight
+prompts, not universal byte identity:
+
+| gate | repaired dev SHA-256 | repaired chunk SHA-256 | first divergence |
+|---|---|---|---|
+| stochastic | `5919fcde302485f1451f6be5c23a4ce109a31a8da099e5be50a5fd962d88fb4e` | `b8526e490891b21111320c240cc3847c2cb7554d5cfeb133d2c1238afb8312a1` | one sequence, completion position 15; seven later tokens cascade |
+| greedy | `1e10d050c87fd8b7fc49932a31c2cc28cb959737b7ebe73569315c7ba3b73d51` | `6d9cd726cee967d843af37faa7ac07f701e7c1716c7d9c615968f19be358ca0b` | one sequence, completion position 28 |
+
+Top-two capture classified the first greedy difference in the documented BF16
+tie class: repaired dev had tokens 4024 and 1196 tied at 18.125 (argmax chose
+1196), while chunked execution produced 18.375 and 18.250 (chose 4024). These are
+declared numerical-compatibility limits across kernel composition, not invalid
+tokens and not evidence for a bitwise-equivalence claim.
 
 ## Fork resolutions
 

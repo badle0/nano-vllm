@@ -104,6 +104,12 @@ preceded by `git status`; instruments live in `benchmarks/pr6/`, never `/tmp`-on
   explicitly in the PR that TP>1 chunked-mixed is unvalidated. The O(n·T)
   full-token-ids-per-chunk shipping cost (sequence.py:86) is a known TP-only tax,
   documented, unfixed.
+
+  **Repaired-state update (2026-08-17):** `67d654f` removes that full-token
+  transport in favor of a compact scheduled-slice DTO with explicit framing,
+  derived capacity, and overflow checks; `6a98622` validates the transport across
+  a spawned process and real shared memory. The original plan's TP2 caveat still
+  applies because this host exposes only one GPU.
 - **The latent decode assert** (scheduler:74, KV-exhaustion self-preempt) is
   inherited; mixed steps don't change its trigger, but the new scheduler must not
   *widen* it — covered by the robustness gates.

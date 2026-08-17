@@ -163,6 +163,13 @@ tests, byte-gate IDENTICAL 4/4, band 8589/8582 in 8560–8610; see
 
 (Item 1 appeared twice in the raw findings — two hunters found it independently; deduped here.)
 
+**Later repair note (2026-08-17):** the `__setstate__` fix above was necessary but
+not sufficient for bounded TP transport. Commit `67d654f` now sends compact
+scheduled-slice DTOs instead of repeatedly pickling full prompt state, and
+`6a98622` covers spawned-process shared-memory handoff. This strengthens the
+static/transport story only; TP>1 inference is still unvalidated on the one-GPU
+host.
+
 **Notable refutations** (flagged, then killed by verification — kept on record so
 they aren't re-flagged): `gate_greedy.py`'s byte-duplication of `gate_generate.py`
 is deliberate byte-pinning provenance; the scheduler's trailing partial-`break`
