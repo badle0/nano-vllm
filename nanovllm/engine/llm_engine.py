@@ -182,7 +182,8 @@ class LLMEngine:
             return [sampling_params] * len(prompts)
         if len(sampling_params) != len(prompts):
             raise ValueError(
-                "prompts and sampling_params must contain the same number of items"
+                "prompts and sampling_params must have the same length "
+                "(the same number of items)"
             )
         return sampling_params
 
@@ -311,11 +312,12 @@ class LLMEngine:
         prompts: list[str] | list[list[int]],
         sampling_params: SamplingParams | list[SamplingParams],
     ) -> StreamSession:
+        params = self._normalize_batch(prompts, sampling_params)
         submission_time = self._clock()
         return StreamSession(
             self,
             prompts,
-            sampling_params,
+            params,
             submission_time=submission_time,
         )
 
@@ -328,8 +330,8 @@ class LLMEngine:
         sampling_params: SamplingParams | list[SamplingParams],
         use_tqdm: bool = True,
     ) -> list[dict]:
-        submission_time = self._clock()
         params = self._normalize_batch(prompts, sampling_params)
+        submission_time = self._clock()
         lease = self._acquire_session("generate")
         sequences = []
         pbar = None
