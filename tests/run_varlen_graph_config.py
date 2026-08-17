@@ -19,9 +19,11 @@ from nanovllm.utils.context import get_context, reset_context, set_context
 MODEL_PATH = "/workspace/models/Qwen3-0.6B"
 
 
-def check(tau: int):
+def check(tau: int, max_model_len: int = 512):
     if tau not in (64, 128):
         raise ValueError("this focused check supports only tau 64 or 128")
+    if max_model_len not in (512, 1024, 4096):
+        raise ValueError("max_model_len must be 512, 1024, or 4096")
 
     torch.manual_seed(1234)
     torch.cuda.manual_seed_all(1234)
@@ -29,7 +31,7 @@ def check(tau: int):
         MODEL_PATH,
         max_num_batched_tokens=tau,
         max_num_seqs=8,
-        max_model_len=512,
+        max_model_len=max_model_len,
         gpu_memory_utilization=0.5,
         enforce_eager=False,
     )
@@ -61,26 +63,26 @@ def check(tau: int):
         live = get_context()
         misses_before = runner.varlen_miss
         with torch.inference_mode():
+            eager_logits = runner.model.compute_logits(
+                runner.model(input_ids, positions)
+            ).clone()
+        set_context(
+            True,
+            live.cu_seqlens_q,
+            live.cu_seqlens_k,
+            live.max_seqlen_q,
+            live.max_seqlen_k,
+            live.slot_mapping,
+            None,
+            live.block_tables,
+        )
+        with torch.inference_mode():
             routed_logits = runner.run_model(input_ids, positions, True).clone()
 
         if tau == 64:
             assert runner.varlen_miss == misses_before + 1
         else:
             assert runner.varlen_miss == misses_before
-            set_context(
-                True,
-                live.cu_seqlens_q,
-                live.cu_seqlens_k,
-                live.max_seqlen_q,
-                live.max_seqlen_k,
-                live.slot_mapping,
-                None,
-                live.block_tables,
-            )
-            with torch.inference_mode():
-                eager_logits = runner.model.compute_logits(
-                    runner.model(input_ids, positions)
-                )
             assert torch.equal(
                 routed_logits.argmax(dim=-1), eager_logits.argmax(dim=-1)
             )
@@ -93,6 +95,7 @@ def check(tau: int):
     assert all(len(output["token_ids"]) == 1 for output in outputs)
     print(json.dumps({
         "tau": tau,
+        "max_model_len": max_model_len,
         "varlen_graphs": len(runner.varlen_graphs),
         "varlen_miss": runner.varlen_miss,
         "tokens": [output["token_ids"][0] for output in outputs],
@@ -102,4 +105,11 @@ def check(tau: int):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--tau", type=int, required=True)
-    check(parser.parse_args().tau)
+    parser.add_argument(
+        "--max-model-len",
+        type=int,
+        choices=(512, 1024, 4096),
+        default=512,
+    )
+    args = parser.parse_args()
+    check(args.tau, args.max_model_len)

@@ -318,7 +318,7 @@ class ModelRunner:
         slot_mapping = torch.tensor(slot_mapping, dtype=torch.int32, pin_memory=True).cuda(non_blocking=True)
         set_context(True, cu_seqlens_q, cu_seqlens_k, max_seqlen_q, max_seqlen_k, slot_mapping, None, block_tables)
         return input_ids, positions
-    
+
     prepare_prefill = prepare_ragged
 
     def prepare_decode(self, seqs: list[Sequence | ScheduledSequence]):
