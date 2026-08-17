@@ -1,68 +1,358 @@
-import torch
-from nanovllm import SamplingParams
+from threading import Lock
+from types import MethodType
 
-# TRAP 1 (prefix cache): equivalence runs generate() then stream() on ONE engine.
-# Prompts must stay under one KV block (256 tokens): can_allocate only consults
-# full blocks (range(num_blocks - 1)), so sub-block prompts get zero cache hits
-# and run 2's prefill batching is identical to run 1's. Longer prompts would hit
-# the prefix cache on the second run, change batch composition, and legitimately
-# perturb sampled tokens — a flaky gate that looks like a streaming bug.
-PROMPTS = ["The capital of France is", "def fibonacci(n):", "In 1969, humans first"]
+import pytest
+import torch
+
+from nanovllm import LLM, SamplingParams, SchedulerCapacityError
+from nanovllm.engine.llm_engine import LLMEngine, StepOutput
+from nanovllm.engine.sequence import SequenceStatus, StreamOutput
+
+MODEL_PATH = "/workspace/models/Qwen3-0.6B"
+PROMPTS = [
+    "The capital of France is",
+    "def fibonacci(n):",
+    "In 1969, humans first",
+]
 SP = SamplingParams(temperature=0.6, max_tokens=32, ignore_eos=True)
 
-def _seed():
-    torch.manual_seed(1234); torch.cuda.manual_seed_all(1234)
 
-def _reassemble(events):
-    per_seq = {}
-    for ev in events:
-        per_seq.setdefault(ev.seq_id, []).append(ev.token_id)
-    # TRAP 2 (seq_id offset): absolute ids are a global counter also consumed by
-    # warmup; only their ORDER maps to submission order — same trick generate uses.
-    return [per_seq[k] for k in sorted(per_seq)]
+class FakeClock:
+
+    def __init__(self):
+        self.value = 0.0
+
+    def __call__(self):
+        return self.value
+
+    def advance(self, seconds):
+        self.value += seconds
+
+
+class FakeTokenizer:
+
+    def __init__(self, clock):
+        self.clock = clock
+        self.encoded = []
+
+    def encode(self, prompt):
+        self.encoded.append(prompt)
+        self.clock.advance(0.25)
+        if prompt == "bad":
+            return []
+        return [10 + len(self.encoded)]
+
+    def decode(self, token_ids):
+        return ",".join(str(token_id) for token_id in token_ids)
+
+
+class FakeScheduler:
+
+    def __init__(self, max_num_seqs=512):
+        self.sequences = []
+        self.cancel_calls = []
+        self.max_num_seqs = max_num_seqs
+
+    @property
+    def available_capacity(self):
+        return self.max_num_seqs - len(self.sequences)
+
+    def require_capacity(self, requested=1):
+        if requested > self.available_capacity:
+            raise SchedulerCapacityError(
+                requested,
+                max(self.available_capacity, 0),
+                self.max_num_seqs,
+            )
+
+    def add(self, sequence):
+        self.require_capacity()
+        self.sequences.append(sequence)
+
+    def is_finished(self):
+        return not self.sequences
+
+    def cancel(self, seq_ids):
+        targets = set(seq_ids)
+        self.cancel_calls.append(tuple(sorted(targets)))
+        retained = []
+        cancelled = []
+        for sequence in self.sequences:
+            if sequence.seq_id in targets:
+                sequence.status = SequenceStatus.CANCELLED
+                cancelled.append(sequence.seq_id)
+            else:
+                retained.append(sequence)
+        self.sequences = retained
+        return cancelled
+
+
+def make_fake_engine(max_num_seqs=512):
+    clock = FakeClock()
+    engine = LLMEngine.__new__(LLMEngine)
+    engine._clock = clock
+    engine._session_lock = Lock()
+    engine._active_session = None
+    engine.tokenizer = FakeTokenizer(clock)
+    engine.scheduler = FakeScheduler(max_num_seqs=max_num_seqs)
+
+    def fake_step(self):
+        clock.advance(1.0)
+        now = clock()
+        events = []
+        finished = []
+        for sequence in list(self.scheduler.sequences):
+            if sequence.first_scheduled_time is None:
+                sequence.first_scheduled_time = now
+            token_id = 20 + sequence.num_completion_tokens
+            sequence.append_token(token_id)
+            if sequence.first_token_time is None:
+                sequence.first_token_time = now
+            sequence.token_times.append(now)
+            is_finished = sequence.num_completion_tokens == sequence.max_tokens
+            if is_finished:
+                sequence.finish_time = now
+                sequence.status = SequenceStatus.FINISHED
+                self.scheduler.sequences.remove(sequence)
+                finished.append(sequence)
+            events.append(StreamOutput(sequence.seq_id, token_id, is_finished))
+        return StepOutput(events, finished, 0, len(events))
+
+    engine._step = MethodType(fake_step, engine)
+    return engine, clock
+
+
+def seed():
+    torch.manual_seed(1234)
+    torch.cuda.manual_seed_all(1234)
+
+
+def reassemble(events):
+    per_sequence = {}
+    for event in events:
+        per_sequence.setdefault(event.seq_id, []).append(event.token_id)
+    return [per_sequence[seq_id] for seq_id in sorted(per_sequence)]
+
+
+def test_second_session_and_public_engine_drivers_are_rejected():
+    engine, _ = make_fake_engine()
+    session = engine.stream(["first"], SamplingParams(max_tokens=2))
+    first_event = next(session)
+    assert first_event.seq_id in session.seq_ids
+
+    with pytest.raises(RuntimeError, match="active stream session"):
+        engine.stream(["second"], SamplingParams(max_tokens=2))
+    with pytest.raises(RuntimeError, match="active stream session"):
+        engine.generate(["second"], SamplingParams(max_tokens=2), use_tqdm=False)
+    with pytest.raises(RuntimeError, match="active stream session"):
+        engine.add_request("second", SamplingParams(max_tokens=2))
+    with pytest.raises(RuntimeError, match="active stream session"):
+        engine.step()
+
+    owned_ids = session.seq_ids
+    session.close()
+    assert engine.scheduler.cancel_calls[-1] == owned_ids
+    assert engine.scheduler.is_finished()
+
+    with engine.stream(["second"], SamplingParams(max_tokens=1)) as second:
+        assert len(list(second)) == 1
+
+
+def test_context_exit_cleans_up_a_retained_partial_stream():
+    engine, _ = make_fake_engine()
+    session = engine.stream(["first"], SamplingParams(max_tokens=4))
+    with session:
+        next(session)
+    assert session.closed
+    assert engine.scheduler.is_finished()
+    assert engine._active_session is None
+    session.close()
+
+
+def test_stream_delivery_metrics_are_caller_visible_without_event_arity_change():
+    engine, clock = make_fake_engine()
+    session = engine.stream(["first"], SamplingParams(max_tokens=2))
+    first = next(session)
+    clock.advance(3.0)
+    final = next(session)
+
+    assert len(first) == len(final) == 3
+    assert final.finished
+    assert session.closed
+    metrics = session.metrics[final.seq_id]
+    assert metrics["caller_ttft"] == pytest.approx(1.25)
+    assert metrics["first_token_to_delivery"] == pytest.approx(0.0)
+    assert metrics["caller_e2e"] == pytest.approx(5.25)
+    assert metrics["engine_finish_to_delivery"] == pytest.approx(0.0)
+
+
+def test_stream_validates_lengths_before_admission():
+    engine, _ = make_fake_engine()
+    with pytest.raises(ValueError, match="same number"):
+        engine.stream(
+            ["first", "second"],
+            [SamplingParams(max_tokens=1)],
+        )
+    assert engine.scheduler.sequences == []
+    assert engine.tokenizer.encoded == []
+    assert engine._active_session is None
+
+
+@pytest.mark.parametrize("method", ["stream", "generate"])
+def test_length_validation_precedes_initialized_engine_state(method):
+    engine = object.__new__(LLMEngine)
+    with pytest.raises(ValueError, match="same length"):
+        if method == "stream":
+            engine.stream(
+                ["first", "second"],
+                [SamplingParams(max_tokens=1)],
+            )
+        else:
+            engine.generate(
+                ["first", "second"],
+                [SamplingParams(max_tokens=1)],
+                use_tqdm=False,
+            )
+
+
+@pytest.mark.parametrize("method", ["stream", "generate"])
+def test_admission_failure_rolls_back_only_admitted_ids(method):
+    engine, _ = make_fake_engine()
+    params = SamplingParams(max_tokens=1)
+    with pytest.raises(IndexError):
+        if method == "stream":
+            engine.stream([[1], []], params)
+        else:
+            engine.generate([[1], []], params, use_tqdm=False)
+
+    assert len(engine.scheduler.cancel_calls) >= 1
+    assert len(engine.scheduler.cancel_calls[0]) == 1
+    assert engine.scheduler.is_finished()
+    assert engine._active_session is None
+
+    with engine.stream([[1]], params) as session:
+        assert len(list(session)) == 1
+
+
+def test_string_tokenization_failure_is_transactional():
+    engine, _ = make_fake_engine()
+    with pytest.raises(IndexError):
+        engine.stream(["first", "bad"], SamplingParams(max_tokens=1))
+    assert len(engine.scheduler.cancel_calls[0]) == 1
+    assert engine.scheduler.is_finished()
+    assert engine._active_session is None
+
+
+@pytest.mark.parametrize("method", ["stream", "generate"])
+def test_batch_capacity_is_preflighted_before_tokenization(method):
+    engine, _ = make_fake_engine(max_num_seqs=1)
+    params = SamplingParams(max_tokens=1)
+    with pytest.raises(SchedulerCapacityError, match="split the batch"):
+        if method == "stream":
+            engine.stream(["first", "second"], params)
+        else:
+            engine.generate(
+                ["first", "second"],
+                params,
+                use_tqdm=False,
+            )
+
+    assert engine.tokenizer.encoded == []
+    assert engine.scheduler.sequences == []
+    assert engine._active_session is None
+
+    with engine.stream(["retry"], params) as session:
+        assert len(list(session)) == 1
+
+
+def test_manual_capacity_failure_does_not_tokenize_and_can_retry():
+    engine, _ = make_fake_engine(max_num_seqs=1)
+    params = SamplingParams(max_tokens=1)
+    first_id = engine.add_request("first", params)
+
+    with pytest.raises(SchedulerCapacityError):
+        engine.add_request("blocked", params)
+    assert engine.tokenizer.encoded == ["first"]
+
+    engine.scheduler.cancel([first_id])
+    retry_id = engine.add_request("retry", params)
+    assert retry_id != first_id
+    assert engine.tokenizer.encoded == ["first", "retry"]
+
+
+def test_add_request_returns_seq_id_and_manual_step_keeps_pair_contract():
+    engine, _ = make_fake_engine()
+    seq_id = engine.add_request("first", SamplingParams(max_tokens=1))
+    outputs, num_tokens = engine.step()
+    assert outputs == [(seq_id, [20])]
+    assert num_tokens == -1
+
 
 def test_seeded_equivalence(llm):
-    _seed(); batch = [o["token_ids"] for o in llm.generate(PROMPTS, SP, use_tqdm=False)]
-    _seed(); streamed = _reassemble(llm.stream(PROMPTS, SP))
+    seed()
+    batch = [
+        output["token_ids"]
+        for output in llm.generate(PROMPTS, SP, use_tqdm=False)
+    ]
+    seed()
+    streamed = reassemble(llm.stream(PROMPTS, SP))
     assert streamed == batch
 
-def test_finished_flags(llm):
-    _seed(); events = list(llm.stream(PROMPTS, SP))
-    finished = [e for e in events if e.finished]
-    assert len(finished) == len(PROMPTS)
-    last_by_seq = {e.seq_id: e for e in events}
-    assert all(last_by_seq[e.seq_id] == e for e in finished)   # finished is each seq's last event
 
-def test_break_does_not_leak(llm):
-    bm = llm.scheduler.block_manager
-    baseline = len(bm.free_block_ids)
-    it = llm.stream(PROMPTS, SP)
-    for _ in range(5): next(it)
-    it.close()                                   # GeneratorExit -> finally -> cancel_all
-    assert len(bm.free_block_ids) == baseline
+def test_finished_flags(llm):
+    seed()
+    events = list(llm.stream(PROMPTS, SP))
+    finished = [event for event in events if event.finished]
+    assert len(finished) == len(PROMPTS)
+    last_by_sequence = {event.seq_id: event for event in events}
+    assert all(
+        last_by_sequence[event.seq_id] == event for event in finished
+    )
+
+
+def test_context_break_does_not_leak_gpu_blocks(llm):
+    block_manager = llm.scheduler.block_manager
+    baseline = len(block_manager.free_block_ids)
+    session = llm.stream(PROMPTS, SP)
+    with session:
+        for _ in range(5):
+            next(session)
+    assert session.closed
+    assert len(block_manager.free_block_ids) == baseline
     assert llm.scheduler.is_finished()
-    _seed(); out = llm.generate(PROMPTS, SP, use_tqdm=False)   # engine reusable
-    assert all(len(o["token_ids"]) == SP.max_tokens for o in out)
+
+    seed()
+    output = llm.generate(PROMPTS, SP, use_tqdm=False)
+    assert all(len(item["token_ids"]) == SP.max_tokens for item in output)
+
 
 def test_max_tokens_one(llm):
-    _seed()
-    events = list(llm.stream(PROMPTS, SamplingParams(temperature=0.6, max_tokens=1, ignore_eos=True)))
-    assert len(events) == len(PROMPTS) and all(e.finished for e in events)
-    # one event per seq, finished=True, emitted from its prefill-completing step
+    seed()
+    events = list(llm.stream(
+        PROMPTS,
+        SamplingParams(temperature=0.6, max_tokens=1, ignore_eos=True),
+    ))
+    assert len(events) == len(PROMPTS)
+    assert all(event.finished for event in events)
 
-def test_step_public_contract(llm):
-    _seed()
-    llm.add_request(PROMPTS[0], SP)
-    while not llm.is_finished():
-        out, num_tokens = llm.step()
-    assert out and len(out[0]) == 3          # (seq_id, token_ids, metrics) — bench_latency's shape
 
 def test_chunked_prefill_emission(llm, monkeypatch):
-    # Budget is a plain scheduler attribute read fresh each schedule() call —
-    # shrink it at runtime to force multi-chunk prefill on the shared engine.
-    monkeypatch.setattr(llm.scheduler, "max_num_batched_tokens", 64)
-    long_prompt = [11] * 200                     # chunks: 64/64/64/8
-    sp = SamplingParams(temperature=0.6, max_tokens=8, ignore_eos=True)
-    events = list(llm.stream([long_prompt], sp))
-    assert len(events) == sp.max_tokens          # 3 intermediate chunks emitted nothing
-    assert events[-1].finished and not any(e.finished for e in events[:-1])
+    monkeypatch.setattr(llm.scheduler, "_max_num_batched_tokens", 64)
+    long_prompt = [11] * 200
+    params = SamplingParams(temperature=0.6, max_tokens=8, ignore_eos=True)
+    events = list(llm.stream([long_prompt], params))
+    assert len(events) == params.max_tokens
+    assert events[-1].finished
+    assert not any(event.finished for event in events[:-1])
+
+
+def test_prefix_cache_stream_generate_equivalence(llm):
+    prompt = [11] * 300
+    params = SamplingParams(temperature=0.6, max_tokens=8, ignore_eos=True)
+    seed()
+    llm.generate([prompt], params, use_tqdm=False)
+    seed()
+    streamed = reassemble(llm.stream([prompt], params))[0]
+    seed()
+    generated = llm.generate([prompt], params, use_tqdm=False)[0]["token_ids"]
+    assert streamed == generated

@@ -18,6 +18,17 @@ class Config:
     num_kvcache_blocks: int = -1
 
     def __post_init__(self):
+        for name in ("max_num_batched_tokens", "max_num_seqs"):
+            value = getattr(self, name)
+            if type(value) is not int:
+                raise TypeError(f"{name} must be an integer")
+            if value <= 0:
+                raise ValueError(f"{name} must be positive")
+        if self.max_num_batched_tokens < self.max_num_seqs:
+            raise ValueError(
+                "max_num_batched_tokens must be greater than or equal to "
+                "max_num_seqs"
+            )
         assert os.path.isdir(self.model)
         assert self.kvcache_block_size % 256 == 0
         assert 1 <= self.tensor_parallel_size <= 8

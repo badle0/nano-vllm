@@ -1,15 +1,65 @@
 import torch
 from torch import nn
 
-@torch.compiler.disable
-def _top_p_mask(sorted_logits: torch.Tensor, top_ps: torch.Tensor) -> torch.Tensor:
-    # Runs eager: Inductor (torch 2.10, CUDA) crashes compiling this cumsum
-    # inside the fused sampler graph. See pr3_topp.md.
-    probs_sort = sorted_logits.softmax(dim=-1)
-    cum = probs_sort.cumsum(dim=-1)
-    return sorted_logits.masked_fill((cum - probs_sort) > top_ps.unsqueeze(1), float("-inf"))
-
 class Sampler(nn.Module):
+
+    TOP_P_CHUNK_SIZE = 64
+
+    @torch.compile
+    def greedy(self, logits: torch.Tensor):
+        return logits.argmax(dim=-1)
+
+    @torch.inference_mode()
+    def filter_top_k(
+        self,
+        logits: torch.Tensor,
+        row_indices: torch.Tensor | None,
+        top_k: int,
+    ):
+        active_logits = logits if row_indices is None else logits.index_select(0, row_indices)
+        top_k_values = torch.topk(active_logits, top_k, dim=-1, sorted=False).values
+        threshold = top_k_values.amin(dim=-1, keepdim=True)
+        active_logits.masked_fill_(active_logits < threshold, float("-inf"))
+        if row_indices is not None:
+            logits.index_copy_(0, row_indices, active_logits)
+        return logits
+
+    @torch.inference_mode()
+    def filter_top_p(
+        self,
+        logits: torch.Tensor,
+        temperatures: torch.Tensor,
+        row_indices: torch.Tensor | None,
+        probability_cutoffs: torch.Tensor,
+    ):
+        active_logits = logits if row_indices is None else logits.index_select(0, row_indices)
+        active_temperatures = (
+            temperatures
+            if row_indices is None
+            else temperatures.index_select(0, row_indices)
+        )
+        for start in range(0, active_logits.size(0), self.TOP_P_CHUNK_SIZE):
+            end = min(start + self.TOP_P_CHUNK_SIZE, active_logits.size(0))
+            chunk_logits = active_logits[start:end]
+            chunk_temperatures = active_temperatures[start:end].clamp_min(1e-10)
+            scaled_logits = chunk_logits.float().div_(
+                chunk_temperatures.unsqueeze(dim=1)
+            )
+            sorted_logits, sorted_indices = torch.sort(
+                scaled_logits, dim=-1, descending=False
+            )
+            cumulative_probs = sorted_logits.softmax(dim=-1).cumsum(dim=-1)
+            sorted_indices_to_remove = cumulative_probs <= (
+                probability_cutoffs[start:end].unsqueeze(dim=1)
+            )
+            sorted_indices_to_remove[:, -1] = False
+            indices_to_remove = torch.zeros_like(sorted_indices_to_remove).scatter_(
+                -1, sorted_indices, sorted_indices_to_remove
+            )
+            chunk_logits.masked_fill_(indices_to_remove, float("-inf"))
+        if row_indices is not None:
+            logits.index_copy_(0, row_indices, active_logits)
+        return logits
 
     @torch.compile
     def forward(self, logits: torch.Tensor, temperatures: torch.Tensor,

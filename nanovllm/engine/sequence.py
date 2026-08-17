@@ -11,6 +11,7 @@ class SequenceStatus(Enum):
     WAITING = auto()
     RUNNING = auto()
     FINISHED = auto()
+    CANCELLED = auto()
 
 class StreamOutput(NamedTuple):
     seq_id: int
@@ -21,7 +22,14 @@ class Sequence:
     block_size = 256
     counter = count()
 
-    def __init__(self, token_ids: list[int], sampling_params = SamplingParams()):
+    def __init__(
+        self,
+        token_ids: list[int],
+        sampling_params=SamplingParams(),
+        *,
+        submission_time: float | None = None,
+        engine_arrival_time: float | None = None,
+    ):
         self.seq_id = next(Sequence.counter)
         self.status = SequenceStatus.WAITING
         self.token_ids = copy(token_ids)
@@ -37,10 +45,19 @@ class Sequence:
         self.top_p = sampling_params.top_p
         self.max_tokens = sampling_params.max_tokens
         self.ignore_eos = sampling_params.ignore_eos
-        self.arrival_time = perf_counter()
+        if submission_time is None or engine_arrival_time is None:
+            now = perf_counter()
+            if submission_time is None:
+                submission_time = now
+            if engine_arrival_time is None:
+                engine_arrival_time = now
+        self.submission_time = submission_time
+        self.engine_arrival_time = engine_arrival_time
         self.first_scheduled_time = None
         self.first_token_time = None
         self.finish_time = None
+        self.first_delivery_time = None
+        self.delivery_time = None
         self.token_times = []
 
     def __len__(self):
@@ -81,20 +98,3 @@ class Sequence:
         self.token_ids.append(token_id)
         self.last_token = token_id
         self.num_tokens += 1
-
-    def __getstate__(self):
-        last_state = self.last_token if not self.is_prefill else self.token_ids
-        return (self.num_tokens, self.num_prompt_tokens, self.num_cached_tokens, self.num_scheduled_tokens, self.block_table, last_state)
-
-    def __setstate__(self, state):
-        self.num_tokens, self.num_prompt_tokens, self.num_cached_tokens, self.num_scheduled_tokens, self.block_table, last_state = state
-        # the payload already encodes the mode: prefill ships the token list, decode
-        # ships last_token alone — prepare_ragged branches on is_prefill per row, so
-        # TP workers (pickle bypasses __init__) must get the flag restored here
-        self.is_prefill = isinstance(last_state, list)
-        if self.is_prefill:
-            self.token_ids = last_state
-            self.last_token = self.token_ids[-1]
-        else:
-            self.token_ids = []
-            self.last_token = last_state

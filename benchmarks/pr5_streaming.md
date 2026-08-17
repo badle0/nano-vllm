@@ -1,5 +1,46 @@
 # PR 5 (token streaming API) — design and validation record
 
+## 2026-08-17 repair addendum
+
+The measurements below are retained as historical evidence, but the original
+ownership and append-only text designs are superseded by the repaired API:
+
+- `stream()` eagerly returns a single active `StreamSession`. A second stream or
+  generate call is rejected until that session finishes or closes.
+- `StreamSession` is an iterator and context manager. Early exit must use
+  `with llm.stream(...) as stream:` or an explicit `stream.close()`; a retained
+  iterator is not closed merely by breaking a loop.
+- Admission is transactional. Cleanup calls `Scheduler.cancel(seq_ids)` with
+  only IDs admitted by that request; it never performs global cancellation.
+- `add_request()` returns its sequence ID. Public `step()` retains legacy pairs,
+  while `step_with_metrics()` is the opt-in metrics API.
+- `StreamOutput` remains the three-field token event. Caller first/final delivery
+  metrics are exposed through `StreamSession.metrics` after each request finishes.
+- `StreamingDetokenizer.feed()` returns a correction-capable `TextUpdate`, not an
+  append-only string. It decodes a bounded unstable tail, advances its stable
+  frontier only across an exactly reconstructible split, and performs one exact
+  full decode at `flush()`.
+
+The repaired suite passes 43 tests on the pinned A100/Qwen3-0.6B environment,
+including ownership rejection, scoped cancellation, failed-admission rollback,
+context cleanup, prefix-cache equivalence, tokenizer rewrites across window
+shifts, and a structural bounded-decode-work gate. Throughput figures later in
+this document describe the original branch and must not be relabeled as fresh
+measurements of the repaired implementation.
+
+The repaired bounded-window benchmark, including one exact final flush per
+sequence, produced:
+
+| tokens | repaired us/token |
+|---:|---:|
+| 64 | 19.6 |
+| 256 | 21.1 |
+| 1,024 | 22.4 |
+| 2,048 | 23.4 |
+
+The nearly flat per-token cost replaces the original cumulative path whose cost
+rose to roughly 230 us/token at 2,048 tokens.
+
 Branch: feat/token-streaming (two commits over feat/request-metrics 08a6e35; stacked on
 the metrics PR, independent of the sampling series).
 Hardware/env: Vast.ai A100 SXM4, torch 2.10 + cu128 + flash-attn 2.8.1, Qwen3-0.6B bf16.

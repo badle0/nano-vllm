@@ -1,4 +1,3 @@
-import os
 import pytest
 
 @pytest.fixture(scope="session")
@@ -13,5 +12,8 @@ def llm():
     # ONE engine per pytest process — nano-vllm engines cannot coexist:
     # unconditional dist.init_process_group (model_runner:26), atexit-pinned
     # 0.9 memory grab (llm_engine:36), fixed shm name for TP>1.
-    return LLM(os.path.expanduser("~/huggingface/Qwen3-0.6B"),
-               enforce_eager=False, max_model_len=4096)
+    return LLM(
+        "/workspace/models/Qwen3-0.6B",
+        enforce_eager=False,
+        max_model_len=4096,
+    )
