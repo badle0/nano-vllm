@@ -49,3 +49,37 @@ by the full-vocabulary sort: its measured end-to-end throughput loss was 38.3%
 at batch 256. That all-active result is still a performance release blocker
 until the project agrees to that cost or adopts an oracle-equivalent fused
 selection implementation.
+
+## Rejected all-active prototypes
+
+Follow-up work on the same A100 evaluated two tempting shortcuts and reverted
+both without changing release code.
+
+Sorting BF16 logits before FP32 temperature scaling reduced the unit-temperature
+filter median from 9.235 to 7.981 ms and incremental scratch from 617.9 to
+531.7 MiB. It is not a portable Transformers-equivalent transformation:
+`TopPLogitsWarper` sorts the scaled FP32 scores with the default `stable=False`
+mode, which has no public tie-order guarantee, whereas an
+explicitly stable low-precision sort can choose different members of a cutoff
+tie. Non-unit division can also merge distinct low-precision values or overflow
+them. A proposed host-only "safe temperature" range did not prove injectivity
+for max-BF16/tiny-temperature scaling and was removed.
+
+Adding a per-call scaled-boundary equivalence check and the original FP32-sort
+fallback preserved the tested oracle behavior, but the synchronization erased
+most of the gain. At temperature 0.6 its filter median moved only from 9.160 to
+8.508 ms. In the declared B=256 end-to-end protocol, disabled top-p produced
+17,193.7 output tokens/s and the checked candidate produced 10,905.8 tokens/s,
+a 36.57% loss. No top-p budget has been agreed, and this remains a material
+unresolved enabled-path regression.
+
+The plan-permitted stable descending minimal-nucleus contract was also tested.
+On 256 random BF16 rows at temperature 0.6 it disagreed with the Transformers
+support in 252 rows and 13,260 token positions. Both contracts kept a median of
+53,257 tokens (35.05% of the vocabulary), while full-filter latency changed only
+from 10.730 to 9.455 ms. That compatibility cost is not justified by the small
+speedup, so the Transformers ascending contract remains in force.
+
+These results leave the release blocker unchanged. A viable next attempt needs
+an oracle-equivalent segmented selection/fused kernel that preserves the actual
+scaled-score cutoff tie, without a host synchronization on every decode step.
