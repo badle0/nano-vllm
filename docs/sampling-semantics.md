@@ -29,6 +29,33 @@ alter the number or order of random draws for inactive rows. All-active top-p
 work is processed in chunks of 64 rows to bound temporary allocation without
 changing per-row support.
 
+## Greedy and top-k repair evidence
+
+The greedy repair is pinned to `ec98870`; the top-k repair is pinned to its
+descendant `8759c87`. On the declared A100 environment, three fresh processes
+per B=256 sampler route produced the following aggregate values. Cold is the
+median first call from unique empty Inductor caches; steady median and p95 are
+medians of the per-process statistics; peak is the maximum per-process
+incremental allocated-memory peak.
+
+| Route | Cold wall | Steady median | Steady p95 | Peak incremental allocation |
+|---|---:|---:|---:|---:|
+| homogeneous greedy | 1,171.37 ms | 0.177 ms | 0.185 ms | 0.002 MiB |
+| top-k disabled | 1,893.14 ms | 1.011 ms | 1.026 ms | 148.38 MiB |
+| one row at top-k 50 | 2,003.54 ms | 1.069 ms | 1.112 ms | 148.38 MiB |
+| all rows at top-k 50 | 1,943.67 ms | 2.038 ms | 2.043 ms | 148.38 MiB |
+
+The common stochastic sampler dominates the allocated-memory peak. Activating
+one top-k row adds only 5.78% sampler latency over disabled, while all-active
+work is 1.91x the one-active route, confirming active-row scaling.
+
+Four additional fresh B=256 end-to-end processes balanced which scenario ran
+first. Their paired top-k-50 throughput changes were -6.31%, -5.98%, -6.48%,
+and -5.93%; the median paired loss was -6.15%, inside the suggested 10% budget.
+The exact harnesses, process order, environment/model pins, raw samples, hashes,
+and validator are in
+[`benchmarks/sampling_evidence/`](../benchmarks/sampling_evidence/README.md).
+
 ## A100 regression gates
 
 The 2026-08-17 repair was measured on an NVIDIA A100-SXM4-40GB with PyTorch
@@ -49,3 +76,37 @@ by the full-vocabulary sort: its measured end-to-end throughput loss was 38.3%
 at batch 256. That all-active result is still a performance release blocker
 until the project agrees to that cost or adopts an oracle-equivalent fused
 selection implementation.
+
+## Rejected all-active prototypes
+
+Follow-up work on the same A100 evaluated two tempting shortcuts and reverted
+both without changing release code.
+
+Sorting BF16 logits before FP32 temperature scaling reduced the unit-temperature
+filter median from 9.235 to 7.981 ms and incremental scratch from 617.9 to
+531.7 MiB. It is not a portable Transformers-equivalent transformation:
+`TopPLogitsWarper` sorts the scaled FP32 scores with the default `stable=False`
+mode, which has no public tie-order guarantee, whereas an
+explicitly stable low-precision sort can choose different members of a cutoff
+tie. Non-unit division can also merge distinct low-precision values or overflow
+them. A proposed host-only "safe temperature" range did not prove injectivity
+for max-BF16/tiny-temperature scaling and was removed.
+
+Adding a per-call scaled-boundary equivalence check and the original FP32-sort
+fallback preserved the tested oracle behavior, but the synchronization erased
+most of the gain. At temperature 0.6 its filter median moved only from 9.160 to
+8.508 ms. In the declared B=256 end-to-end protocol, disabled top-p produced
+17,193.7 output tokens/s and the checked candidate produced 10,905.8 tokens/s,
+a 36.57% loss. No top-p budget has been agreed, and this remains a material
+unresolved enabled-path regression.
+
+The plan-permitted stable descending minimal-nucleus contract was also tested.
+On 256 random BF16 rows at temperature 0.6 it disagreed with the Transformers
+support in 252 rows and 13,260 token positions. Both contracts kept a median of
+53,257 tokens (35.05% of the vocabulary), while full-filter latency changed only
+from 10.730 to 9.455 ms. That compatibility cost is not justified by the small
+speedup, so the Transformers ascending contract remains in force.
+
+These results leave the release blocker unchanged. A viable next attempt needs
+an oracle-equivalent segmented selection/fused kernel that preserves the actual
+scaled-score cutoff tie, without a host synchronization on every decode step.

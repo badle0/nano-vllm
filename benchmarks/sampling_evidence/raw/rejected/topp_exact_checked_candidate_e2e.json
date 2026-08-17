@@ -1,0 +1,66 @@
+{
+  "batches": {
+    "256": {
+      "top_p_0.9": {
+        "cold": {
+          "elapsed_s": 0.7477947194129229,
+          "output_tokens_per_s": 10954.878106696659,
+          "rep": 0
+        },
+        "median_elapsed_s": 0.7511566057801247,
+        "median_output_tokens_per_s": 10905.848310409358,
+        "steady": [
+          {
+            "elapsed_s": 0.7448285315185785,
+            "output_tokens_per_s": 10998.504559563404,
+            "rep": 1
+          },
+          {
+            "elapsed_s": 0.7511566057801247,
+            "output_tokens_per_s": 10905.848310409358,
+            "rep": 2
+          },
+          {
+            "elapsed_s": 0.758450947701931,
+            "output_tokens_per_s": 10800.962178004202,
+            "rep": 3
+          }
+        ]
+      },
+      "top_p_disabled": {
+        "cold": {
+          "elapsed_s": 0.6157662067562342,
+          "output_tokens_per_s": 13303.750530829308,
+          "rep": 0
+        },
+        "median_elapsed_s": 0.4764532335102558,
+        "median_output_tokens_per_s": 17193.712674895014,
+        "steady": [
+          {
+            "elapsed_s": 0.4740997161716223,
+            "output_tokens_per_s": 17279.06539609597,
+            "rep": 1
+          },
+          {
+            "elapsed_s": 0.4775916039943695,
+            "output_tokens_per_s": 17152.73034845181,
+            "rep": 2
+          },
+          {
+            "elapsed_s": 0.4764532335102558,
+            "output_tokens_per_s": 17193.712674895014,
+            "rep": 3
+          }
+        ]
+      }
+    }
+  },
+  "cuda": "12.8",
+  "gpu": "NVIDIA A100-SXM4-40GB",
+  "mode": "topp",
+  "model": "/workspace/models/Qwen3-0.6B",
+  "output_len": 32,
+  "prompt_len": 128,
+  "repetitions": 4,
+  "torch": "2.10.0+cu128"
+}

@@ -21,25 +21,65 @@ ownership and append-only text designs are superseded by the repaired API:
   frontier only across an exactly reconstructible split, and performs one exact
   full decode at `flush()`.
 
-The repaired suite passes 43 tests on the pinned A100/Qwen3-0.6B environment,
+The repaired suite passes 45 tests on the pinned A100/Qwen3-0.6B environment,
 including ownership rejection, scoped cancellation, failed-admission rollback,
 context cleanup, prefix-cache equivalence, tokenizer rewrites across window
-shifts, and a structural bounded-decode-work gate. Throughput figures later in
-this document describe the original branch and must not be relabeled as fresh
-measurements of the repaired implementation.
+shifts, and a structural bounded-decode-work gate.
 
-The repaired bounded-window benchmark, including one exact final flush per
-sequence, produced:
+### Fresh repaired evidence
 
-| tokens | repaired us/token |
+The release evidence is machine-readable at
+[`pr5_results/repaired_streaming_a100_2026-08-17.json`](pr5_results/repaired_streaming_a100_2026-08-17.json).
+It contains every raw observation plus the model-config hash, clean repository
+commit `8e24de3`, benchmark-script hash, branch, GPU/driver, and package versions.
+The protocol used four fresh worker processes with balanced `generate -> stream`
+and `stream -> generate` order. Each worker warmed both paths before measuring a
+16-request, 128-token pair with the same seed.
+
+The null-consumer paired stream delta had a **+0.70% median** and a
+**-3.99% to +4.70% range**. The sign followed measurement order, so these data
+support neither a throughput regression nor an improvement claim:
+
+| path | median output tokens/s |
+|---|---:|
+| `generate()` return path | 4,589.2 |
+| drained `stream()` with null consumer | 4,665.9 |
+
+All four seeded stream/generate pairs were token-identical. Caller-visible
+delivery was substantially earlier, but this is a delivery-boundary comparison,
+not a model-TTFT claim:
+
+| caller boundary | median |
+|---|---:|
+| `generate()` API return | 446.3 ms |
+| first `StreamSession` event | 27.0 ms |
+| paired exposure factor | 16.45x |
+
+The synchronous backpressure shape matched one consumer delay per event. With
+eight requests, median inter-step gaps were 3.02, 11.48, and 36.09 ms for 0, 1,
+and 4 ms sleep per event. After delivery, pending storage never exceeded seven
+events: the rest of the current scheduler step, not an unbounded producer queue.
+
+The correction-capable `TextUpdate` consumer reconstructed the exact full decode
+at every tested length. Timed cost includes applying every update and one exact
+final flush:
+
+| tokens | median us/token |
 |---:|---:|
-| 64 | 19.6 |
-| 256 | 21.1 |
-| 1,024 | 22.4 |
-| 2,048 | 23.4 |
+| 64 | 17.8 |
+| 256 | 21.9 |
+| 1,024 | 21.4 |
+| 2,048 | 21.4 |
 
-The nearly flat per-token cost replaces the original cumulative path whose cost
-rose to roughly 230 us/token at 2,048 tokens.
+No incremental decode covered more than 40 tokens, and each sequence performed
+exactly one full-length decode at flush. This structural bound is the release
+gate; it is stronger than interpreting small CPU timing differences as a trend.
+
+## Historical contribution record (superseded)
+
+The remainder of this document records the original feature branch. Its API and
+same-process measurements are retained for provenance, not as repaired release
+claims.
 
 Branch: feat/token-streaming (two commits over feat/request-metrics 08a6e35; stacked on
 the metrics PR, independent of the sampling series).
@@ -295,18 +335,34 @@ never pays it, which is the payoff of the IDs-only payload decision.
 
 ## Reproduction
 
-pip install -e . --no-deps
-pytest tests/ -v                                   # 18 passed
-python example_stream.py                           # live typing demo
+### Repaired branch
 
-All scripts run from the repo root; each was run twice with the first run discarded:
+```bash
+source /venv/main/bin/activate
+PYTHONPATH=. pytest -q tests                         # 45 passed
+PYTHONPATH=. python benchmarks/pr5_scripts/repaired_stream_benchmark.py \
+  --model /workspace/models/Qwen3-0.6B \
+  --runs 4 \
+  --output benchmarks/pr5_results/repaired_streaming_a100_2026-08-17.json
+```
 
-python benchmarks/pr5_scripts/ttft_caller.py       # caller-visible TTFT, batch vs stream
-python benchmarks/pr5_scripts/null_consumer.py     # throughput cost, null consumer
-python benchmarks/pr5_scripts/slow_consumer.py     # step-coupling model
-python benchmarks/pr5_scripts/detok_cost.py        # cumulative-decode scaling (CPU only)
+The benchmark refuses fewer than three workers for release evidence and refuses
+to overwrite an existing result unless `--overwrite` is explicit. The parent
+does not import torch; every observation initializes and tears down its own
+CUDA/model worker.
 
-Raw output of the recorded session: benchmarks/pr5_raw_results.txt
+### Original branch (historical)
+
+The following same-process scripts and
+[`pr5_raw_results.txt`](pr5_raw_results.txt) are preserved only to reproduce the
+original contribution record:
+
+```bash
+python benchmarks/pr5_scripts/ttft_caller.py
+python benchmarks/pr5_scripts/null_consumer.py
+python benchmarks/pr5_scripts/slow_consumer.py
+python benchmarks/pr5_scripts/detok_cost.py
+```
 
 ## References
 

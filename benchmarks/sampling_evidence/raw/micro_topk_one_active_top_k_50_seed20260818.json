@@ -1,0 +1,82 @@
+{
+  "argv": [
+    "/workspace/nano-vllm-sampling-evidence/benchmarks/sampling_evidence/sampler_bench.py",
+    "topk",
+    "one_active_top_k_50",
+    "--seed",
+    "20260818",
+    "--output",
+    "/workspace/nano-vllm-sampling-evidence/benchmarks/sampling_evidence/raw/micro_topk_one_active_top_k_50_seed20260818.json"
+  ],
+  "benchmark": "repaired_sampling_microbenchmark",
+  "cold": {
+    "cuda_ms": 1924.21484375,
+    "peak_incremental_allocated_mib": 148.37744140625,
+    "wall_ms": 1924.172943457961
+  },
+  "commit": "8759c877382f11ea16b40fdbd0dace7000b5e9ba",
+  "configuration": {
+    "batch": 256,
+    "dtype": "bfloat16",
+    "input_restore_outside_timed_region": true,
+    "percentile_method": "nearest_rank",
+    "steady_iterations": 25,
+    "top_k": 50,
+    "vocab": 151936,
+    "warmups_after_cold": 5
+  },
+  "environment": {
+    "cuda_build": "12.8",
+    "gpu": "NVIDIA A100-SXM4-40GB",
+    "gpu_total_memory_bytes": 42406903808,
+    "nvidia_driver": "570.133.20",
+    "python": "3.12.13",
+    "torch": "2.10.0+cu128",
+    "transformers": "5.14.1"
+  },
+  "execution": {
+    "cuda_visible_devices": null,
+    "cwd": "/workspace/nano-vllm-topk-bench",
+    "pythonpath": ".",
+    "torchinductor_cache_dir": "/tmp/nv_sampling_micro_topk_one_20260818_r2"
+  },
+  "feature": "topk",
+  "scenario": "one_active_top_k_50",
+  "schema_version": 1,
+  "seed": 20260818,
+  "started_at_utc": "2026-08-17T11:17:22.335263+00:00",
+  "steady": {
+    "max_cuda_ms": 1.1233279705047607,
+    "median_cuda_ms": 1.099776029586792,
+    "min_cuda_ms": 1.0577919483184814,
+    "p95_cuda_ms": 1.1212799549102783,
+    "peak_incremental_allocated_mib": 148.37744140625,
+    "samples_cuda_ms": [
+      1.0915839672088623,
+      1.1212799549102783,
+      1.1141120195388794,
+      1.1100159883499146,
+      1.1151360273361206,
+      1.1110399961471558,
+      1.0690560340881348,
+      1.1038719415664673,
+      1.1018240451812744,
+      1.07315194606781,
+      1.0639359951019287,
+      1.1048959493637085,
+      1.1233279705047607,
+      1.060863971710205,
+      1.1018240451812744,
+      1.0987520217895508,
+      1.060863971710205,
+      1.117184042930603,
+      1.0977280139923096,
+      1.0577919483184814,
+      1.0803200006484985,
+      1.0977280139923096,
+      1.1028480529785156,
+      1.0598399639129639,
+      1.099776029586792
+    ]
+  }
+}

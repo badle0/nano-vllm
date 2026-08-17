@@ -1,0 +1,139 @@
+{
+  "artifact_kind": "historical_benchmark_provenance",
+  "benchmark": {
+    "harness": {
+      "path": "benchmarks/request_metrics/metrics_overhead.py",
+      "sha256": "52d717956323971a6fba0e193e04c5d839c6d199fa5036db6251cb38113942b4",
+      "source": "byte-for-byte copy of the historical external harness"
+    },
+    "protocol": {
+      "batch_sizes": [
+        64,
+        256
+      ],
+      "cold_observations_excluded_from_median": 1,
+      "generation": {
+        "ignore_eos": true,
+        "output_tokens": 32,
+        "temperature": 0.6
+      },
+      "model_configuration": {
+        "enforce_eager": false,
+        "gpu_memory_utilization": 0.8,
+        "max_model_len": 1024,
+        "max_num_seqs": 256
+      },
+      "pair_order": "baseline_then_repair",
+      "process_isolation": "fresh_process_per_side_per_seed",
+      "prompt_tokens": 128,
+      "repetitions": 4,
+      "source": "post-run reconstruction from the exact historical harness and raw-file timestamps; batch sizes and observations are also present in raw outputs",
+      "seed_formulas": {
+        "prompt_rng": "seed + batch",
+        "torch": "seed * 1000 + batch * 10 + repetition"
+      },
+      "warmup": {
+        "generated_tokens": 2,
+        "prompt_token_ids": [
+          17,
+          19,
+          23
+        ]
+      }
+    }
+  },
+  "code_under_test": {
+    "baseline": {
+      "commit": "bb823b3e06983d71485a8e1f23715ebd87d98ef8",
+      "embedded_in_raw_results": false,
+      "label": "main",
+      "source": "post-run reconstruction from the clean baseline worktree"
+    },
+    "repair": {
+      "commit": "2ac1fef510d5e7698a070add1332035903c59457",
+      "embedded_in_raw_results": false,
+      "label": "fix-request-metrics",
+      "source": "post-run reconstruction from the clean repair worktree"
+    }
+  },
+  "environment": {
+    "cuda_wheel": {
+      "embedded_in_raw_results": true,
+      "value": "12.8"
+    },
+    "gpu": {
+      "embedded_in_raw_results": true,
+      "value": "NVIDIA A100-SXM4-40GB"
+    },
+    "model_path": {
+      "embedded_in_raw_results": false,
+      "source": "post-run reconstruction from the benchmark invocation context",
+      "value": "/workspace/models/Qwen3-0.6B"
+    },
+    "nvidia_driver": {
+      "embedded_in_raw_results": false,
+      "source": "post-run nvidia-smi query on the same still-running instance",
+      "value": "570.133.20"
+    },
+    "python": {
+      "embedded_in_raw_results": false,
+      "source": "post-run query of the unchanged /venv/main environment",
+      "value": "3.12.13"
+    },
+    "pytorch": {
+      "embedded_in_raw_results": true,
+      "value": "2.10.0+cu128"
+    },
+    "transformers": {
+      "embedded_in_raw_results": false,
+      "source": "post-run query of the unchanged /venv/main environment",
+      "value": "5.14.1"
+    }
+  },
+  "provenance_notice": "Raw files are preserved byte-for-byte. Commit IDs, model path, NVIDIA driver, Transformers/Python versions, commands, pair order, and historical file mtimes were reconstructed after the run and were not embedded by the historical harness.",
+  "runs": [
+    {
+      "baseline": {
+        "historical_mtime_utc": "2026-08-17T05:01:51.189185055Z",
+        "path": "benchmarks/request_metrics/raw/metrics_fix_main_seed1.json",
+        "sha256": "68f3d1244cba8355f567984f18d8548dd51d55fd0228127b720624bd776679d7"
+      },
+      "pair": 1,
+      "repair": {
+        "historical_mtime_utc": "2026-08-17T05:02:16.901615695Z",
+        "path": "benchmarks/request_metrics/raw/metrics_fix_branch_seed1.json",
+        "sha256": "5245c27d11c76a8b6856ec2e972dd2926ee481dff84e35332370eac998b335a4"
+      },
+      "seed": 20260817
+    },
+    {
+      "baseline": {
+        "historical_mtime_utc": "2026-08-17T05:02:43.566062331Z",
+        "path": "benchmarks/request_metrics/raw/metrics_fix_main_seed2.json",
+        "sha256": "35aa7ced4fc75216985d44788824a7fe53be719b26554b162bf29b5b09d592ba"
+      },
+      "pair": 2,
+      "repair": {
+        "historical_mtime_utc": "2026-08-17T05:03:09.050489245Z",
+        "path": "benchmarks/request_metrics/raw/metrics_fix_branch_seed2.json",
+        "sha256": "7bbefd7900bf477369bff24a76b28b489f2c2cfb7beac7a4a267c000e1429cf6"
+      },
+      "seed": 20260818
+    },
+    {
+      "baseline": {
+        "historical_mtime_utc": "2026-08-17T05:03:35.622934436Z",
+        "path": "benchmarks/request_metrics/raw/metrics_fix_main_seed3.json",
+        "sha256": "f69c6c414eca6cecfdf37a775997b9109e01a30ac4b70919361fed3b10b89e65"
+      },
+      "pair": 3,
+      "repair": {
+        "historical_mtime_utc": "2026-08-17T05:04:02.999393141Z",
+        "path": "benchmarks/request_metrics/raw/metrics_fix_branch_seed3.json",
+        "sha256": "1727a5824bf65e180f7443534781e724290ed4611daae7990ffe0de2ca5db74f"
+      },
+      "seed": 20260819
+    }
+  ],
+  "schema_version": 1
+}
