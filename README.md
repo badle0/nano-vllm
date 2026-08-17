@@ -91,6 +91,9 @@ See `bench.py` for benchmark.
 The reproducible request-metrics overhead A/B protocol, provenance manifest,
 and byte-for-byte raw results are in `benchmarks/request_metrics/`.
 
+Fresh-process repaired greedy/top-k release evidence and retained raw results
+are documented in `benchmarks/sampling_evidence/`.
+
 **Test Configuration:**
 - Hardware: RTX 4070 Laptop (8GB)
 - Model: Qwen3-0.6B

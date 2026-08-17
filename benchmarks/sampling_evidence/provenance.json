@@ -1,0 +1,322 @@
+{
+  "artifact_kind": "repaired_sampling_release_evidence",
+  "code_under_test": {
+    "evidence_base": "b02f1efed6b33090fc6d23b1da0793c6365962c8",
+    "greedy_repair": "ec988708bbe1e4e84e97c3fc0599378c01920e3a",
+    "topk_repair": "8759c877382f11ea16b40fdbd0dace7000b5e9ba"
+  },
+  "environment": {
+    "cuda_build": "12.8",
+    "gpu": "NVIDIA A100-SXM4-40GB",
+    "gpu_total_memory_bytes": 42406903808,
+    "nvidia_driver": "570.133.20",
+    "python": "3.12.13",
+    "pytorch": "2.10.0+cu128",
+    "source": "embedded in every fresh release raw result",
+    "transformers": "5.14.1"
+  },
+  "harnesses": [
+    {
+      "path": "benchmarks/sampling_evidence/sampler_bench.py",
+      "sha256": "6455cfd8a1aac45ec48234b71757e3e436a790755c34d630275b8dd6d5c1d28b"
+    },
+    {
+      "path": "benchmarks/sampling_evidence/topk_e2e_bench.py",
+      "sha256": "3222ec6bbed35aefb9f0f90f827ce066f785fd8259c726bb2a1eec873d40b37d"
+    }
+  ],
+  "model": {
+    "config": {
+      "model_type": "qwen3",
+      "torch_dtype": "bfloat16",
+      "vocab_size": 151936
+    },
+    "embedded_path_in_e2e_raw_results": true,
+    "files": [
+      {
+        "path": "config.json",
+        "sha256": "660db3b73d788119c04535e48cf9be5f55bc3100841a718637ae695b442f27dd"
+      },
+      {
+        "path": "model.safetensors",
+        "sha256": "f47f71177f32bcd101b7573ec9171e6a57f4f4d31148d38e382306f42996874b"
+      },
+      {
+        "path": "tokenizer.json",
+        "sha256": "aeb13307a71acd8fe81861d94ad54ab689df773318809eed3cbe794b4492dae4"
+      }
+    ],
+    "path": "/workspace/models/Qwen3-0.6B",
+    "sha256_source": "post-run manifest construction; hashes were not embedded by the benchmark process"
+  },
+  "protocol": {
+    "e2e": {
+      "batch": 256,
+      "cold_observations_excluded": 1,
+      "first_scenario_order": [
+        "disabled",
+        "enabled",
+        "disabled",
+        "enabled"
+      ],
+      "fresh_processes": 4,
+      "gpu_memory_utilization": 0.8,
+      "ignore_eos": true,
+      "max_model_len": 1024,
+      "max_num_seqs": 256,
+      "output_tokens": 32,
+      "prompt_tokens": 128,
+      "repetitions_per_process": 4,
+      "seeds": [
+        20260817,
+        20260818,
+        20260819,
+        20260820
+      ],
+      "temperature": 0.6,
+      "top_k": 50
+    },
+    "micro": {
+      "batch": 256,
+      "dtype": "bfloat16",
+      "fresh_processes_per_scenario": 3,
+      "percentile_method": "nearest_rank",
+      "process_rounds": [
+        {
+          "order": [
+            "greedy_all",
+            "disabled",
+            "one_active_top_k_50",
+            "all_active_top_k_50"
+          ],
+          "seed": 20260817
+        },
+        {
+          "order": [
+            "one_active_top_k_50",
+            "all_active_top_k_50",
+            "greedy_all",
+            "disabled"
+          ],
+          "seed": 20260818
+        },
+        {
+          "order": [
+            "all_active_top_k_50",
+            "greedy_all",
+            "disabled",
+            "one_active_top_k_50"
+          ],
+          "seed": 20260819
+        }
+      ],
+      "steady_iterations": 25,
+      "top_k": 50,
+      "unique_empty_inductor_cache_per_process": true,
+      "vocab": 151936,
+      "warmups_after_cold": 5
+    }
+  },
+  "release_results": {
+    "aggregation": {
+      "cold_wall_ms": "median of per-process first-call wall times",
+      "e2e_change_percent": "median of per-process paired steady throughput changes",
+      "peak_incremental_allocated_mib": "maximum per-process steady incremental allocated-memory peak",
+      "steady_median_cuda_ms": "median of per-process steady medians",
+      "steady_p95_cuda_ms": "median of per-process nearest-rank p95 values"
+    },
+    "e2e_topk_b256": {
+      "all_active_top_k_50_median_output_tokens_per_s": 16345.424916615224,
+      "disabled_median_output_tokens_per_s": 17400.74943312884,
+      "median_paired_throughput_change_percent": -6.145112682198583,
+      "passes_suggested_budget": true,
+      "ratio_of_median_throughputs_change_percent": -6.06482221107334,
+      "suggested_maximum_loss_percent": 10.0,
+      "worst_paired_throughput_change_percent": -6.483463916385501
+    },
+    "micro": {
+      "all_active_top_k_50": {
+        "cold_wall_ms": 1943.6693787574768,
+        "peak_incremental_allocated_mib": 148.37744140625,
+        "steady_median_cuda_ms": 2.037760019302368,
+        "steady_p95_cuda_ms": 2.042880058288574
+      },
+      "disabled": {
+        "cold_wall_ms": 1893.144527450204,
+        "peak_incremental_allocated_mib": 148.37744140625,
+        "steady_median_cuda_ms": 1.0106879472732544,
+        "steady_p95_cuda_ms": 1.026047945022583
+      },
+      "greedy_all": {
+        "cold_wall_ms": 1171.3707819581032,
+        "peak_incremental_allocated_mib": 0.001953125,
+        "steady_median_cuda_ms": 0.17715199291706085,
+        "steady_p95_cuda_ms": 0.18534399569034576
+      },
+      "one_active_top_k_50": {
+        "cold_wall_ms": 2003.5394169390202,
+        "peak_incremental_allocated_mib": 148.37744140625,
+        "steady_median_cuda_ms": 1.0690560340881348,
+        "steady_p95_cuda_ms": 1.112064003944397
+      }
+    }
+  },
+  "rejected_prototype_evidence": {
+    "baseline_commit": "b02f1efed6b33090fc6d23b1da0793c6365962c8",
+    "documentation_commit": "42affe47b3a97bb0ef2470f31c1e8b311cbc7a21",
+    "implementation_commit": null,
+    "path": "benchmarks/sampling_evidence/raw/rejected/topp_exact_checked_candidate_e2e.json",
+    "provenance_notice": "The raw file embeds model, Torch/CUDA/GPU, sizes, and observations, but not commit, seed, Transformers, driver, or argv. The experimental implementation was reverted and is not retained as a benchmarkable commit; the contemporaneous documentation commit is the only code-history tie.",
+    "release_aggregate_member": false,
+    "sha256": "bcb762572a461b6acdd2905107e3e277905235a2b0478e3418a44a72bee8fe9b",
+    "status": "rejected_non_release",
+    "steady_throughput_change_percent": -36.57071909586305
+  },
+  "release_raw_results": [
+    {
+      "commit": "ec988708bbe1e4e84e97c3fc0599378c01920e3a",
+      "feature": "greedy",
+      "kind": "micro",
+      "path": "benchmarks/sampling_evidence/raw/micro_greedy_greedy_all_seed20260817.json",
+      "scenario": "greedy_all",
+      "seed": 20260817,
+      "sha256": "10237f4228ad7bc2b51c9b2c0f2cb5d3a34e466dd8abc84761da3e83141f9a39"
+    },
+    {
+      "commit": "8759c877382f11ea16b40fdbd0dace7000b5e9ba",
+      "feature": "topk",
+      "kind": "micro",
+      "path": "benchmarks/sampling_evidence/raw/micro_topk_disabled_seed20260817.json",
+      "scenario": "disabled",
+      "seed": 20260817,
+      "sha256": "e02f75fece71f24947ad28b3a9bbb8ff6c76ae01096df529ed8df57620b32eef"
+    },
+    {
+      "commit": "8759c877382f11ea16b40fdbd0dace7000b5e9ba",
+      "feature": "topk",
+      "kind": "micro",
+      "path": "benchmarks/sampling_evidence/raw/micro_topk_one_active_top_k_50_seed20260817.json",
+      "scenario": "one_active_top_k_50",
+      "seed": 20260817,
+      "sha256": "5d607c7d7b75febb0f31ea4f9a607b7d392d18a11a888380d2d8255adbcec9b9"
+    },
+    {
+      "commit": "8759c877382f11ea16b40fdbd0dace7000b5e9ba",
+      "feature": "topk",
+      "kind": "micro",
+      "path": "benchmarks/sampling_evidence/raw/micro_topk_all_active_top_k_50_seed20260817.json",
+      "scenario": "all_active_top_k_50",
+      "seed": 20260817,
+      "sha256": "915afa43fb6a61a4a71a5103398c4ee228915c0aaba26f96b550b1476766ce47"
+    },
+    {
+      "commit": "8759c877382f11ea16b40fdbd0dace7000b5e9ba",
+      "feature": "topk",
+      "kind": "micro",
+      "path": "benchmarks/sampling_evidence/raw/micro_topk_one_active_top_k_50_seed20260818.json",
+      "scenario": "one_active_top_k_50",
+      "seed": 20260818,
+      "sha256": "cbca29fb14f32ed32056ad594f20676c8be9e82320d6727fd00fe4b40a0ddf87"
+    },
+    {
+      "commit": "8759c877382f11ea16b40fdbd0dace7000b5e9ba",
+      "feature": "topk",
+      "kind": "micro",
+      "path": "benchmarks/sampling_evidence/raw/micro_topk_all_active_top_k_50_seed20260818.json",
+      "scenario": "all_active_top_k_50",
+      "seed": 20260818,
+      "sha256": "5a62cc666cda47dc951ce93721731ddff3f45ab5386ea24d870d2fade59da031"
+    },
+    {
+      "commit": "ec988708bbe1e4e84e97c3fc0599378c01920e3a",
+      "feature": "greedy",
+      "kind": "micro",
+      "path": "benchmarks/sampling_evidence/raw/micro_greedy_greedy_all_seed20260818.json",
+      "scenario": "greedy_all",
+      "seed": 20260818,
+      "sha256": "a33f583ec663694ca5bdbc800d6e38126923ca45a23492e5a7b74df4134bddca"
+    },
+    {
+      "commit": "8759c877382f11ea16b40fdbd0dace7000b5e9ba",
+      "feature": "topk",
+      "kind": "micro",
+      "path": "benchmarks/sampling_evidence/raw/micro_topk_disabled_seed20260818.json",
+      "scenario": "disabled",
+      "seed": 20260818,
+      "sha256": "15317029a8d2597840eee2d7dddd9f1c02240a4c77b3e0147d563e87de0eac71"
+    },
+    {
+      "commit": "8759c877382f11ea16b40fdbd0dace7000b5e9ba",
+      "feature": "topk",
+      "kind": "micro",
+      "path": "benchmarks/sampling_evidence/raw/micro_topk_all_active_top_k_50_seed20260819.json",
+      "scenario": "all_active_top_k_50",
+      "seed": 20260819,
+      "sha256": "bcff8c7489813ea0699d1fc1c0b3cf66f40928cca336f6b8ef56e01be2788de6"
+    },
+    {
+      "commit": "ec988708bbe1e4e84e97c3fc0599378c01920e3a",
+      "feature": "greedy",
+      "kind": "micro",
+      "path": "benchmarks/sampling_evidence/raw/micro_greedy_greedy_all_seed20260819.json",
+      "scenario": "greedy_all",
+      "seed": 20260819,
+      "sha256": "6d264864807ca81c7c7c4d1f1cc4bd75b8b8ebb555dd97b74919021aeb92f449"
+    },
+    {
+      "commit": "8759c877382f11ea16b40fdbd0dace7000b5e9ba",
+      "feature": "topk",
+      "kind": "micro",
+      "path": "benchmarks/sampling_evidence/raw/micro_topk_disabled_seed20260819.json",
+      "scenario": "disabled",
+      "seed": 20260819,
+      "sha256": "56fdf09b6c5d5c3c3112097cda9a74865788e4b7413bdbb72f619e49867aaa28"
+    },
+    {
+      "commit": "8759c877382f11ea16b40fdbd0dace7000b5e9ba",
+      "feature": "topk",
+      "kind": "micro",
+      "path": "benchmarks/sampling_evidence/raw/micro_topk_one_active_top_k_50_seed20260819.json",
+      "scenario": "one_active_top_k_50",
+      "seed": 20260819,
+      "sha256": "d67657ccb868e276b520189feb5806cb1bc5d3ae88b9421f825c78970d8d9d11"
+    },
+    {
+      "commit": "8759c877382f11ea16b40fdbd0dace7000b5e9ba",
+      "feature": "topk",
+      "first_scenario": "disabled",
+      "kind": "e2e",
+      "path": "benchmarks/sampling_evidence/raw/e2e_topk_b256_seed20260817.json",
+      "seed": 20260817,
+      "sha256": "0d830b44021abe10aaaa375dd182c65769d2281f08a1bf0a4b93644df6950f15"
+    },
+    {
+      "commit": "8759c877382f11ea16b40fdbd0dace7000b5e9ba",
+      "feature": "topk",
+      "first_scenario": "enabled",
+      "kind": "e2e",
+      "path": "benchmarks/sampling_evidence/raw/e2e_topk_b256_seed20260818.json",
+      "seed": 20260818,
+      "sha256": "e2f07bead6550987b1b7d7535cd7a867482881ead06a3e484efcee566297f991"
+    },
+    {
+      "commit": "8759c877382f11ea16b40fdbd0dace7000b5e9ba",
+      "feature": "topk",
+      "first_scenario": "disabled",
+      "kind": "e2e",
+      "path": "benchmarks/sampling_evidence/raw/e2e_topk_b256_seed20260819.json",
+      "seed": 20260819,
+      "sha256": "f55b8299fab38ea6b919b7d57333d78ab6e411a7595183644fe7f3b033b78cda"
+    },
+    {
+      "commit": "8759c877382f11ea16b40fdbd0dace7000b5e9ba",
+      "feature": "topk",
+      "first_scenario": "enabled",
+      "kind": "e2e",
+      "path": "benchmarks/sampling_evidence/raw/e2e_topk_b256_seed20260820.json",
+      "seed": 20260820,
+      "sha256": "cee6c53cbb027bdc12f6e1ba04b5f96bd8532d37738d646c3f2585a1cdf93da6"
+    }
+  ],
+  "schema_version": 1
+}
