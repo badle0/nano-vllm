@@ -58,8 +58,9 @@ class ModelRunner:
                 self.shm.unlink()
         if not self.enforce_eager:
             del self.graphs, self.graph_pool
-            if hasattr(self, "varlen_graphs"):
-                del self.varlen_graphs, self.varlen_vars
+            for name in ("varlen_graphs", "varlen_vars"):
+                if hasattr(self, name):
+                    delattr(self, name)
         torch.cuda.synchronize()
         dist.destroy_process_group()
 
@@ -316,13 +317,92 @@ class ModelRunner:
             top_p_plan = (row_indices, probability_cutoffs)
         return temperatures, top_k_buckets, top_p_plan, False
 
-    def _fill_varlen(self, input_ids: torch.Tensor, positions: torch.Tensor, ctx):
+    def _select_varlen_graph_key(self, num_tokens: int, num_seqs: int):
+        """Return the smallest captured graph that can hold a ragged step.
+
+        Capture keys can be sparse when a slot tier cannot represent a legal
+        dummy layout for the configured ``max_model_len``.  Selecting from the
+        graphs that actually exist avoids indexing an empty bucket list and
+        avoids assuming that every token/slot cross-product was captured.
+        """
+        if num_tokens <= 0 or num_seqs <= 0:
+            return None
+        return min(
+            (
+                key
+                for key in getattr(self, "varlen_graphs", {})
+                if key[0] >= num_tokens and key[1] >= num_seqs
+            ),
+            default=None,
+        )
+
+    def _varlen_context_fits_graph(
+        self,
+        num_tokens: int,
+        num_seqs: int,
+        ctx,
+        graph_key: tuple[int, int],
+    ):
+        """Whether live ragged metadata fits the persistent capture buffers."""
+        buffers = getattr(self, "varlen_vars", None)
+        block_tables = ctx.block_tables
+        capture_max_q = min(graph_key[0], self.config.max_model_len)
+        return bool(
+            buffers is not None
+            and ctx.slot_mapping is not None
+            and ctx.slot_mapping.numel() == num_tokens
+            and ctx.cu_seqlens_k is not None
+            and ctx.cu_seqlens_k.numel() == num_seqs + 1
+            and ctx.max_seqlen_q <= capture_max_q
+            and ctx.max_seqlen_k <= self.config.max_model_len
+            and block_tables is not None
+            and block_tables.ndim == 2
+            and block_tables.size(0) >= num_seqs
+            and block_tables.size(1) <= buffers["block_tables"].size(1)
+        )
+
+    @staticmethod
+    def _varlen_capture_boundaries(
+        num_tokens: int,
+        num_slots: int,
+        max_model_len: int,
+    ) -> tuple[int, ...] | None:
+        """Build a legal padded ``cu_seqlens`` layout for graph capture.
+
+        Every non-empty dummy sequence is capped at ``max_model_len`` and the
+        remaining slots are zero-length.  ``None`` means that this graph key is
+        structurally impossible for the requested slot tier.
+        """
+        if num_tokens <= 0 or num_slots <= 0 or max_model_len <= 0:
+            return None
+        num_nonempty = (num_tokens + max_model_len - 1) // max_model_len
+        if num_nonempty > num_slots:
+            return None
+        boundaries = [0]
+        for index in range(num_nonempty):
+            boundaries.append(min((index + 1) * max_model_len, num_tokens))
+        boundaries.extend([num_tokens] * (num_slots - num_nonempty))
+        return tuple(boundaries)
+
+    def _fill_varlen(
+        self,
+        input_ids: torch.Tensor,
+        positions: torch.Tensor,
+        ctx,
+        graph_key: tuple[int, int],
+    ):
         """Copy a real ragged step into the persistent varlen graph buffers.
         Single fill path shared by replay and the per-bucket bitwise test —
-        the certified code IS the production code. Returns the bucket T_pad."""
+        the certified code IS the production code."""
         v = self.varlen_vars
         t = input_ids.size(0)
         ns = ctx.cu_seqlens_q.numel() - 1
+        tp, sl = graph_key
+        if t > tp or ns > sl:
+            raise ValueError(
+                f"ragged step ({t} tokens, {ns} sequences) exceeds graph "
+                f"capacity ({tp} tokens, {sl} sequences)"
+            )
         v["input_ids"][:t] = input_ids
         v["positions"][:t] = positions
         v["slot_mapping"].fill_(-1)
@@ -333,7 +413,6 @@ class ModelRunner:
         v["cu_k"][ns + 1:] = ctx.cu_seqlens_k[-1]
         v["block_tables"].fill_(-1)
         v["block_tables"][:ns, :ctx.block_tables.size(1)] = ctx.block_tables
-        return next(x for x in self.varlen_ts if x >= t)
 
     @torch.inference_mode()
     def run_model(self, input_ids: torch.Tensor, positions: torch.Tensor, is_prefill: bool):
@@ -356,16 +435,23 @@ class ModelRunner:
         t = input_ids.size(0)
         ctx = get_context()
         ns = ctx.cu_seqlens_q.numel() - 1
-        # hasattr subsumes enforce_eager (capture only runs when graphs are enabled);
-        # block_tables None excludes warmup
-        graphable = hasattr(self, "varlen_graphs") and ctx.block_tables is not None
-        if not (graphable and t <= self.varlen_ts[-1] and ns <= self.config.max_num_seqs + 1):
-            if graphable:
+        # block_tables=None is the allocation warmup, which deliberately uses
+        # the eager non-paged path and is not a graph miss.
+        graph_key = (
+            self._select_varlen_graph_key(t, ns)
+            if ctx.block_tables is not None
+            else None
+        )
+        if graph_key is not None and not self._varlen_context_fits_graph(
+            t, ns, ctx, graph_key
+        ):
+            graph_key = None
+        if graph_key is None:
+            if hasattr(self, "varlen_graphs") and ctx.block_tables is not None:
                 self.varlen_miss += 1
             return self.model.compute_logits(self.model(input_ids, positions))
-        tp = self._fill_varlen(input_ids, positions, ctx)
-        sl = next(s for s in self.varlen_slots if s >= ns)   # lean tier for few segments (P13)
-        self.varlen_graphs[(tp, sl)].replay()
+        self._fill_varlen(input_ids, positions, ctx, graph_key)
+        self.varlen_graphs[graph_key].replay()
         return self.model.compute_logits(self.varlen_vars["outputs"][:t])   # gather runs on the LIVE real context
 
     def run(self, seqs: list[Sequence], is_prefill: bool) -> list[int]:
@@ -436,12 +522,25 @@ class ModelRunner:
         config = self.config
         S1 = config.max_num_seqs + 1    # F3: +1 segment slot for C3's single partial chunk
         max_blocks = (config.max_model_len + self.block_size - 1) // self.block_size
+        # Initialize the full state before the first possible early return.  A
+        # sub-128 token budget intentionally has no graph buckets and all real
+        # ragged steps are counted eager misses.
+        self.varlen_ts = []
+        self.varlen_slots = []
+        self.varlen_graphs = {}
+        self.varlen_vars = None
+        self.varlen_miss = 0
         # bucket top-end 2048, NOT the F3-drafted 4096: P12 measured the 4096 replay at
         # 32 ms best-case ~= paged-eager (host1 is past the E2 dispatch/GPU crossover at
         # that T), so the graph buys nothing there; C3's chunking bounds mixed steps to
         # the token budget anyway. Zero-length slot tax ~0.04 ms/slot at T=4096 (P12).
-        self.varlen_ts = [t for t in (128, 256, 512, 1024, 2048)
-                          if t <= config.max_num_batched_tokens]
+        self.varlen_ts = [
+            t
+            for t in (128, 256, 512, 1024, 2048)
+            if t <= config.max_num_batched_tokens
+        ]
+        if not self.varlen_ts:
+            return
         T = self.varlen_ts[-1]
         v = dict(
             input_ids=torch.zeros(T, dtype=torch.int64),
@@ -460,13 +559,22 @@ class ModelRunner:
         # the baked grid comes from the slice length; _fill_varlen's full-size
         # padding serves every tier.
         self.varlen_slots = sorted({min(64, S1), S1})
-        self.varlen_graphs = {}
-        self.varlen_miss = 0
         for t in reversed(self.varlen_ts):
             for sl in reversed(self.varlen_slots):
-                v["cu_q"].fill_(t); v["cu_q"][0] = 0    # one segment owns all t tokens; rest zero-length (P1)
+                boundaries = self._varlen_capture_boundaries(
+                    t, sl, config.max_model_len
+                )
+                if boundaries is None:
+                    continue
+                v["cu_q"].fill_(t)
+                v["cu_q"][:sl + 1].copy_(torch.tensor(
+                    boundaries,
+                    dtype=torch.int32,
+                    device=v["cu_q"].device,
+                ))
                 v["cu_k"].copy_(v["cu_q"])
-                set_context(True, v["cu_q"][:sl + 1], v["cu_k"][:sl + 1], t,   # M=T_pad (P2); K-ceiling=max_model_len
+                set_context(True, v["cu_q"][:sl + 1], v["cu_k"][:sl + 1],
+                            min(t, config.max_model_len),
                             config.max_model_len, v["slot_mapping"][:t], None, v["block_tables"][:sl])
                 graph = torch.cuda.CUDAGraph()
                 v["outputs"][:t] = self.model(v["input_ids"][:t], v["positions"][:t])      # warmup
@@ -475,7 +583,8 @@ class ModelRunner:
                 self.varlen_graphs[(t, sl)] = graph
                 torch.cuda.synchronize()
                 reset_context()
-        self.varlen_vars = v
+        if self.varlen_graphs:
+            self.varlen_vars = v
 
     def _pretouch_eager_prefill(self):
         # Must run AFTER __init__ restores the default dtype/device: init-time Dynamo
