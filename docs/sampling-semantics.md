@@ -29,6 +29,33 @@ alter the number or order of random draws for inactive rows. All-active top-p
 work is processed in chunks of 64 rows to bound temporary allocation without
 changing per-row support.
 
+## Greedy and top-k repair evidence
+
+The greedy repair is pinned to `ec98870`; the top-k repair is pinned to its
+descendant `8759c87`. On the declared A100 environment, three fresh processes
+per B=256 sampler route produced the following aggregate values. Cold is the
+median first call from unique empty Inductor caches; steady median and p95 are
+medians of the per-process statistics; peak is the maximum per-process
+incremental allocated-memory peak.
+
+| Route | Cold wall | Steady median | Steady p95 | Peak incremental allocation |
+|---|---:|---:|---:|---:|
+| homogeneous greedy | 1,171.37 ms | 0.177 ms | 0.185 ms | 0.002 MiB |
+| top-k disabled | 1,893.14 ms | 1.011 ms | 1.026 ms | 148.38 MiB |
+| one row at top-k 50 | 2,003.54 ms | 1.069 ms | 1.112 ms | 148.38 MiB |
+| all rows at top-k 50 | 1,943.67 ms | 2.038 ms | 2.043 ms | 148.38 MiB |
+
+The common stochastic sampler dominates the allocated-memory peak. Activating
+one top-k row adds only 5.78% sampler latency over disabled, while all-active
+work is 1.91x the one-active route, confirming active-row scaling.
+
+Four additional fresh B=256 end-to-end processes balanced which scenario ran
+first. Their paired top-k-50 throughput changes were -6.31%, -5.98%, -6.48%,
+and -5.93%; the median paired loss was -6.15%, inside the suggested 10% budget.
+The exact harnesses, process order, environment/model pins, raw samples, hashes,
+and validator are in
+[`benchmarks/sampling_evidence/`](../benchmarks/sampling_evidence/README.md).
+
 ## A100 regression gates
 
 The 2026-08-17 repair was measured on an NVIDIA A100-SXM4-40GB with PyTorch

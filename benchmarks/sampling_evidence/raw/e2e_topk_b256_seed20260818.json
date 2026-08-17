@@ -1,0 +1,135 @@
+{
+  "argv": [
+    "/workspace/nano-vllm-sampling-evidence/benchmarks/sampling_evidence/topk_e2e_bench.py",
+    "--model",
+    "/workspace/models/Qwen3-0.6B",
+    "--seed",
+    "20260818",
+    "--first",
+    "enabled",
+    "--output",
+    "/workspace/nano-vllm-sampling-evidence/benchmarks/sampling_evidence/raw/e2e_topk_b256_seed20260818.json"
+  ],
+  "benchmark": "repaired_topk_e2e_b256",
+  "commit": "8759c877382f11ea16b40fdbd0dace7000b5e9ba",
+  "configuration": {
+    "batch": 256,
+    "cold_observations_excluded": 1,
+    "first_scenario": "enabled",
+    "gpu_memory_utilization": 0.8,
+    "ignore_eos": true,
+    "max_model_len": 1024,
+    "max_num_seqs": 256,
+    "model": "/workspace/models/Qwen3-0.6B",
+    "output_tokens": 32,
+    "prompt_tokens": 128,
+    "repetitions": 4,
+    "temperature": 0.6,
+    "top_k": 50
+  },
+  "environment": {
+    "cuda_build": "12.8",
+    "gpu": "NVIDIA A100-SXM4-40GB",
+    "gpu_total_memory_bytes": 42406903808,
+    "nvidia_driver": "570.133.20",
+    "python": "3.12.13",
+    "torch": "2.10.0+cu128",
+    "transformers": "5.14.1"
+  },
+  "execution": {
+    "cuda_visible_devices": null,
+    "cwd": "/workspace/nano-vllm-topk-bench",
+    "pythonpath": ".",
+    "torchinductor_cache_dir": "/tmp/nv_sampling_e2e_topk_20260818_enabled"
+  },
+  "paired_steady_throughput_change_percent": -5.981362208365903,
+  "scenarios": {
+    "all_active_top_k_50": {
+      "cold": {
+        "elapsed_s": 0.6654232759028673,
+        "order": [
+          "all_active_top_k_50",
+          "disabled"
+        ],
+        "output_tokens_per_s": 12310.961002806576,
+        "repetition": 0
+      },
+      "median_elapsed_s": 0.500836880877614,
+      "median_output_tokens_per_s": 16356.62291012834,
+      "steady": [
+        {
+          "elapsed_s": 0.500836880877614,
+          "order": [
+            "disabled",
+            "all_active_top_k_50"
+          ],
+          "output_tokens_per_s": 16356.62291012834,
+          "repetition": 1
+        },
+        {
+          "elapsed_s": 0.5005770865827799,
+          "order": [
+            "all_active_top_k_50",
+            "disabled"
+          ],
+          "output_tokens_per_s": 16365.111827077802,
+          "repetition": 2
+        },
+        {
+          "elapsed_s": 0.5010941457003355,
+          "order": [
+            "disabled",
+            "all_active_top_k_50"
+          ],
+          "output_tokens_per_s": 16348.225319117942,
+          "repetition": 3
+        }
+      ]
+    },
+    "disabled": {
+      "cold": {
+        "elapsed_s": 0.46654142066836357,
+        "order": [
+          "all_active_top_k_50",
+          "disabled"
+        ],
+        "output_tokens_per_s": 17558.998273431338,
+        "repetition": 0
+      },
+      "median_elapsed_s": 0.47088001295924187,
+      "median_output_tokens_per_s": 17397.213248694585,
+      "steady": [
+        {
+          "elapsed_s": 0.46971794217824936,
+          "order": [
+            "disabled",
+            "all_active_top_k_50"
+          ],
+          "output_tokens_per_s": 17440.25353174882,
+          "repetition": 1
+        },
+        {
+          "elapsed_s": 0.47088001295924187,
+          "order": [
+            "all_active_top_k_50",
+            "disabled"
+          ],
+          "output_tokens_per_s": 17397.213248694585,
+          "repetition": 2
+        },
+        {
+          "elapsed_s": 0.47153256461024284,
+          "order": [
+            "disabled",
+            "all_active_top_k_50"
+          ],
+          "output_tokens_per_s": 17373.137328853,
+          "repetition": 3
+        }
+      ]
+    }
+  },
+  "schema_version": 1,
+  "seed": 20260818,
+  "started_at_utc": "2026-08-17T11:20:24.989615+00:00"
+}
