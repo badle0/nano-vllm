@@ -1,4 +1,5 @@
 import pickle
+import struct
 import torch
 import torch.distributed as dist
 from multiprocessing.synchronize import Event
@@ -6,10 +7,54 @@ from multiprocessing.shared_memory import SharedMemory
 
 from nanovllm.config import Config
 from nanovllm.engine.sequence import Sequence
+from nanovllm.engine.tp_transport import ScheduledSequence, compact_run_args
 from nanovllm.models.qwen3 import Qwen3ForCausalLM
 from nanovllm.layers.sampler import Sampler
 from nanovllm.utils.context import set_context, get_context, reset_context
 from nanovllm.utils.loader import load_model
+
+
+TP_SHM_MAGIC = b"NVTP"
+TP_SHM_HEADER = struct.Struct("<4sI")
+TP_SHM_MIN_SIZE = 64 * 1024
+TP_SHM_MAX_SIZE = 64 * 1024 * 1024
+
+
+class TensorParallelTransportError(RuntimeError):
+    pass
+
+
+def tensor_parallel_shm_size(config: Config) -> int:
+    """Return a bounded transport size derived from the configured work limits.
+
+    Pickle uses at most five bytes for the non-negative 32-bit token/block IDs
+    expected here.  Sixteen bytes per variable integer, 256 bytes per sequence,
+    and 64 KiB of framing slack leave a conservative margin for containers and
+    fixed metadata while still putting an explicit 64 MiB ceiling on allocation.
+    Every actual frame is checked against the allocated buffer before publication.
+    """
+
+    max_blocks_per_seq = (
+        config.max_model_len + config.kvcache_block_size - 1
+    ) // config.kvcache_block_size
+    variable_ints = (
+        config.max_num_batched_tokens
+        + config.max_num_seqs * max_blocks_per_seq
+    )
+    estimated = (
+        TP_SHM_HEADER.size
+        + 64 * 1024
+        + 16 * variable_ints
+        + 256 * config.max_num_seqs
+    )
+    size = max(TP_SHM_MIN_SIZE, (estimated + 4095) // 4096 * 4096)
+    if size > TP_SHM_MAX_SIZE:
+        raise ValueError(
+            "tensor-parallel transport requires "
+            f"{size} bytes, above the {TP_SHM_MAX_SIZE}-byte safety limit; "
+            "reduce max_num_batched_tokens, max_num_seqs, or max_model_len"
+        )
+    return size
 
 
 class ModelRunner:
@@ -22,6 +67,9 @@ class ModelRunner:
         self.world_size = config.tensor_parallel_size
         self.rank = rank
         self.event = event
+        self.tp_shm_size = (
+            tensor_parallel_shm_size(config) if self.world_size > 1 else 0
+        )
 
         dist.init_process_group("nccl", "tcp://localhost:2333", world_size=self.world_size, rank=rank)
         torch.cuda.set_device(rank)
@@ -43,7 +91,9 @@ class ModelRunner:
 
         if self.world_size > 1:
             if rank == 0:
-                self.shm = SharedMemory(name="nanovllm", create=True, size=2**20)
+                self.shm = SharedMemory(
+                    name="nanovllm", create=True, size=self.tp_shm_size
+                )
                 dist.barrier()
             else:
                 dist.barrier()
@@ -74,17 +124,61 @@ class ModelRunner:
     def read_shm(self):
         assert self.world_size > 1 and self.rank > 0
         self.event.wait()
-        n = int.from_bytes(self.shm.buf[0:4], "little")
-        method_name, *args = pickle.loads(self.shm.buf[4:n+4])
-        self.event.clear()
-        return method_name, args
+        try:
+            buffer_size = len(self.shm.buf)
+            if buffer_size < TP_SHM_HEADER.size:
+                raise TensorParallelTransportError(
+                    "tensor-parallel shared-memory buffer is smaller than its header"
+                )
+            magic, n = TP_SHM_HEADER.unpack(
+                bytes(self.shm.buf[:TP_SHM_HEADER.size])
+            )
+            capacity = buffer_size - TP_SHM_HEADER.size
+            if magic != TP_SHM_MAGIC:
+                raise TensorParallelTransportError(
+                    "invalid tensor-parallel shared-memory header"
+                )
+            if n == 0 or n > capacity:
+                raise TensorParallelTransportError(
+                    "invalid tensor-parallel payload length: "
+                    f"{n} bytes for {capacity}-byte capacity"
+                )
+            try:
+                payload = pickle.loads(
+                    bytes(self.shm.buf[TP_SHM_HEADER.size:TP_SHM_HEADER.size + n])
+                )
+            except Exception as exc:
+                raise TensorParallelTransportError(
+                    "could not deserialize tensor-parallel payload"
+                ) from exc
+            if (
+                not isinstance(payload, list)
+                or not payload
+                or not isinstance(payload[0], str)
+            ):
+                raise TensorParallelTransportError(
+                    "invalid tensor-parallel call payload"
+                )
+            method_name, *args = payload
+            return method_name, args
+        finally:
+            self.event.clear()
 
     def write_shm(self, method_name, *args):
         assert self.world_size > 1 and self.rank == 0
-        data = pickle.dumps([method_name, *args])
+        worker_args = compact_run_args(args) if method_name == "run" else args
+        data = pickle.dumps([method_name, *worker_args], protocol=pickle.HIGHEST_PROTOCOL)
         n = len(data)
-        self.shm.buf[0:4] = n.to_bytes(4, "little")
-        self.shm.buf[4:n+4] = data
+        capacity = len(self.shm.buf) - TP_SHM_HEADER.size
+        if n == 0 or n > capacity:
+            raise TensorParallelTransportError(
+                "tensor-parallel payload exceeds shared-memory capacity: "
+                f"{n} bytes for {capacity}-byte capacity"
+            )
+        self.shm.buf[:TP_SHM_HEADER.size] = TP_SHM_HEADER.pack(
+            TP_SHM_MAGIC, n
+        )
+        self.shm.buf[TP_SHM_HEADER.size:TP_SHM_HEADER.size + n] = data
         for event in self.event:
             event.set()
 
@@ -165,13 +259,16 @@ class ModelRunner:
                 module.v_cache = self.kv_cache[1, layer_id]
                 layer_id += 1
 
-    def prepare_block_tables(self, seqs: list[Sequence]):
+    def prepare_block_tables(self, seqs: list[Sequence | ScheduledSequence]):
         max_len = max(len(seq.block_table) for seq in seqs)
-        block_tables = [seq.block_table + [-1] * (max_len - len(seq.block_table)) for seq in seqs]
+        block_tables = [
+            list(seq.block_table) + [-1] * (max_len - len(seq.block_table))
+            for seq in seqs
+        ]
         block_tables = torch.tensor(block_tables, dtype=torch.int32, pin_memory=True).cuda(non_blocking=True)
         return block_tables
 
-    def prepare_ragged(self, seqs: list[Sequence]):
+    def prepare_ragged(self, seqs: list[Sequence | ScheduledSequence]):
         input_ids = []
         positions = []
         cu_seqlens_q = [0]
@@ -186,10 +283,13 @@ class ModelRunner:
             end = start + seqlen_q
             seqlen_k = end
             if seq.is_prefill:
-                input_ids.extend(seq[start:end])
+                if isinstance(seq, ScheduledSequence):
+                    input_ids.extend(seq.scheduled_token_ids)
+                else:
+                    input_ids.extend(seq[start:end])
             else:
                 # decode-mode row: identical indices via the num_cached == len-1
-                # invariant; TP workers ship only last_token, so extract explicitly
+                # invariant; extract the explicit last-token field on worker DTOs
                 input_ids.append(seq.last_token)
             positions.extend(range(start, end))
             cu_seqlens_q.append(cu_seqlens_q[-1] + seqlen_q)
@@ -221,7 +321,7 @@ class ModelRunner:
     
     prepare_prefill = prepare_ragged
 
-    def prepare_decode(self, seqs: list[Sequence]):
+    def prepare_decode(self, seqs: list[Sequence | ScheduledSequence]):
         input_ids = []
         positions = []
         slot_mapping = []
@@ -230,7 +330,12 @@ class ModelRunner:
             input_ids.append(seq.last_token)
             positions.append(len(seq) - 1)
             context_lens.append(len(seq))
-            slot_mapping.append(seq.block_table[-1] * self.block_size + seq.last_block_num_tokens  - 1)
+            last_block_num_tokens = len(seq) - (
+                len(seq.block_table) - 1
+            ) * self.block_size
+            slot_mapping.append(
+                seq.block_table[-1] * self.block_size + last_block_num_tokens - 1
+            )
         input_ids = torch.tensor(input_ids, dtype=torch.int64, pin_memory=True).cuda(non_blocking=True)
         positions = torch.tensor(positions, dtype=torch.int64, pin_memory=True).cuda(non_blocking=True)
         slot_mapping = torch.tensor(slot_mapping, dtype=torch.int32, pin_memory=True).cuda(non_blocking=True)
@@ -454,7 +559,11 @@ class ModelRunner:
         self.varlen_graphs[graph_key].replay()
         return self.model.compute_logits(self.varlen_vars["outputs"][:t])   # gather runs on the LIVE real context
 
-    def run(self, seqs: list[Sequence], is_prefill: bool) -> list[int]:
+    def run(
+        self,
+        seqs: list[Sequence | ScheduledSequence],
+        is_prefill: bool,
+    ) -> list[int]:
         input_ids, positions = self.prepare_prefill(seqs) if is_prefill else self.prepare_decode(seqs)
         temperatures, top_k_buckets, top_p_plan, all_greedy = (
             self.prepare_sample(seqs)
