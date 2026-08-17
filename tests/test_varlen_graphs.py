@@ -28,7 +28,7 @@ def test_varlen_graph_bitwise_per_bucket(llm, monkeypatch):
     mr = llm.model_runner
     sp = SamplingParams(temperature=0.6, max_tokens=1, ignore_eos=True)
     for target, budget in ((100, 128), (400, 512), (1500, 2048)):
-        monkeypatch.setattr(llm.scheduler, "max_num_batched_tokens", budget)
+        monkeypatch.setattr(llm.scheduler, "_max_num_batched_tokens", budget)
         llm.add_request([random.randint(1000, 150000) for _ in range(target)], sp)
         seqs, is_prefill = llm.scheduler.schedule()
         assert is_prefill
@@ -40,7 +40,7 @@ def test_varlen_graph_bitwise_full_tier(llm, monkeypatch):
     # 65 x 8-token prompts in one step: ns=65 > lean tier (64) -> full-slot graph.
     # Sub-block prompts, so no prefix-cache coupling with other tests.
     random.seed(11)
-    monkeypatch.setattr(llm.scheduler, "max_num_batched_tokens", 1024)
+    monkeypatch.setattr(llm.scheduler, "_max_num_batched_tokens", 1024)
     mr = llm.model_runner
     sp = SamplingParams(temperature=0.6, max_tokens=1, ignore_eos=True)
     for _ in range(65):

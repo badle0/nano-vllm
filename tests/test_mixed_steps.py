@@ -3,8 +3,8 @@ from nanovllm import SamplingParams
 
 # C3 pins (F2 verdict): decode-first admission, FIFO chunk fill, <=1 partial chunk
 # per step, <=1 mid-chunk seq system-wide, emission predicate untouched, preemption
-# machinery untouched. Budget is a plain scheduler attribute read fresh each
-# schedule() call (same trick as test_chunked_prefill_emission).
+# machinery untouched. White-box budget overrides below exercise scheduling
+# mechanics only; deployment budgets are immutable constructor configuration.
 # Snapshots are taken AT schedule() time: seq fields (num_scheduled_tokens etc.)
 # are mutated by postprocess, so live refs would assert against stale state.
 # TRAP (shared engine): prompt fillers are unique per test — repeated multi-block
@@ -32,7 +32,7 @@ def _drain(llm):
 
 def test_mixed_step_decode_first(llm, monkeypatch):
     torch.manual_seed(1234); torch.cuda.manual_seed_all(1234)
-    monkeypatch.setattr(llm.scheduler, "max_num_batched_tokens", 256)
+    monkeypatch.setattr(llm.scheduler, "_max_num_batched_tokens", 256)
     llm.add_request([7] * 100, SamplingParams(temperature=0.6, max_tokens=32, ignore_eos=True))
     llm.step()                                   # full prefill -> seq is decoding
     caps = _capture_schedules(llm, monkeypatch)
@@ -49,7 +49,7 @@ def test_mixed_step_decode_first(llm, monkeypatch):
 
 def test_decode_never_skips_under_chunk_pressure(llm, monkeypatch):
     torch.manual_seed(1234); torch.cuda.manual_seed_all(1234)
-    monkeypatch.setattr(llm.scheduler, "max_num_batched_tokens", 128)
+    monkeypatch.setattr(llm.scheduler, "_max_num_batched_tokens", 128)
     sp = SamplingParams(temperature=0.6, max_tokens=24, ignore_eos=True)
     for _ in range(3):
         llm.add_request([5] * 40, sp)            # 120 tokens: all three prefill in one step
@@ -74,7 +74,7 @@ def test_decode_never_skips_under_chunk_pressure(llm, monkeypatch):
 def test_multi_seq_chunk_emission(llm, monkeypatch):
     # two long prompts chunking concurrently: mid-chunk steps emit nothing,
     # each seq emits exactly max_tokens events, finished flag on the last only
-    monkeypatch.setattr(llm.scheduler, "max_num_batched_tokens", 96)
+    monkeypatch.setattr(llm.scheduler, "_max_num_batched_tokens", 96)
     sp = SamplingParams(temperature=0.6, max_tokens=6, ignore_eos=True)
     events = list(llm.stream([[11] * 300, [13] * 250], sp))
     per_seq = {}
@@ -88,7 +88,7 @@ def test_multi_seq_chunk_emission(llm, monkeypatch):
 
 def test_preempt_under_mixing(llm, monkeypatch):
     torch.manual_seed(1234); torch.cuda.manual_seed_all(1234)
-    monkeypatch.setattr(llm.scheduler, "max_num_batched_tokens", 128)
+    monkeypatch.setattr(llm.scheduler, "_max_num_batched_tokens", 128)
     sp = SamplingParams(temperature=0.6, max_tokens=16, ignore_eos=True)
     for _ in range(2):
         llm.add_request([5] * 30, sp)
@@ -112,7 +112,7 @@ def test_step_shim_convention(llm, monkeypatch):
     # C4 contract: step() keeps (finished, num_tokens); pure steps keep the legacy
     # signed value, a mixed step reports +num_prefill_tokens (decode rows excluded).
     torch.manual_seed(1234); torch.cuda.manual_seed_all(1234)
-    monkeypatch.setattr(llm.scheduler, "max_num_batched_tokens", 256)
+    monkeypatch.setattr(llm.scheduler, "_max_num_batched_tokens", 256)
     llm.add_request([27] * 100, SamplingParams(temperature=0.6, max_tokens=8, ignore_eos=True))
     _, n = llm.step()
     assert n == 100                              # pure prefill: +tokens (legacy)

@@ -54,8 +54,18 @@ class FakeScheduler:
     def __init__(self):
         self.sequences = []
         self.finished = True
+        self.max_num_seqs = 512
+
+    @property
+    def available_capacity(self):
+        return self.max_num_seqs - len(self.sequences)
+
+    def require_capacity(self, requested=1):
+        if requested > self.available_capacity:
+            raise RuntimeError("fake scheduler capacity exceeded")
 
     def add(self, seq):
+        self.require_capacity()
         self.sequences.append(seq)
         self.finished = False
 

@@ -4,7 +4,7 @@ from types import MethodType
 import pytest
 import torch
 
-from nanovllm import LLM, SamplingParams
+from nanovllm import LLM, SamplingParams, SchedulerCapacityError
 from nanovllm.engine.llm_engine import LLMEngine, StepOutput
 from nanovllm.engine.sequence import SequenceStatus, StreamOutput
 
@@ -48,11 +48,25 @@ class FakeTokenizer:
 
 class FakeScheduler:
 
-    def __init__(self):
+    def __init__(self, max_num_seqs=512):
         self.sequences = []
         self.cancel_calls = []
+        self.max_num_seqs = max_num_seqs
+
+    @property
+    def available_capacity(self):
+        return self.max_num_seqs - len(self.sequences)
+
+    def require_capacity(self, requested=1):
+        if requested > self.available_capacity:
+            raise SchedulerCapacityError(
+                requested,
+                max(self.available_capacity, 0),
+                self.max_num_seqs,
+            )
 
     def add(self, sequence):
+        self.require_capacity()
         self.sequences.append(sequence)
 
     def is_finished(self):
@@ -73,14 +87,14 @@ class FakeScheduler:
         return cancelled
 
 
-def make_fake_engine():
+def make_fake_engine(max_num_seqs=512):
     clock = FakeClock()
     engine = LLMEngine.__new__(LLMEngine)
     engine._clock = clock
     engine._session_lock = Lock()
     engine._active_session = None
     engine.tokenizer = FakeTokenizer(clock)
-    engine.scheduler = FakeScheduler()
+    engine.scheduler = FakeScheduler(max_num_seqs=max_num_seqs)
 
     def fake_step(self):
         clock.advance(1.0)
@@ -229,6 +243,43 @@ def test_string_tokenization_failure_is_transactional():
     assert engine._active_session is None
 
 
+@pytest.mark.parametrize("method", ["stream", "generate"])
+def test_batch_capacity_is_preflighted_before_tokenization(method):
+    engine, _ = make_fake_engine(max_num_seqs=1)
+    params = SamplingParams(max_tokens=1)
+    with pytest.raises(SchedulerCapacityError, match="split the batch"):
+        if method == "stream":
+            engine.stream(["first", "second"], params)
+        else:
+            engine.generate(
+                ["first", "second"],
+                params,
+                use_tqdm=False,
+            )
+
+    assert engine.tokenizer.encoded == []
+    assert engine.scheduler.sequences == []
+    assert engine._active_session is None
+
+    with engine.stream(["retry"], params) as session:
+        assert len(list(session)) == 1
+
+
+def test_manual_capacity_failure_does_not_tokenize_and_can_retry():
+    engine, _ = make_fake_engine(max_num_seqs=1)
+    params = SamplingParams(max_tokens=1)
+    first_id = engine.add_request("first", params)
+
+    with pytest.raises(SchedulerCapacityError):
+        engine.add_request("blocked", params)
+    assert engine.tokenizer.encoded == ["first"]
+
+    engine.scheduler.cancel([first_id])
+    retry_id = engine.add_request("retry", params)
+    assert retry_id != first_id
+    assert engine.tokenizer.encoded == ["first", "retry"]
+
+
 def test_add_request_returns_seq_id_and_manual_step_keeps_pair_contract():
     engine, _ = make_fake_engine()
     seq_id = engine.add_request("first", SamplingParams(max_tokens=1))
@@ -286,7 +337,7 @@ def test_max_tokens_one(llm):
 
 
 def test_chunked_prefill_emission(llm, monkeypatch):
-    monkeypatch.setattr(llm.scheduler, "max_num_batched_tokens", 64)
+    monkeypatch.setattr(llm.scheduler, "_max_num_batched_tokens", 64)
     long_prompt = [11] * 200
     params = SamplingParams(temperature=0.6, max_tokens=8, ignore_eos=True)
     events = list(llm.stream([long_prompt], params))

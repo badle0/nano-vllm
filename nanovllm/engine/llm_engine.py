@@ -227,6 +227,9 @@ class LLMEngine:
     ) -> Sequence:
         if submission_time is None:
             submission_time = self._clock()
+        # Fail before tokenization or sequence-id allocation when the bounded
+        # scheduler cannot own another request.
+        self.scheduler.require_capacity()
         if isinstance(prompt, str):
             prompt = self.tokenizer.encode(prompt)
         seq = Sequence(
@@ -245,6 +248,9 @@ class LLMEngine:
         *,
         submission_time: float,
     ) -> list[Sequence]:
+        # Reserve the whole batch logically before doing any tokenization so an
+        # oversized batch cannot be partially admitted.
+        self.scheduler.require_capacity(len(prompts))
         admitted = []
         try:
             for prompt, params in zip(prompts, sampling_params, strict=True):
