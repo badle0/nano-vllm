@@ -8,6 +8,7 @@ import sys
 
 import pytest
 import torch
+from transformers.generation.logits_process import TopPLogitsWarper
 
 from nanovllm.sampling_params import SamplingParams
 
@@ -29,8 +30,23 @@ def _filter_top_p(logits, temperatures, top_ps, rows=None):
         if rows is None
         else torch.tensor(rows, dtype=torch.int64, device=logits.device)
     )
-    top_ps = torch.tensor(top_ps, dtype=torch.float32, device=logits.device)
-    return Sampler().filter_top_p(logits, temperatures, row_indices, top_ps)
+    probability_cutoffs = torch.tensor(
+        [1.0 - float(top_p) for top_p in top_ps],
+        dtype=torch.float32,
+        device=logits.device,
+    )
+    return Sampler().filter_top_p(
+        logits, temperatures, row_indices, probability_cutoffs
+    )
+
+def _transformers_top_p_support(logits, temperatures, top_ps):
+    support = []
+    input_ids = torch.zeros(1, 1, dtype=torch.int64, device=logits.device)
+    for row, top_p in enumerate(top_ps):
+        scores = logits[row:row + 1].float() / temperatures[row]
+        warped = TopPLogitsWarper(float(top_p))(input_ids, scores)
+        support.append(torch.isfinite(warped))
+    return torch.cat(support, dim=0)
 
 def test_temperature_zero_is_permitted():
     SamplingParams(temperature=0.0)
@@ -67,6 +83,19 @@ def test_sampling_params_round_trip():
 def test_topk_rejects_non_integer_values(top_k):
     with pytest.raises(TypeError):
         SamplingParams(top_k=top_k)
+
+@pytest.mark.parametrize("top_p", [True, "0.9", None])
+def test_topp_rejects_non_numeric_values(top_p):
+    with pytest.raises(TypeError):
+        SamplingParams(top_p=top_p)
+
+@pytest.mark.parametrize(
+    "top_p",
+    [0.0, -0.1, 1.1, float("nan"), float("inf")],
+)
+def test_topp_rejects_values_outside_finite_unit_interval(top_p):
+    with pytest.raises(ValueError):
+        SamplingParams(top_p=top_p)
 
 def test_validation_survives_optimized_python():
     code = """
@@ -286,6 +315,156 @@ def test_topp_keeps_the_crossing_token():
     filtered = _filter_top_p(row.clone(), temperatures, [0.6])
     seen = {int(Sampler()(filtered.clone(), temperatures)) for _ in range(2000)}
     assert seen == {0, 1}
+
+def test_topp_exact_half_boundary_matches_transformers():
+    row = torch.tensor([[math.log(0.5), math.log(0.5)]])
+    temperatures = torch.ones(1)
+    actual = torch.isfinite(
+        _filter_top_p(row.clone(), temperatures, [0.5])
+    )
+    expected = _transformers_top_p_support(row, temperatures, [0.5])
+
+    assert torch.equal(actual, expected)
+    assert actual.sum() == 1
+
+@pytest.mark.parametrize("device", ["cpu", "cuda"])
+def test_topp_host_cutoff_rounding_matches_transformers(device):
+    if device == "cuda" and not torch.cuda.is_available():
+        pytest.skip("CUDA is unavailable")
+    host_cutoff = torch.tensor(1.0 - 0.9, dtype=torch.float32)
+    probability = host_cutoff
+    for _ in range(2):
+        probability = torch.nextafter(
+            probability, torch.tensor(float("inf"), dtype=torch.float32)
+        )
+    small_logit = math.log(probability.item() / (1.0 - probability.item()))
+    logits = torch.tensor([[small_logit, 0.0]], device=device)
+    temperatures = torch.ones(1, device=device)
+
+    actual = torch.isfinite(
+        _filter_top_p(logits.clone(), temperatures, [0.9])
+    )
+    expected = _transformers_top_p_support(logits, temperatures, [0.9])
+
+    assert torch.equal(actual, expected)
+    assert actual.all()
+
+@pytest.mark.parametrize("dtype", [torch.float32, torch.bfloat16])
+def test_topp_random_support_matches_transformers(dtype):
+    torch.manual_seed(29)
+    logits = torch.randn(64, 257).to(dtype)
+    temperatures = torch.linspace(0.5, 1.5, logits.size(0))
+    top_ps = [0.1, 0.5, 0.8, 0.9, 0.95, 0.99] * 11
+    top_ps = top_ps[:logits.size(0)]
+
+    actual = torch.isfinite(
+        _filter_top_p(logits.clone(), temperatures, top_ps)
+    )
+    expected = _transformers_top_p_support(logits, temperatures, top_ps)
+
+    assert torch.equal(actual, expected)
+
+@pytest.mark.parametrize("dtype", [torch.float32, torch.bfloat16])
+def test_topp_forced_tie_support_matches_transformers(dtype):
+    torch.manual_seed(31)
+    logits = torch.randint(-3, 4, (64, 257)).to(dtype)
+    temperatures = torch.linspace(0.5, 1.5, logits.size(0))
+    top_ps = [0.2, 0.5, 0.8, 0.9] * 16
+
+    actual = torch.isfinite(
+        _filter_top_p(logits.clone(), temperatures, top_ps)
+    )
+    expected = _transformers_top_p_support(logits, temperatures, top_ps)
+
+    assert torch.equal(actual, expected)
+
+def test_topp_prefilter_selects_only_active_rows(monkeypatch):
+    observed_shapes = []
+    torch_sort = torch.sort
+
+    def track_sort(tensor, *args, **kwargs):
+        observed_shapes.append(tuple(tensor.shape))
+        return torch_sort(tensor, *args, **kwargs)
+
+    monkeypatch.setattr(torch, "sort", track_sort)
+    logits = torch.randn(8, 1000)
+    temperatures = torch.ones(8)
+    _filter_top_p(logits, temperatures, [0.9], rows=(3,))
+
+    assert observed_shapes == [(1, 1000)]
+
+def test_topp_chunks_all_active_rows_without_changing_transformers_support(
+    monkeypatch,
+):
+    observed_shapes = []
+    torch_sort = torch.sort
+
+    def track_sort(tensor, *args, **kwargs):
+        observed_shapes.append(tuple(tensor.shape))
+        return torch_sort(tensor, *args, **kwargs)
+
+    monkeypatch.setattr(torch, "sort", track_sort)
+    logits = torch.randint(-3, 4, (65, 257), dtype=torch.float32)
+    temperatures = torch.linspace(0.5, 1.5, logits.size(0))
+    top_ps = [0.9] * logits.size(0)
+    actual = torch.isfinite(
+        _filter_top_p(logits.clone(), temperatures, top_ps)
+    )
+    expected = _transformers_top_p_support(logits, temperatures, top_ps)
+
+    assert observed_shapes[:2] == [(64, 257), (1, 257)]
+    assert torch.equal(actual, expected)
+
+def test_topp_prefilter_accepts_model_inference_tensors():
+    with torch.inference_mode():
+        logits = torch.randn(2, 1000, dtype=torch.bfloat16)
+    temperatures = torch.ones(2)
+
+    filtered = _filter_top_p(logits, temperatures, [0.9], rows=(0,))
+
+    assert filtered is logits
+    assert torch.isfinite(filtered[0]).sum() < filtered.size(1)
+
+def test_one_active_topp_row_preserves_inactive_draws_and_cpu_rng_state():
+    logits = torch.randn(8, 1000, dtype=torch.bfloat16)
+    temperatures = torch.ones(8)
+    sampler = Sampler()
+    sampler(logits.clone(), temperatures)
+
+    torch.manual_seed(37)
+    disabled = sampler(logits.clone(), temperatures)
+    disabled_state = torch.get_rng_state().clone()
+
+    torch.manual_seed(37)
+    filtered = _filter_top_p(
+        logits.clone(), temperatures, [0.9], rows=(0,)
+    )
+    enabled = sampler(filtered, temperatures)
+    enabled_state = torch.get_rng_state().clone()
+
+    assert torch.equal(enabled[1:], disabled[1:])
+    assert torch.equal(enabled_state, disabled_state)
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA is unavailable")
+def test_one_active_topp_row_preserves_inactive_draws_and_cuda_rng_state():
+    logits = torch.arange(8000, dtype=torch.float32, device="cuda").reshape(8, 1000)
+    temperatures = torch.ones(8, device="cuda")
+    sampler = Sampler().cuda()
+    sampler(logits.clone(), temperatures)
+
+    torch.cuda.manual_seed(37)
+    disabled = sampler(logits.clone(), temperatures)
+    disabled_state = torch.cuda.get_rng_state().clone()
+
+    torch.cuda.manual_seed(37)
+    filtered = _filter_top_p(
+        logits.clone(), temperatures, [0.9], rows=(0,)
+    )
+    enabled = sampler(filtered, temperatures)
+    enabled_state = torch.cuda.get_rng_state().clone()
+
+    assert torch.equal(enabled[1:], disabled[1:])
+    assert torch.equal(enabled_state, disabled_state)
 
 def test_topp_adaptive_collapse_on_peaked_row():
     row = torch.full((1, 100), -10.0)

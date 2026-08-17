@@ -115,16 +115,26 @@ class ModelRunner:
                 warmup_logits = torch.zeros(2, vocab_size)
                 self.sampler.filter_top_k(warmup_logits, None, top_k)
             warmup_temperatures = torch.ones(2, dtype=torch.float32)
-            warmup_top_ps = torch.full((1,), 0.9, dtype=torch.float32)
+            warmup_probability_cutoffs = torch.full(
+                (1,), 1.0 - 0.9, dtype=torch.float32
+            )
             warmup_logits = torch.zeros(2, vocab_size)
             row_indices = torch.zeros(1, dtype=torch.int64)
             self.sampler.filter_top_p(
-                warmup_logits, warmup_temperatures, row_indices, warmup_top_ps
+                warmup_logits,
+                warmup_temperatures,
+                row_indices,
+                warmup_probability_cutoffs,
             )
             warmup_logits = torch.zeros(2, vocab_size)
-            warmup_top_ps = torch.full((2,), 0.9, dtype=torch.float32)
+            warmup_probability_cutoffs = torch.full(
+                (2,), 1.0 - 0.9, dtype=torch.float32
+            )
             self.sampler.filter_top_p(
-                warmup_logits, warmup_temperatures, None, warmup_top_ps
+                warmup_logits,
+                warmup_temperatures,
+                None,
+                warmup_probability_cutoffs,
             )
             del warmup_logits
         torch.cuda.empty_cache()
@@ -286,8 +296,12 @@ class ModelRunner:
                 if rows is None
                 else torch.tensor(rows, dtype=torch.int64, pin_memory=True).cuda(non_blocking=True)
             )
-            top_ps = torch.tensor(top_ps, dtype=torch.float32, pin_memory=True).cuda(non_blocking=True)
-            top_p_plan = (row_indices, top_ps)
+            probability_cutoffs = torch.tensor(
+                tuple(1.0 - top_p for top_p in top_ps),
+                dtype=torch.float32,
+                pin_memory=True,
+            ).cuda(non_blocking=True)
+            top_p_plan = (row_indices, probability_cutoffs)
         return temperatures, top_k_buckets, top_p_plan, False
 
     @torch.inference_mode()
@@ -324,9 +338,9 @@ class ModelRunner:
                 for top_k, row_indices in top_k_buckets:
                     logits = self.sampler.filter_top_k(logits, row_indices, top_k)
                 if top_p_plan is not None:
-                    row_indices, top_ps = top_p_plan
+                    row_indices, probability_cutoffs = top_p_plan
                     logits = self.sampler.filter_top_p(
-                        logits, temperatures, row_indices, top_ps
+                        logits, temperatures, row_indices, probability_cutoffs
                     )
                 tokens = self.sampler(logits, temperatures)
             token_ids = tokens.tolist()
