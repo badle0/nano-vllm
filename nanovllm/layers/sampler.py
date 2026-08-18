@@ -1,5 +1,26 @@
+from functools import lru_cache
+
 import torch
 from torch import nn
+
+
+@lru_cache(maxsize=1)
+def _load_flashinfer_sampling():
+    try:
+        from flashinfer import sampling
+    except ImportError as exc:
+        raise RuntimeError(
+            "top_p_backend='flashinfer' requires the optional fast-sampling "
+            "dependencies; install nano-vllm[fast-sampling]"
+        ) from exc
+    return sampling
+
+
+def require_flashinfer_sampling():
+    """Fail before engine workers start if the optional backend is missing."""
+
+    return _load_flashinfer_sampling()
+
 
 class Sampler(nn.Module):
 
@@ -60,6 +81,37 @@ class Sampler(nn.Module):
         if row_indices is not None:
             logits.index_copy_(0, row_indices, active_logits)
         return logits
+
+    @torch.inference_mode()
+    def sample_top_p_flashinfer(
+        self,
+        logits: torch.Tensor,
+        temperatures: torch.Tensor,
+        top_ps: torch.Tensor,
+    ):
+        """Sample with FlashInfer's sorting-free, statistical top-p contract.
+
+        This is deliberately separate from :meth:`filter_top_p`: FlashInfer
+        uses its own Philox draws and boundary-tie rule, so it cannot preserve
+        the exact backend's fixed-seed token stream.
+        """
+
+        sampling = _load_flashinfer_sampling()
+        greedy_tokens = logits.argmax(dim=-1)
+        probabilities = sampling.softmax(
+            logits,
+            temperature=temperatures.clamp_min(1e-10),
+        )
+        sample_tokens = sampling.top_p_sampling_from_probs(
+            probabilities,
+            top_ps,
+            deterministic=True,
+        )
+        return torch.where(
+            temperatures == 0,
+            greedy_tokens,
+            sample_tokens.to(greedy_tokens.dtype),
+        )
 
     @torch.compile
     def forward(self, logits: torch.Tensor, temperatures: torch.Tensor):

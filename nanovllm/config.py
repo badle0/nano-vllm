@@ -16,8 +16,15 @@ class Config:
     eos: int = -1
     kvcache_block_size: int = 256
     num_kvcache_blocks: int = -1
+    top_p_backend: str = "exact"
 
     def __post_init__(self):
+        if not isinstance(self.top_p_backend, str):
+            raise TypeError("top_p_backend must be a string")
+        if self.top_p_backend not in {"exact", "flashinfer"}:
+            raise ValueError(
+                "top_p_backend must be either 'exact' or 'flashinfer'"
+            )
         assert os.path.isdir(self.model)
         assert self.kvcache_block_size % 256 == 0
         assert 1 <= self.tensor_parallel_size <= 8
