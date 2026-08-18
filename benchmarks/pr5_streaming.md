@@ -82,21 +82,26 @@ evidence. The earlier JSON remains valid historical evidence, but it is not an
 equivalence certificate: its four pairs reused one seed and its null stream did
 not perform the final detokenization already included by `generate()`.
 
-The hardened protocol requires exactly eight fresh-process pairs. It derives a
-distinct seed and exact prompt set for every pair, balances route order four/four,
-and performs one final full tokenizer decode per sequence on both timed routes.
-Every worker records its exact argv, pair position, prompt hash and text, route
-timestamps, raw per-event engine-to-caller delay, request delivery distributions,
-and start/end/peak GPU and RSS memory. The parent records the clean HEAD and Git
-tree, tracked source-blob manifest, benchmark hash, full model-file manifest and
-hashes, package/hardware environment, and exact child commands. It fingerprints
-the repository and model again after all workers finish.
+The hardened protocol requires exactly eight fresh-worker statistical units.
+After short and full-128-token untimed warmups on both routes, every worker runs
+four timed generate/stream pairs: two in each route order, each with a distinct
+prompt set and seed shared by the two routes. Prompt plus completion is asserted
+below one KV-cache block, and an idle/zero-owned-block assertion precedes replacing
+the block manager before every timed route. Each worker contributes the median of
+its four within-round paired throughput deltas; route medians remain descriptive.
+Every worker records its exact argv, round/pair position, prompt hash and text,
+cache-reset policy/state, route timestamps, raw per-event engine-to-caller delay,
+request delivery distributions, and start/end/peak GPU and RSS memory. The parent
+records the clean HEAD and Git tree, tracked source-blob manifest, benchmark hash,
+full model-file manifest and hashes, package/hardware environment, and exact child
+commands. It fingerprints the repository and model again after all workers finish.
 
 Results are atomically published outside the repository and can never overwrite
 an existing path; there is no `--overwrite` escape hatch. The predeclared gates
 include token/text identity, a paired mean 90% interval inside ±2%, event-delivery
-p95 at most 1 ms, minimum 10x caller exposure, stream peak allocation within 1%
-of generate, pending storage at most `batch_size - 1`, and the synchronous
+p95 at most 1 ms, minimum 10x caller exposure, every timed stream peak allocation
+within 1% of its paired generate peak (with only zero/zero passing a zero baseline),
+pending storage at most `batch_size - 1`, and the synchronous
 `G(B, delta) = G0 + B * delta` backpressure roofline. The allowed roofline
 residual is `max(2 ms, 10% * B * delta)`.
 

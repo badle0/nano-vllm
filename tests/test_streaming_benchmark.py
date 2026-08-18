@@ -1,4 +1,5 @@
 import json
+from types import SimpleNamespace
 
 import pytest
 
@@ -7,7 +8,6 @@ from nanovllm import StreamingDetokenizer
 
 
 def _fake_worker(index):
-    order = ["generate", "stream"] if index % 2 == 0 else ["stream", "generate"]
     request_metrics = {
         key: {"values": [0.0001], "summary": benchmark._summary([0.0001])}
         for key in (
@@ -19,29 +19,51 @@ def _fake_worker(index):
             "engine_finish_to_delivery",
         )
     }
-    memory = {"peak": {"allocated_bytes": 100}}
-    routes = {
-        "generate": {
-            "tokens_per_second": 100.0,
-            "return_seconds": 1.0,
-            "pair_position": order.index("generate"),
-            "memory": memory,
-        },
-        "stream": {
-            "tokens_per_second": 100.0,
-            "first_event_seconds": 0.05,
-            "pair_position": order.index("stream"),
-            "memory": memory,
-            "event_delivery": {
-                "values": [{"engine_to_caller_seconds": 0.0001}],
+    initial_order = (
+        ["generate", "stream"] if index % 2 == 0 else ["stream", "generate"]
+    )
+    timed_rounds = []
+    for round_index in range(benchmark.CORE_TIMED_ROUNDS):
+        order = initial_order if round_index % 2 == 0 else list(reversed(initial_order))
+        resets = [{
+            "policy": benchmark.CORE_PREFIX_CACHE_POLICY,
+            "route": route,
+            "pair_position": position,
+            "used_blocks_before_reset": 0,
+            "used_blocks_after_route": 0,
+            "cached_block_hashes_after_route": 0,
+        } for position, route in enumerate(order)]
+        timed_rounds.append({
+            "round_index": round_index,
+            "round_seed": 10_000 + index * benchmark.CORE_TIMED_ROUNDS + round_index,
+            "prompts": ["prompt"] * 8,
+            "prompt_sha256": f"{index * benchmark.CORE_TIMED_ROUNDS + round_index:064x}",
+            "max_prompt_plus_completion_tokens": 200,
+            "block_size": 256,
+            "measurement_order": order,
+            "prefix_cache_resets": resets,
+            "generate": {
+                "tokens_per_second": 100.0,
+                "return_seconds": 1.0,
+                "num_tokens": 8 * 128,
+                "pair_position": order.index("generate"),
+                "memory": {"peak": {"allocated_bytes": 100}},
             },
-            "request_metric_distributions_seconds": request_metrics,
-        },
-        "tokens_equivalent": True,
-        "texts_equivalent": True,
-        "paired_stream_throughput_delta_percent": 0.0,
-        "caller_exposure_factor": 20.0,
-    }
+            "stream": {
+                "tokens_per_second": 100.0,
+                "first_event_seconds": 0.05,
+                "pair_position": order.index("stream"),
+                "memory": {"peak": {"allocated_bytes": 100}},
+                "event_delivery": {
+                    "values": [{"engine_to_caller_seconds": 0.0001}],
+                },
+                "request_metric_distributions_seconds": request_metrics,
+            },
+            "tokens_equivalent": True,
+            "texts_equivalent": True,
+            "paired_stream_throughput_delta_percent": 0.0,
+            "caller_exposure_factor": 20.0,
+        })
     slow = []
     for sleep_seconds in (0.0, 0.001, 0.004):
         slow.append({
@@ -63,10 +85,29 @@ def _fake_worker(index):
     return {
         "trial_seed": 1000 + index,
         "prompt_sha256": f"{index:064x}",
-        "prompts": ["prompt"] * 8,
-        "measurement_order": order,
+        "timed_round_seeds": [item["round_seed"] for item in timed_rounds],
+        "timed_round_orders": [item["measurement_order"] for item in timed_rounds],
+        "warmup": {
+            "full_length_tokens_per_route": 128,
+            "prefix_cache_policy": benchmark.CORE_PREFIX_CACHE_POLICY,
+            "records": [
+                {"route": route, "max_tokens": 128}
+                for route in ("generate", "stream")
+            ],
+        },
         "environment": environment,
-        "core": routes,
+        "core": {
+            "timed_rounds": timed_rounds,
+            "route_medians": {
+                "generate": {"tokens_per_second": 100.0, "return_seconds": 1.0},
+                "stream": {"tokens_per_second": 100.0, "first_event_seconds": 0.05},
+            },
+            "tokens_equivalent": True,
+            "texts_equivalent": True,
+            "prefix_cache_policy": benchmark.CORE_PREFIX_CACHE_POLICY,
+            "paired_stream_throughput_delta_percent": 0.0,
+            "caller_exposure_factor": 20.0,
+        },
         "slow_consumer": slow,
         "detokenizer": [{
             "num_tokens": 64,
@@ -123,6 +164,7 @@ def test_release_parser_predeclares_eight_pairs_and_has_no_overwrite_escape_hatc
     args = parser.parse_args(["--output", "/tmp/unused-streaming-cert.json"])
 
     assert args.runs == 8
+    assert args.core_rounds == 4
     assert args.correction_lengths == [8000, 32000]
     assert "--overwrite" not in parser.format_help()
 
@@ -135,3 +177,52 @@ def test_cpu_synthetic_aggregate_exercises_all_gpu_release_gate_shapes():
     ] == {"mean": 0.0, "low": 0.0, "high": 0.0}
     assert all(aggregate["gates"].values())
     assert aggregate["backpressure_roofline"]["4"]["residual_ms"] == 0.0
+
+
+def test_peak_memory_gate_is_paired_relative_and_zero_safe():
+    workers = [_fake_worker(index) for index in range(8)]
+    first_round = workers[0]["core"]["timed_rounds"][0]
+    first_round["generate"]["memory"]["peak"]["allocated_bytes"] = 100
+    first_round["stream"]["memory"]["peak"]["allocated_bytes"] = 102
+
+    assert not benchmark._aggregate(workers)["gates"][
+        "stream_peak_memory_within_1_percent_of_generate"
+    ]
+    assert benchmark._stream_peak_within_one_percent_of_generate(101, 100)
+    assert not benchmark._stream_peak_within_one_percent_of_generate(102, 100)
+    assert benchmark._stream_peak_within_one_percent_of_generate(0, 0)
+    assert not benchmark._stream_peak_within_one_percent_of_generate(1, 0)
+
+
+def test_core_prefix_reset_requires_idle_ownership_and_replaces_cache_metadata():
+    class FakeBlock:
+        ref_count = 0
+
+    class FakeBlockManager:
+        def __init__(self, num_blocks, block_size):
+            self.block_size = block_size
+            self.blocks = [FakeBlock() for _ in range(num_blocks)]
+            self.free_block_ids = list(range(num_blocks))
+            self.used_block_ids = set()
+            self.hash_to_block_id = {}
+
+    previous = FakeBlockManager(4, 256)
+    previous.hash_to_block_id[123] = 2
+    scheduler = SimpleNamespace(
+        is_finished=lambda: True,
+        block_manager=previous,
+    )
+    llm = SimpleNamespace(scheduler=scheduler, _active_session=None)
+
+    record = benchmark._reset_core_prefix_cache(
+        llm, FakeBlockManager, "generate", 0
+    )
+
+    assert scheduler.block_manager is not previous
+    assert scheduler.block_manager.hash_to_block_id == {}
+    assert record["policy"] == benchmark.CORE_PREFIX_CACHE_POLICY
+    assert record["discarded_cached_block_hashes"] == 1
+
+    scheduler.block_manager.used_block_ids.add(0)
+    with pytest.raises(AssertionError, match="owns KV-cache blocks"):
+        benchmark._reset_core_prefix_cache(llm, FakeBlockManager, "stream", 1)

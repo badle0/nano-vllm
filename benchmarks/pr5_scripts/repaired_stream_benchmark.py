@@ -2,10 +2,12 @@
 """Fresh-process evidence for the repaired synchronous streaming API.
 
 The parent process never imports torch.  It starts one worker process per
-observation so CUDA/model state cannot leak across observations.  Every worker
-warms both public delivery paths, measures generate/stream in an alternating
-order, rotates the slow-consumer order, and exercises correction-capable
-TextUpdate application through one exact detokenizer flush.
+statistical unit so CUDA/model state cannot leak across units.  Every worker
+warms both public delivery paths at the full measured length, then takes the
+median of four cache-neutral paired generate/stream efficiency deltas with two
+rounds in each route order and distinct prompt/seed pairs.  It also rotates the
+slow-consumer order and exercises correction-capable TextUpdate application
+through one exact detokenizer flush.
 
 This benchmark measures caller-visible delivery boundaries.  In particular,
 ``stream_first_event_seconds`` is not model TTFT: it includes public API work
@@ -34,9 +36,11 @@ from time import perf_counter, process_time, sleep
 from typing import Any
 
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 DEFAULT_MODEL = "/workspace/models/Qwen3-0.6B"
 SOURCE_PATHS = ("nanovllm", "benchmarks/pr5_scripts/repaired_stream_benchmark.py")
+CORE_TIMED_ROUNDS = 4
+CORE_PREFIX_CACHE_POLICY = "fresh_block_manager_before_each_timed_route"
 CORRECTION_WINDOW_SIZE = 32
 CORRECTION_BOUNDARY_OVERLAP = 8
 CORRECTION_TIME_SLOPE_LIMIT = 1.5
@@ -209,6 +213,53 @@ def _summary(values: list[float]) -> dict[str, float | int]:
         "p95": _percentile(values, 0.95),
         "p99": _percentile(values, 0.99),
         "max": max(values),
+    }
+
+
+def _stream_peak_within_one_percent_of_generate(
+    stream_peak_bytes: int,
+    generate_peak_bytes: int,
+) -> bool:
+    """Compare paired peaks without turning a zero baseline into a free allowance."""
+    if stream_peak_bytes < 0 or generate_peak_bytes < 0:
+        return False
+    if generate_peak_bytes == 0:
+        return stream_peak_bytes == 0
+    return stream_peak_bytes <= generate_peak_bytes * 1.01
+
+
+def _reset_core_prefix_cache(
+    llm: Any,
+    block_manager_type: type,
+    route: str,
+    pair_position: int,
+) -> dict[str, Any]:
+    """Install fresh prefix metadata only when no request owns a KV block."""
+    scheduler = llm.scheduler
+    if not scheduler.is_finished():
+        raise AssertionError("core prefix-cache reset requires an idle scheduler")
+    if getattr(llm, "_active_session", None) is not None:
+        raise AssertionError("core prefix-cache reset requires no active API session")
+    previous = scheduler.block_manager
+    if previous.used_block_ids:
+        raise AssertionError("idle scheduler still owns KV-cache blocks")
+    if len(previous.free_block_ids) != len(previous.blocks):
+        raise AssertionError("idle block manager does not expose every block as free")
+    if any(block.ref_count != 0 for block in previous.blocks):
+        raise AssertionError("idle block manager retained a nonzero block reference")
+
+    replacement = block_manager_type(len(previous.blocks), previous.block_size)
+    if replacement.used_block_ids or replacement.hash_to_block_id:
+        raise AssertionError("fresh block manager unexpectedly contains cache state")
+    scheduler.block_manager = replacement
+    return {
+        "policy": CORE_PREFIX_CACHE_POLICY,
+        "route": route,
+        "pair_position": pair_position,
+        "num_blocks": len(previous.blocks),
+        "block_size": previous.block_size,
+        "discarded_cached_block_hashes": len(previous.hash_to_block_id),
+        "used_blocks_before_reset": 0,
     }
 
 
@@ -775,18 +826,34 @@ def _worker_environment(
     }
 
 
+def _assert_subblock_route_released(
+    llm: Any,
+    reset_record: dict[str, Any],
+) -> None:
+    scheduler = llm.scheduler
+    if not scheduler.is_finished() or scheduler.block_manager.used_block_ids:
+        raise AssertionError("completed core route retained scheduler or KV-block ownership")
+    cached_hashes = len(scheduler.block_manager.hash_to_block_id)
+    if cached_hashes:
+        raise AssertionError("sub-block core route unexpectedly populated prefix cache")
+    reset_record["used_blocks_after_route"] = 0
+    reset_record["cached_block_hashes_after_route"] = cached_hashes
+
+
 def _run_worker(args: argparse.Namespace) -> None:
     worker_started_at_utc = _utc_now()
     import torch
     from nanovllm import LLM, SamplingParams, StreamingDetokenizer
+    from nanovllm.engine.block_manager import BlockManager
 
     if not torch.cuda.is_available():
         raise RuntimeError("the repaired streaming benchmark requires CUDA")
     repo = Path(__file__).resolve().parents[2]
     model = Path(args.model)
     trial_seed = _trial_seed(args.seed, args.trial_index)
-    prompts = _trial_prompts(args.batch_size, args.trial_index)
-    slow_prompts = prompts[:args.slow_batch_size]
+    slow_prompts = _trial_prompts(
+        args.batch_size, 50_000 + args.trial_index
+    )[:args.slow_batch_size]
     environment = _worker_environment(
         torch,
         repo,
@@ -811,39 +878,145 @@ def _run_worker(args: argparse.Namespace) -> None:
         max_model_len=args.max_model_len,
     )
 
-    warmup_params = SamplingParams(
-        temperature=args.temperature,
-        max_tokens=args.warmup_tokens,
-        ignore_eos=True,
-    )
+    warmup_prompts = _trial_prompts(args.batch_size, 10_000 + args.trial_index)
+    warmup_prompt_lengths = [len(llm.tokenizer.encode(item)) for item in warmup_prompts]
+    if max(warmup_prompt_lengths) + args.max_tokens >= llm.scheduler.block_size:
+        raise AssertionError("warmup prompt plus completion must remain below one KV block")
     warmup_seed = trial_seed ^ 0x5A5A5A5A
-    _measure_generate(llm, torch, prompts, warmup_params, warmup_seed)
-    _measure_stream(llm, torch, prompts, warmup_params, warmup_seed)
+    warmup_records = []
+    for warmup_tokens in (args.warmup_tokens, args.max_tokens):
+        warmup_params = SamplingParams(
+            temperature=args.temperature,
+            max_tokens=warmup_tokens,
+            ignore_eos=True,
+        )
+        for pair_position, route in enumerate(("generate", "stream")):
+            reset_record = _reset_core_prefix_cache(
+                llm, BlockManager, route, pair_position
+            )
+            if route == "generate":
+                _measure_generate(
+                    llm, torch, warmup_prompts, warmup_params, warmup_seed
+                )
+            else:
+                _measure_stream(
+                    llm, torch, warmup_prompts, warmup_params, warmup_seed
+                )
+            _assert_subblock_route_released(llm, reset_record)
+            warmup_records.append({
+                "route": route,
+                "max_tokens": warmup_tokens,
+                "prefix_cache_reset": reset_record,
+            })
 
     params = SamplingParams(
         temperature=args.temperature,
         max_tokens=args.max_tokens,
         ignore_eos=True,
     )
-    core = {}
-    order = ("generate", "stream") if args.order == "generate-stream" else ("stream", "generate")
-    for pair_position, route in enumerate(order):
-        if route == "generate":
-            core[route] = _measure_generate(
-                llm, torch, prompts, params, trial_seed, pair_position
+    initial_order = (
+        ("generate", "stream")
+        if args.order == "generate-stream"
+        else ("stream", "generate")
+    )
+    timed_rounds = []
+    for round_index in range(args.core_rounds):
+        prompt_index = args.trial_index * args.core_rounds + round_index
+        prompts = _trial_prompts(args.batch_size, prompt_index)
+        prompt_lengths = [len(llm.tokenizer.encode(item)) for item in prompts]
+        max_prompt_plus_completion = max(prompt_lengths) + args.max_tokens
+        if max_prompt_plus_completion >= llm.scheduler.block_size:
+            raise AssertionError("timed prompt plus completion must remain below one KV block")
+        round_seed = trial_seed + 313 * round_index
+        order = initial_order if round_index % 2 == 0 else tuple(reversed(initial_order))
+        routes = {}
+        resets = []
+        for pair_position, route in enumerate(order):
+            reset_record = _reset_core_prefix_cache(
+                llm, BlockManager, route, pair_position
             )
-        else:
-            core[route] = _measure_stream(
-                llm, torch, prompts, params, trial_seed, pair_position
-            )
-    tokens_equivalent = core["generate"]["token_ids"] == core["stream"]["token_ids"]
-    texts_equivalent = core["generate"]["texts"] == core["stream"]["texts"]
-    if not tokens_equivalent or not texts_equivalent:
-        raise AssertionError("seeded generate and stream outputs diverged")
-    del core["generate"]["token_ids"]
-    del core["stream"]["token_ids"]
-    del core["generate"]["texts"]
-    del core["stream"]["texts"]
+            if route == "generate":
+                routes[route] = _measure_generate(
+                    llm, torch, prompts, params, round_seed, pair_position
+                )
+            else:
+                routes[route] = _measure_stream(
+                    llm, torch, prompts, params, round_seed, pair_position
+                )
+            _assert_subblock_route_released(llm, reset_record)
+            resets.append(reset_record)
+
+        tokens_equivalent = (
+            routes["generate"]["token_ids"] == routes["stream"]["token_ids"]
+        )
+        texts_equivalent = (
+            routes["generate"]["texts"] == routes["stream"]["texts"]
+        )
+        if not tokens_equivalent or not texts_equivalent:
+            raise AssertionError("seeded generate and stream outputs diverged")
+        for route in ("generate", "stream"):
+            del routes[route]["token_ids"]
+            del routes[route]["texts"]
+        timed_rounds.append({
+            "round_index": round_index,
+            "round_seed": round_seed,
+            "prompts": prompts,
+            "prompt_sha256": _canonical_sha256(prompts),
+            "prompt_token_lengths": prompt_lengths,
+            "max_prompt_plus_completion_tokens": max_prompt_plus_completion,
+            "block_size": llm.scheduler.block_size,
+            "measurement_order": list(order),
+            "prefix_cache_resets": resets,
+            **routes,
+            "tokens_equivalent": tokens_equivalent,
+            "texts_equivalent": texts_equivalent,
+            "paired_stream_throughput_delta_percent": (
+                (routes["stream"]["tokens_per_second"]
+                 / routes["generate"]["tokens_per_second"] - 1.0) * 100.0
+            ),
+            "caller_exposure_factor": (
+                routes["generate"]["return_seconds"]
+                / routes["stream"]["first_event_seconds"]
+            ),
+        })
+
+    generate_tps_median = statistics.median(
+        item["generate"]["tokens_per_second"] for item in timed_rounds
+    )
+    stream_tps_median = statistics.median(
+        item["stream"]["tokens_per_second"] for item in timed_rounds
+    )
+    core = {
+        "timed_rounds": timed_rounds,
+        "route_medians": {
+            "generate": {
+                "tokens_per_second": generate_tps_median,
+                "return_seconds": statistics.median(
+                    item["generate"]["return_seconds"] for item in timed_rounds
+                ),
+            },
+            "stream": {
+                "tokens_per_second": stream_tps_median,
+                "drained_seconds": statistics.median(
+                    item["stream"]["drained_seconds"] for item in timed_rounds
+                ),
+                "first_event_seconds": statistics.median(
+                    item["stream"]["first_event_seconds"] for item in timed_rounds
+                ),
+            },
+        },
+        "tokens_equivalent": all(item["tokens_equivalent"] for item in timed_rounds),
+        "texts_equivalent": all(item["texts_equivalent"] for item in timed_rounds),
+        "matched_work": "both routes perform one final full tokenizer decode per sequence",
+        "prefix_cache_policy": CORE_PREFIX_CACHE_POLICY,
+        "paired_stream_throughput_delta_percent": statistics.median(
+            item["paired_stream_throughput_delta_percent"]
+            for item in timed_rounds
+        ),
+        "caller_exposure_factor": statistics.median(
+            item["caller_exposure_factor"] for item in timed_rounds
+        ),
+    }
 
     slow_params = SamplingParams(
         temperature=args.temperature,
@@ -886,7 +1059,9 @@ def _run_worker(args: argparse.Namespace) -> None:
     repository_after = _repository_fingerprint(repo)
     if repository_after != repository:
         raise RuntimeError("repository changed while a release worker was running")
-    prompt_sha256 = _canonical_sha256(prompts)
+    prompt_sha256 = _canonical_sha256([
+        item["prompt_sha256"] for item in timed_rounds
+    ])
     result = {
         "schema_version": SCHEMA_VERSION,
         "worker_started_at_utc": worker_started_at_utc,
@@ -894,27 +1069,24 @@ def _run_worker(args: argparse.Namespace) -> None:
         "trial_index": args.trial_index,
         "pair_id": f"{args.expected_commit[:12]}-{args.trial_index:02d}-{prompt_sha256[:12]}",
         "trial_seed": trial_seed,
-        "prompts": prompts,
+        "timed_prompt_sets": [item["prompts"] for item in timed_rounds],
         "prompt_sha256": prompt_sha256,
-        "measurement_order": list(order),
+        "timed_round_orders": [item["measurement_order"] for item in timed_rounds],
+        "timed_round_seeds": [item["round_seed"] for item in timed_rounds],
         "slow_consumer_order_ms": [value * 1000.0 for value in sleep_order],
         "environment": environment,
-        "core": {
-            **core,
-            "tokens_equivalent": tokens_equivalent,
-            "texts_equivalent": texts_equivalent,
-            "matched_work": (
-                "both routes perform one final full tokenizer decode per sequence"
+        "warmup": {
+            "short_tokens_per_route": args.warmup_tokens,
+            "full_length_tokens_per_route": args.max_tokens,
+            "prompt_sha256": _canonical_sha256(warmup_prompts),
+            "max_prompt_plus_completion_tokens": (
+                max(warmup_prompt_lengths) + args.max_tokens
             ),
-            "paired_stream_throughput_delta_percent": (
-                (core["stream"]["tokens_per_second"]
-                 / core["generate"]["tokens_per_second"] - 1.0) * 100.0
-            ),
-            "caller_exposure_factor": (
-                core["generate"]["return_seconds"]
-                / core["stream"]["first_event_seconds"]
-            ),
+            "block_size": llm.scheduler.block_size,
+            "prefix_cache_policy": CORE_PREFIX_CACHE_POLICY,
+            "records": warmup_records,
         },
+        "core": core,
         "slow_consumer": slow,
         "detokenizer": detokenizer,
     }
@@ -943,25 +1115,42 @@ def _stable_environment_pin(environment: dict[str, Any]) -> dict[str, Any]:
 
 
 def _aggregate(workers: list[dict[str, Any]]) -> dict[str, Any]:
-    generate_tps = [item["core"]["generate"]["tokens_per_second"] for item in workers]
-    stream_tps = [item["core"]["stream"]["tokens_per_second"] for item in workers]
-    generate_return = [item["core"]["generate"]["return_seconds"] for item in workers]
-    stream_first = [item["core"]["stream"]["first_event_seconds"] for item in workers]
+    timed_rounds = [
+        timed_round
+        for worker in workers
+        for timed_round in worker["core"]["timed_rounds"]
+    ]
+    generate_tps = [
+        item["core"]["route_medians"]["generate"]["tokens_per_second"]
+        for item in workers
+    ]
+    stream_tps = [
+        item["core"]["route_medians"]["stream"]["tokens_per_second"]
+        for item in workers
+    ]
+    generate_return = [
+        item["core"]["route_medians"]["generate"]["return_seconds"]
+        for item in workers
+    ]
+    stream_first = [
+        item["core"]["route_medians"]["stream"]["first_event_seconds"]
+        for item in workers
+    ]
     paired_deltas = [
         item["core"]["paired_stream_throughput_delta_percent"] for item in workers
     ]
     paired_delta_90ci = _mean_90ci_for_eight(paired_deltas)
     event_delivery_seconds = [
         event["engine_to_caller_seconds"]
-        for worker in workers
-        for event in worker["core"]["stream"]["event_delivery"]["values"]
+        for timed_round in timed_rounds
+        for event in timed_round["stream"]["event_delivery"]["values"]
     ]
     request_delivery = {}
     for key in ("first_token_to_delivery", "engine_finish_to_delivery"):
         values = [
             value
-            for worker in workers
-            for value in worker["core"]["stream"]
+            for timed_round in timed_rounds
+            for value in timed_round["stream"]
             ["request_metric_distributions_seconds"][key]["values"]
         ]
         request_delivery[key] = {
@@ -970,12 +1159,12 @@ def _aggregate(workers: list[dict[str, Any]]) -> dict[str, Any]:
         }
 
     generate_peak = [
-        item["core"]["generate"]["memory"]["peak"]["allocated_bytes"]
-        for item in workers
+        item["generate"]["memory"]["peak"]["allocated_bytes"]
+        for item in timed_rounds
     ]
     stream_peak = [
-        item["core"]["stream"]["memory"]["peak"]["allocated_bytes"]
-        for item in workers
+        item["stream"]["memory"]["peak"]["allocated_bytes"]
+        for item in timed_rounds
     ]
     memory_delta = [
         stream - generate
@@ -1056,11 +1245,27 @@ def _aggregate(workers: list[dict[str, Any]]) -> dict[str, Any]:
 
     return {
         "matched_final_decode_consumer": {
+            "worker_statistical_unit": (
+                "one fresh worker's median of four within-round paired stream "
+                "throughput deltas across two rounds in each route order"
+            ),
             "generate_tokens_per_second": _summary(generate_tps),
             "stream_tokens_per_second": _summary(stream_tps),
             "paired_stream_delta_percent": _summary(paired_deltas),
             "paired_mean_delta_percent_90ci": paired_delta_90ci,
             "equivalence_band_percent": [-2.0, 2.0],
+            "raw_timed_round_stream_delta_percent": _summary([
+                item["paired_stream_throughput_delta_percent"]
+                for item in timed_rounds
+            ]),
+            "raw_by_stream_position": {
+                str(position): _summary([
+                    item["paired_stream_throughput_delta_percent"]
+                    for item in timed_rounds
+                    if item["stream"]["pair_position"] == position
+                ])
+                for position in (0, 1)
+            },
         },
         "caller_delivery": {
             "generate_return_ms": _summary([value * 1000.0 for value in generate_return]),
@@ -1096,17 +1301,77 @@ def _aggregate(workers: list[dict[str, Any]]) -> dict[str, Any]:
             "eight_distinct_prompt_sets": len({
                 item["prompt_sha256"] for item in workers
             }) == 8,
+            "all_timed_round_seeds_distinct": len({
+                item["round_seed"] for item in timed_rounds
+            }) == len(timed_rounds),
+            "all_timed_prompt_sets_distinct": len({
+                item["prompt_sha256"] for item in timed_rounds
+            }) == len(timed_rounds),
             "balanced_pair_order": (
-                sum(item["measurement_order"] == ["generate", "stream"] for item in workers) == 4
+                len(timed_rounds) == len(workers) * CORE_TIMED_ROUNDS
+                and all(
+                    sum(
+                        item["measurement_order"] == ["generate", "stream"]
+                        for item in worker["core"]["timed_rounds"]
+                    ) == CORE_TIMED_ROUNDS // 2
+                    and sum(
+                        item["measurement_order"] == ["stream", "generate"]
+                        for item in worker["core"]["timed_rounds"]
+                    ) == CORE_TIMED_ROUNDS // 2
+                    for worker in workers
+                )
+                and sum(
+                    item["measurement_order"] == ["generate", "stream"]
+                    for item in timed_rounds
+                ) == len(timed_rounds) // 2
                 and sum(
                     item["measurement_order"] == ["stream", "generate"]
-                    for item in workers
-                ) == 4
+                    for item in timed_rounds
+                ) == len(timed_rounds) // 2
             ),
             "route_positions_match_declared_order": all(
-                worker["core"][route]["pair_position"] == position
+                timed_round[route]["pair_position"] == position
+                for timed_round in timed_rounds
+                for position, route in enumerate(timed_round["measurement_order"])
+            ),
+            "full_length_warmup_covers_both_routes": all(
+                worker["warmup"]["full_length_tokens_per_route"]
+                == max(
+                    timed_round["generate"]["num_tokens"]
+                    // len(timed_round["prompts"])
+                    for timed_round in worker["core"]["timed_rounds"]
+                )
+                and {
+                    item["route"]
+                    for item in worker["warmup"]["records"]
+                    if item["max_tokens"]
+                    == worker["warmup"]["full_length_tokens_per_route"]
+                } == {"generate", "stream"}
                 for worker in workers
-                for position, route in enumerate(worker["measurement_order"])
+            ),
+            "cache_neutral_core_policy_asserted": all(
+                worker["core"]["prefix_cache_policy"]
+                == CORE_PREFIX_CACHE_POLICY
+                and worker["warmup"]["prefix_cache_policy"]
+                == CORE_PREFIX_CACHE_POLICY
+                for worker in workers
+            ) and all(
+                timed_round["max_prompt_plus_completion_tokens"]
+                < timed_round["block_size"]
+                and [
+                    item["route"] for item in timed_round["prefix_cache_resets"]
+                ] == timed_round["measurement_order"]
+                and all(
+                    item["policy"] == CORE_PREFIX_CACHE_POLICY
+                    and item["pair_position"] == position
+                    and item["used_blocks_before_reset"] == 0
+                    and item["used_blocks_after_route"] == 0
+                    and item["cached_block_hashes_after_route"] == 0
+                    for position, item in enumerate(
+                        timed_round["prefix_cache_resets"]
+                    )
+                )
+                for timed_round in timed_rounds
             ),
             "all_worker_pins_identical": all(
                 _stable_environment_pin(item["environment"])
@@ -1123,9 +1388,12 @@ def _aggregate(workers: list[dict[str, Any]]) -> dict[str, Any]:
             "minimum_caller_exposure_at_least_10x": min(
                 item["core"]["caller_exposure_factor"] for item in workers
             ) >= 10.0,
-            "stream_peak_memory_within_1_percent_of_generate": max(
-                memory_delta
-            ) <= workers[0]["environment"]["gpu"]["total_memory_bytes"] * 0.01,
+            "stream_peak_memory_within_1_percent_of_generate": all(
+                _stream_peak_within_one_percent_of_generate(stream, generate)
+                for stream, generate in zip(
+                    stream_peak, generate_peak, strict=True
+                )
+            ),
             "pending_storage_bounded_by_slow_batch_minus_one": all(
                 item["max_pending_events_after_delivery"]
                 <= item["num_events"] // item["num_steps"] - 1
@@ -1170,10 +1438,16 @@ def _parent_result(
         "protocol": {
             "fresh_worker_processes": args.runs,
             "fresh_process_pairs": args.runs,
-            "paired_core_order": [worker["measurement_order"] for worker in workers],
+            "raw_timed_route_pairs": args.runs * args.core_rounds,
+            "timed_rounds_per_worker": args.core_rounds,
+            "paired_core_order": [
+                worker["timed_round_orders"] for worker in workers
+            ],
             "pair_ids": [worker["pair_id"] for worker in workers],
             "slow_consumer_order_ms": [worker["slow_consumer_order_ms"] for worker in workers],
-            "warmup_tokens_per_route": args.warmup_tokens,
+            "short_warmup_tokens_per_route": args.warmup_tokens,
+            "full_length_warmup_tokens_per_route": args.max_tokens,
+            "core_prefix_cache_policy": CORE_PREFIX_CACHE_POLICY,
             "batch_size": args.batch_size,
             "max_tokens": args.max_tokens,
             "slow_batch_size": args.slow_batch_size,
@@ -1181,7 +1455,17 @@ def _parent_result(
             "temperature": args.temperature,
             "base_seed": args.seed,
             "trial_seeds": [worker["trial_seed"] for worker in workers],
+            "timed_round_seeds": [
+                worker["timed_round_seeds"] for worker in workers
+            ],
             "prompt_sha256": [worker["prompt_sha256"] for worker in workers],
+            "timed_prompt_sha256": [
+                [
+                    timed_round["prompt_sha256"]
+                    for timed_round in worker["core"]["timed_rounds"]
+                ]
+                for worker in workers
+            ],
             "matched_route_work": (
                 "both generate and stream perform one final full tokenizer "
                 "decode per sequence before their route timer stops"
@@ -1195,6 +1479,16 @@ def _parent_result(
             "repository": repository,
             "benchmark_script_sha256": _sha256_file(Path(__file__).resolve()),
             "model": model,
+            "core_timing_policy": {
+                "statistical_unit": (
+                    "fresh-worker median of four within-round paired deltas"
+                ),
+                "full_length_warmup_per_route": True,
+                "two_rounds_per_route_order": True,
+                "distinct_prompt_and_seed_per_round": True,
+                "prefix_cache_policy": CORE_PREFIX_CACHE_POLICY,
+                "prompt_plus_completion_below_one_block": True,
+            },
             "post_run_verification": {
                 "repository_unchanged": True,
                 "model_manifest_unchanged": True,
@@ -1213,6 +1507,14 @@ def _run_parent(args: argparse.Namespace) -> None:
     started_at_utc = _utc_now()
     if args.runs != 8:
         raise ValueError("release evidence requires exactly eight fresh process pairs")
+    if args.core_rounds != CORE_TIMED_ROUNDS:
+        raise ValueError(
+            f"release evidence requires exactly {CORE_TIMED_ROUNDS} timed rounds per worker"
+        )
+    if args.max_tokens < 1:
+        raise ValueError("max tokens must be positive")
+    if not 1 <= args.warmup_tokens < args.max_tokens:
+        raise ValueError("short warmup tokens must be in [1, max_tokens)")
     if not 1 <= args.batch_size:
         raise ValueError("batch size must be positive")
     if not 1 <= args.slow_batch_size <= args.batch_size:
@@ -1271,6 +1573,7 @@ def _run_parent(args: argparse.Namespace) -> None:
                 "--runs", str(args.runs),
                 "--batch-size", str(args.batch_size),
                 "--max-tokens", str(args.max_tokens),
+                "--core-rounds", str(args.core_rounds),
                 "--slow-batch-size", str(args.slow_batch_size),
                 "--slow-tokens", str(args.slow_tokens),
                 "--warmup-tokens", str(args.warmup_tokens),
@@ -1336,6 +1639,7 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--runs", type=int, default=8)
     parser.add_argument("--batch-size", type=int, default=16)
     parser.add_argument("--max-tokens", type=int, default=128)
+    parser.add_argument("--core-rounds", type=int, default=CORE_TIMED_ROUNDS)
     parser.add_argument("--slow-batch-size", type=int, default=8)
     parser.add_argument("--slow-tokens", type=int, default=32)
     parser.add_argument("--warmup-tokens", type=int, default=8)
