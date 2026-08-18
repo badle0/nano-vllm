@@ -89,6 +89,19 @@ certified by prior manual-GC evidence. The retained inputs are named
 `roofline_chunk_tip_tau{256,512}_seed<seed>_gcdisabled.json` under the external
 evidence directory `/workspace/.feat_bench/results/`.
 
+## Retained 2026-08-18 evidence
+
+- [`2026-08-18-a100-full-completion-ba1bde4`](evidence/2026-08-18-a100-full-completion-ba1bde4/README.md)
+  retains ten fresh full-completion runs and both completed aggregate archives.
+  Tau 256 is `latency_not_certified` at 3/5 strict SLO passes; tau 512 remains
+  throughput/TTFT-only and is not latency-certified.
+- [`2026-08-18-a100-contract-phase-e50e732`](evidence/2026-08-18-a100-contract-phase-e50e732/README.md)
+  retains the passing graph contracts and two non-certifying phase diagnostics.
+
+The full-completion archive is a pre-optimization negative baseline. Any later
+latency change requires a new commit/source pin and five new fresh-process
+tau-256 runs.
+
 ## Optional Python GC control
 
 `LLM(..., disable_python_gc=True)` opts one engine into process-wide cyclic-GC
