@@ -229,10 +229,9 @@ def base_result(kind: str, argv: list[str], pin: dict, model: dict, environment:
     }
 
 
-def immutable_write_json(path: Path, payload: dict) -> None:
+def immutable_write_bytes(path: Path, data: bytes) -> None:
     target = path.expanduser()
     target.parent.mkdir(parents=True, exist_ok=True)
-    data = (json.dumps(payload, indent=2, sort_keys=True) + "\n").encode("utf-8")
     descriptor = os.open(
         target,
         os.O_WRONLY | os.O_CREAT | os.O_EXCL,
@@ -251,6 +250,11 @@ def immutable_write_json(path: Path, payload: dict) -> None:
         os.fsync(descriptor)
     finally:
         os.close(descriptor)
+
+
+def immutable_write_json(path: Path, payload: dict) -> None:
+    data = (json.dumps(payload, indent=2, sort_keys=True) + "\n").encode("utf-8")
+    immutable_write_bytes(path, data)
 
 
 def handle_pin_query(print_source_sha256: bool, show_pin: bool) -> bool:

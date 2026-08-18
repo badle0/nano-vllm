@@ -60,6 +60,14 @@ source hashes; they are reference evidence and never certify a current run.
 Re-certify through the retained harness after any source, model, software,
 hardware, or workload change.
 
+The retained full-completion certification workflow lives under
+`benchmarks/chunked_prefill_tail/`. One run never self-certifies. Its validator
+requires exactly five fresh, immutable, self/model/environment-pinned artifacts;
+tau 256 passes only if all five maximum interactive ITLs are strictly below
+10 ms. Tau 512 remains throughput/TTFT-only regardless of phase or single-run
+results. The validator can write either an immutable aggregate JSON or a
+self-contained read-only archive of the aggregate and all five raw inputs.
+
 ### Request metrics
 
 Each `generate()` result includes a `metrics` dictionary. Fields prefixed with

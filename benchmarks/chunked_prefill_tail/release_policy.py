@@ -128,7 +128,7 @@ def chunk_tail_release_profile(tau: int) -> dict[str, object]:
             "temperature": 0.6,
             "max_model_len": 4096,
             "gpu_memory_utilization": 0.8,
-            "max_num_seqs": tau,
+            "max_num_seqs": min(512, tau),
         },
         "evidence_files": tuple(
             f"roofline_chunk_tip_tau{tau}_seed{seed}_gcdisabled.json"

@@ -78,8 +78,8 @@ and lowers long-request maximum TTFT (~65.9–78.5 ms versus tau 256's
 Therefore GC control fixes one outlier cause, not tau 512's latency contract.
 Other tau values remain performance-unverified by the retained evidence.
 
-The exact arrays, seeds, artifact basenames, hardware, commits, and historical role are in
-`release_policy.py`; every new step-diagnostic JSON embeds that reference plus
+The exact arrays, seeds, artifact basenames, hardware, commits, and historical
+role are in `release_policy.py`; every new step-diagnostic JSON embeds that reference plus
 a recorded-field `matches_historical_recorded_configuration` verdict. The
 legacy files record a commit and model path but no self-pinned source or
 model-content hash, so
@@ -106,6 +106,56 @@ The step harness exposes the same choice as `--disable-python-gc` and retains
 GC state before init, after init, and after explicit engine exit. Omit the flag
 for the default-enabled control run.
 
+## Full-completion certification
+
+`full_completion_cert.py` is the only harness whose output is eligible for a
+current latency verdict. It reproduces the historical request and timed-workload
+protocol exactly, including the 16x64-token/4-token warmup, then measures
+16x64-token interactive requests, 40 engine steps before admitting two
+2,048-token long requests, and 256 completion tokens per request at temperature
+0.6. It pins
+`max_model_len=4096`, `max_num_seqs=min(512,tau)`, GPU utilization 0.8, eager
+off, and TP1 (256 slots at tau 256 and 512 slots at tau 512). The current harness
+intentionally replaces the historical process-level `gc.disable()` before engine
+construction with `disable_python_gc=True`, whose engine-owned lease begins only
+after successful initialization. GC is disabled for the same warmup and measured
+workload, but initialization-time GC state and ownership are not historical matches.
+
+Every single-run artifact contains:
+
+- clean commit/tree plus aggregate and per-file source hashes before and after;
+- the complete model file/size/SHA-256 manifest, rehashed after the run;
+- exact argv, seed assignments, prompt/output hashes, package/CUDA/GPU/driver
+  environment, and allowlisted execution-affecting environment variables;
+- all 18 raw per-request metric dictionaries, including all 255 ITLs and the
+  raw 256-token completion vector for each request;
+- GC enabled state before init, disabled state after successful init, and exact
+  restoration after explicit exit;
+- configured graph buckets and before/after graph-miss counters, plus CUDA
+  allocated/reserved peaks and KV-block counts outside the measured loop.
+
+Per-step routes and selected graph keys are intentionally not observed in this
+harness: even lightweight StepOutput processing between scheduler timestamps
+changes the next ITL. The separate phase diagnostic performs that intrusive
+attribution. A single full-completion run always records
+`single_run_latency_certified=false`.
+
+`aggregate_certification.py` accepts exactly five read-only artifacts with five
+distinct seeds. It rejects any bounded/phase diagnostic, duplicate content,
+dirty or mismatched source pins, mismatched model/environment/workload manifests,
+incomplete raw metrics, altered summaries, or a broken GC lifecycle. Tau 256 is
+current-certified only when every run's maximum interactive ITL is strictly
+below 10 ms. Tau 512 is never latency-certified by this policy, even if five
+observations happen to pass; it remains throughput/TTFT-only. Neither a single
+run nor any phase diagnostic can promote either profile.
+
+Choose `--output` for one immutable aggregate JSON or `--archive-dir` for a new
+self-contained archive. An archive copies all five raw inputs byte-for-byte,
+adds `aggregate.json` and a hash manifest, and verifies read-only files and
+directories before publishing a sibling `<archive>.COMPLETE` marker. An archive
+without that marker is incomplete. Existing outputs, archives, and markers are
+never overwritten.
+
 ## Reproducible commands
 
 First pin the exact committed source. `git status --porcelain` must print
@@ -115,9 +165,72 @@ nothing. Results belong outside this worktree.
 cd /workspace/nano-vllm-chunk-tail
 git status --porcelain
 export PIN_COMMIT="$(git rev-parse HEAD)"
-export PIN_SOURCE="$(PYTHONPATH=. PYTHONDONTWRITEBYTECODE=1 /venv/main/bin/python benchmarks/chunked_prefill_tail/step_diagnostics.py --print-source-sha256)"
+export PIN_SOURCE="$(PYTHONPATH=. PYTHONDONTWRITEBYTECODE=1 /venv/main/bin/python benchmarks/chunked_prefill_tail/full_completion_cert.py --print-source-sha256)"
 mkdir -p /workspace/.feat_bench/chunk-tail
 ```
+
+Retain five fresh tau-256 full-completion processes. These seeds intentionally
+do not reuse the legacy evidence seeds:
+
+```bash
+for SEED in 20260826 20260827 20260828 20260829 20260830; do
+  PYTHONPATH=. PYTHONDONTWRITEBYTECODE=1 \
+    TORCHINDUCTOR_CACHE_DIR=/tmp/nv_chunk_full_tau256 \
+    /venv/main/bin/python \
+      benchmarks/chunked_prefill_tail/full_completion_cert.py \
+      --model /workspace/models/Qwen3-0.6B --tau 256 --seed "$SEED" \
+      --expected-commit "$PIN_COMMIT" \
+      --expected-source-sha256 "$PIN_SOURCE" \
+      --output "/workspace/.feat_bench/chunk-tail/full_tau256_seed${SEED}.json"
+done
+
+PYTHONPATH=. PYTHONDONTWRITEBYTECODE=1 \
+  /venv/main/bin/python \
+    benchmarks/chunked_prefill_tail/aggregate_certification.py \
+    --tau 256 --expected-commit "$PIN_COMMIT" \
+    --expected-source-sha256 "$PIN_SOURCE" \
+    --input \
+      /workspace/.feat_bench/chunk-tail/full_tau256_seed20260826.json \
+      /workspace/.feat_bench/chunk-tail/full_tau256_seed20260827.json \
+      /workspace/.feat_bench/chunk-tail/full_tau256_seed20260828.json \
+      /workspace/.feat_bench/chunk-tail/full_tau256_seed20260829.json \
+      /workspace/.feat_bench/chunk-tail/full_tau256_seed20260830.json \
+    --archive-dir \
+      /workspace/.feat_bench/chunk-tail/cert_tau256_seeds20260826_20260830
+```
+
+Use five separate fresh seeds to retain the tau-512 throughput/TTFT comparison.
+The validator will still set `latency_certified=false`:
+
+```bash
+for SEED in 20260831 20260832 20260833 20260834 20260835; do
+  PYTHONPATH=. PYTHONDONTWRITEBYTECODE=1 \
+    TORCHINDUCTOR_CACHE_DIR=/tmp/nv_chunk_full_tau512 \
+    /venv/main/bin/python \
+      benchmarks/chunked_prefill_tail/full_completion_cert.py \
+      --model /workspace/models/Qwen3-0.6B --tau 512 --seed "$SEED" \
+      --expected-commit "$PIN_COMMIT" \
+      --expected-source-sha256 "$PIN_SOURCE" \
+      --output "/workspace/.feat_bench/chunk-tail/full_tau512_seed${SEED}.json"
+done
+
+PYTHONPATH=. PYTHONDONTWRITEBYTECODE=1 \
+  /venv/main/bin/python \
+    benchmarks/chunked_prefill_tail/aggregate_certification.py \
+    --tau 512 --expected-commit "$PIN_COMMIT" \
+    --expected-source-sha256 "$PIN_SOURCE" \
+    --input \
+      /workspace/.feat_bench/chunk-tail/full_tau512_seed20260831.json \
+      /workspace/.feat_bench/chunk-tail/full_tau512_seed20260832.json \
+      /workspace/.feat_bench/chunk-tail/full_tau512_seed20260833.json \
+      /workspace/.feat_bench/chunk-tail/full_tau512_seed20260834.json \
+      /workspace/.feat_bench/chunk-tail/full_tau512_seed20260835.json \
+    --archive-dir \
+      /workspace/.feat_bench/chunk-tail/cert_tau512_seeds20260831_20260835
+```
+
+Run aggregation before changing the checkout: all five run pins must match the
+aggregator's current clean HEAD and source hash.
 
 Run the high-segment mixed-tail comparison. Tau 256 is the historical latency
 reference; tau 512 is retained only to characterize its throughput/TTFT tradeoff.
