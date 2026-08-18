@@ -78,6 +78,11 @@ The aggregate gate requires the 500k median-of-process-medians to remain below
 both the recorded threshold `max(2x zero-backlog, 5 us)` and every raw run's
 own identical predeclared gate.
 
+The accepted five-process archive is under
+`evidence/2026-08-18-scheduler-da93670/`: median-of-process-medians was
+0.67/0.76/0.76 us at 0/100k/500k waiters, so 500k was 1.1343x zero-backlog and
+passed the 5 us absolute gate.
+
 ## Release classification
 
 Five retained A100-SXM4-40GB processes per tau, seeds 20260821 through 20260825,

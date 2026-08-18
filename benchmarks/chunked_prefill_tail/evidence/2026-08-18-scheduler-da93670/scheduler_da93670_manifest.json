@@ -1,0 +1,136 @@
+{
+  "aggregate": {
+    "0": {
+      "median_of_process_medians_us": 0.67,
+      "per_process_median_us": [
+        0.67,
+        0.67,
+        0.79,
+        0.8,
+        0.66
+      ],
+      "per_process_p95_us": [
+        0.71,
+        0.83,
+        1.07,
+        0.84,
+        0.7
+      ]
+    },
+    "100000": {
+      "median_of_process_medians_us": 0.76,
+      "per_process_median_us": [
+        0.76,
+        0.74,
+        0.88,
+        0.88,
+        0.74
+      ],
+      "per_process_p95_us": [
+        0.8,
+        0.9,
+        1.04,
+        0.92,
+        0.78
+      ]
+    },
+    "500000": {
+      "median_of_process_medians_us": 0.76,
+      "per_process_median_us": [
+        0.75,
+        0.88,
+        0.76,
+        0.89,
+        0.76
+      ],
+      "per_process_p95_us": [
+        0.79,
+        0.93,
+        1.02,
+        0.94,
+        0.8
+      ]
+    }
+  },
+  "commit": "da93670990725e5aef69ebdad09d76150ddc2642",
+  "environment": {
+    "cpu_count": 256,
+    "cpu_model": "AMD EPYC 7713 64-Core Processor",
+    "platform": "Linux-5.15.0-1079-nvidia-x86_64-with-glibc2.39",
+    "python": "3.12.13",
+    "python_executable": "/venv/main/bin/python"
+  },
+  "gates": {
+    "all_pass": true,
+    "all_raw_gates_pass": true,
+    "approximately_constant_schedule_cost": true,
+    "five_fresh_distinct_process_seeds": true
+  },
+  "kind": "chunk_scheduler_backlog_roofline_manifest",
+  "raw_artifacts": [
+    {
+      "bytes": 796393,
+      "measurement_order": [
+        500000,
+        0,
+        100000
+      ],
+      "path": "/workspace/.feat_bench/chunk-tail/scheduler_da93670_seed20260818.json",
+      "seed": 20260818,
+      "sha256": "1a1b71dc8e654871f97b473a77ee151d531760b8af1770ceac465e8632f5da2c"
+    },
+    {
+      "bytes": 796902,
+      "measurement_order": [
+        0,
+        500000,
+        100000
+      ],
+      "path": "/workspace/.feat_bench/chunk-tail/scheduler_da93670_seed20260819.json",
+      "seed": 20260819,
+      "sha256": "790958ecba9eee33af6dfce69dba0f5dbfd3a7459526c158debce37891c8f399"
+    },
+    {
+      "bytes": 801739,
+      "measurement_order": [
+        500000,
+        0,
+        100000
+      ],
+      "path": "/workspace/.feat_bench/chunk-tail/scheduler_da93670_seed20260820.json",
+      "seed": 20260820,
+      "sha256": "52f9b9af5072c9f519912075da44624fca50a311d963c3d0f628f1d4d639ccb5"
+    },
+    {
+      "bytes": 796616,
+      "measurement_order": [
+        500000,
+        100000,
+        0
+      ],
+      "path": "/workspace/.feat_bench/chunk-tail/scheduler_da93670_seed20260821.json",
+      "seed": 20260821,
+      "sha256": "24bdd56332975766716d378d9ae454b396937281292ba424776073d4db7a9d44"
+    },
+    {
+      "bytes": 796462,
+      "measurement_order": [
+        100000,
+        0,
+        500000
+      ],
+      "path": "/workspace/.feat_bench/chunk-tail/scheduler_da93670_seed20260822.json",
+      "seed": 20260822,
+      "sha256": "b5778d7e5023422d83589eb2e6a6a8a61f1103d5671c1a7157bc8b44dfcb4738"
+    }
+  ],
+  "roofline": {
+    "five_hundred_thousand_median_us": 0.76,
+    "gate_threshold_us": 5.0,
+    "passes": true,
+    "relative_ratio": 1.1343283582089552,
+    "zero_backlog_median_us": 0.67
+  },
+  "schema_version": 1,
+  "source_sha256": "c56e5b5ff4c95021197f01fce2278f10eb1455be4006262a7f81bb2f56ba8872"
+}
