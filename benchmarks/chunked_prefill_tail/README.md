@@ -156,6 +156,55 @@ directories before publishing a sibling `<archive>.COMPLETE` marker. An archive
 without that marker is incomplete. Existing outputs, archives, and markers are
 never overwritten.
 
+## Decode-only jitter attribution (non-certifying)
+
+`decode_jitter_diagnostic.py` is an intentionally intrusive follow-up for rare,
+engine-wide decode pulses. It runs 1,000 decode-only steps at batch size 16 and
+then 1,000 at batch size 18 in the same TP1 engine. Those are the two observed
+routes: the production decode graphs select capture buckets 16 and 32,
+respectively. Python cyclic GC is disabled through the engine-owned lease.
+
+Each raw step splits API wall and current-thread CPU time across scheduler,
+decode preparation, model dispatch, sampler dispatch, and scheduler
+postprocessing, with an explicit API residual and caller gap. Linux
+`RUSAGE_THREAD` voluntary/involuntary context-switch deltas distinguish CPU
+descheduling. CUDA events separately split preparation, model, sampler, and the
+whole runner stream. The final CUDA event is queried only after production's
+existing `tokens.tolist()` synchronization; the harness does not add a per-step
+CUDA synchronize. These are stream-boundary elapsed spans: host delay between
+two event records can appear as idle time inside a CUDA span, so interpret them
+together with the corresponding phase wall, thread-CPU, and context-switch
+deltas rather than labeling every CUDA-span outlier as kernel time.
+
+This observer changes the timed path and therefore always writes
+`certification.eligible=false`. Its JSON can attribute a pulse, but cannot
+replace the uninstrumented five-run full-completion policy.
+
+From a clean committed diagnostic branch, retain one immutable run outside the
+source and model trees:
+
+```bash
+cd /workspace/nano-vllm-chunk-decode-jitter
+PIN_COMMIT="$(git rev-parse HEAD)"
+PIN_SOURCE="$(PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=. /venv/main/bin/python \
+  benchmarks/chunked_prefill_tail/decode_jitter_diagnostic.py \
+  --print-source-sha256)"
+PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=. \
+TORCHINDUCTOR_CACHE_DIR=/tmp/nv_chunk_decode_jitter \
+/venv/main/bin/python \
+  benchmarks/chunked_prefill_tail/decode_jitter_diagnostic.py \
+  --model /workspace/models/Qwen3-0.6B \
+  --tau 256 \
+  --steps-per-batch 1000 \
+  --seed 20260836 \
+  --expected-commit "$PIN_COMMIT" \
+  --expected-source-sha256 "$PIN_SOURCE" \
+  --output /workspace/.feat_bench/chunk-tail/decode_jitter_tau256_seed20260836.json
+```
+
+The default 4,096-token context permits up to 2,008 steps per batch. Use a new
+output path for every run; immutable evidence is never overwritten.
+
 ## Reproducible commands
 
 First pin the exact committed source. `git status --porcelain` must print
