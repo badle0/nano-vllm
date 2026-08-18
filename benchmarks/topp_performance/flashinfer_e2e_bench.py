@@ -326,6 +326,7 @@ def main() -> None:
             "python": platform.python_version(),
             "torch": torch.__version__,
             "triton": distribution_version("triton"),
+            "flashinfer_python": distribution_version("flashinfer-python"),
             "cuda_python": distribution_version("cuda-python"),
             "flash_attn": distribution_version("flash-attn"),
             "cuda_build": torch.version.cuda,
