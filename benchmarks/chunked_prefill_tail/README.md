@@ -56,6 +56,28 @@ Treat a cell as a correctness pass only when all of the following hold:
 These are diagnostic gates. They identify the limiting component before any
 production optimization is proposed.
 
+The CPU-only scheduler roofline is retained separately from GPU latency runs:
+
+```bash
+PYTHONPATH=. PYTHONDONTWRITEBYTECODE=1 /venv/main/bin/python \
+  benchmarks/chunked_prefill_tail/scheduler_roofline.py \
+  --expected-commit "$PIN_COMMIT" \
+  --expected-source-sha256 "$PIN_SOURCE" \
+  --seed 20260818 \
+  --output /workspace/.feat_bench/chunk-tail/scheduler_seed20260818.json
+```
+
+It times only `Scheduler.schedule()` after backlog construction, retains all
+20,000 raw nanosecond samples at 0/100k/500k injected waiters, and also checks
+bounded admission, the read-only constructor budget, and the nonpositive-budget
+guard. The injected backlog deliberately exceeds the public capacity contract;
+it is an algorithmic complexity probe, not a reachable admitted state.
+Run five distinct seeds in fresh Python processes, then pass all five immutable
+JSON files to `validate_scheduler_roofline.py --output <new-manifest.json>`.
+The aggregate gate requires the 500k median-of-process-medians to remain below
+both the recorded threshold `max(2x zero-backlog, 5 us)` and every raw run's
+own identical predeclared gate.
+
 ## Release classification
 
 Five retained A100-SXM4-40GB processes per tau, seeds 20260821 through 20260825,
