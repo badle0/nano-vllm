@@ -1,0 +1,260 @@
+{
+  "argv": [
+    "benchmarks/topp_performance/flashinfer_e2e_bench.py",
+    "--model",
+    "/workspace/models/Qwen3-0.6B",
+    "--backend",
+    "exact",
+    "--expected-commit",
+    "b68f1913e46c96987d873f3405883396de4f119f",
+    "--run-label",
+    "p02_second_exact",
+    "--pair-id",
+    "2",
+    "--pair-order",
+    "flashinfer-exact",
+    "--position-in-pair",
+    "second",
+    "--seed",
+    "2026081801",
+    "--batch",
+    "256",
+    "--prompt-len",
+    "128",
+    "--output-len",
+    "32",
+    "--repetitions",
+    "6",
+    "--max-model-len",
+    "1024",
+    "--output",
+    "/workspace/.feat_bench/results/topp_e2e_b68f191/p02_second_exact.json"
+  ],
+  "backend": "exact",
+  "benchmark": "topp_backend_e2e",
+  "commit": "b68f1913e46c96987d873f3405883396de4f119f",
+  "configuration": {
+    "batch": 256,
+    "blocks_per_sequence_at_max_output": 1,
+    "cuda_graphs": true,
+    "effective_max_model_len": 1024,
+    "effective_num_kvcache_blocks": 1076,
+    "effective_top_p_backend": "exact",
+    "first_observation_classification": "shape-cold after engine and sampler JIT warmup",
+    "gpu_memory_utilization": 0.8,
+    "ignore_eos": true,
+    "kvcache_block_size": 256,
+    "max_model_len": 1024,
+    "max_num_seqs": 256,
+    "model": "/workspace/models/Qwen3-0.6B",
+    "model_vocab_size": 151936,
+    "output_tokens": 32,
+    "preemption_excluded_by_capacity": true,
+    "prompt_tokens": 128,
+    "prompts_distinct_across_repetitions": true,
+    "repetitions": 6,
+    "required_peak_blocks_no_sharing": 256,
+    "shape_cold_observations_excluded": 1,
+    "temperature": 0.6,
+    "top_p": 0.9
+  },
+  "environment": {
+    "compute_capability": [
+      8,
+      0
+    ],
+    "cuda_build": "12.8",
+    "cuda_python": null,
+    "flash_attn": "2.8.1",
+    "flashinfer_python": "0.6.17",
+    "gpu": "NVIDIA A100-SXM4-40GB",
+    "gpu_total_memory_bytes": 42406903808,
+    "gpu_uuid": "GPU-0dd9d697-b14a-affe-e840-ce58e73c8c4c",
+    "kernel": "5.15.0-1079-nvidia",
+    "nvidia_driver": "570.133.20",
+    "platform": "Linux-5.15.0-1079-nvidia-x86_64-with-glibc2.39",
+    "python": "3.12.13",
+    "torch": "2.10.0+cu128",
+    "transformers": "5.14.1",
+    "triton": "3.6.0"
+  },
+  "execution": {
+    "cuda_visible_devices": "0",
+    "cwd": "/workspace/nano-vllm-topp-performance",
+    "flashinfer_workspace_base": "/tmp/nv_flashinfer_cache",
+    "pythonpath": "/tmp/nv_flashinfer_proto_nodeps:.",
+    "torchinductor_cache_dir": "/tmp/nv_topp_e2e_p02_exact"
+  },
+  "finished_at_utc": "2026-08-18T05:30:49.243820+00:00",
+  "flashinfer": null,
+  "git_status": "",
+  "median_steady_elapsed_s": 0.7737223710864782,
+  "median_steady_output_tokens_per_s": 10587.777096966462,
+  "model_fingerprint": {
+    "files": [
+      {
+        "bytes": 726,
+        "path": "config.json",
+        "sha256": "660db3b73d788119c04535e48cf9be5f55bc3100841a718637ae695b442f27dd"
+      },
+      {
+        "bytes": 239,
+        "path": "generation_config.json",
+        "sha256": "2325da0f15bb848e018c5ae071b7943332e9f871d6b60e2ed22ca97d4cb993d2"
+      },
+      {
+        "bytes": 11422654,
+        "path": "tokenizer.json",
+        "sha256": "aeb13307a71acd8fe81861d94ad54ab689df773318809eed3cbe794b4492dae4"
+      },
+      {
+        "bytes": 9732,
+        "path": "tokenizer_config.json",
+        "sha256": "d5d09f07b48c3086c508b30d1c9114bd1189145b74e982a265350c923acd8101"
+      },
+      {
+        "bytes": 1503300328,
+        "path": "model.safetensors",
+        "sha256": "f47f71177f32bcd101b7573ec9171e6a57f4f4d31148d38e382306f42996874b"
+      }
+    ],
+    "resolved_path": "/workspace/models/Qwen3-0.6B"
+  },
+  "observations": [
+    {
+      "cuda_rng_state_after_sha256": "b34612d9fe2cbd6af0aaddb2bc70fb194c3cebaf1e22c020084573ca07e375a7",
+      "cuda_rng_state_before_sha256": "5220537c3027a986129c124d70ce71490feac90d3a5b20b55775653c98337b28",
+      "elapsed_s": 0.9557522442191839,
+      "output_tokens_per_s": 8571.258973807147,
+      "prompt_seed": 20260818010000,
+      "prompt_sha256": "a49e86647f25ae619625395705d08c7412a1cefa6765c11bc07be1b056ea3563",
+      "repetition": 0,
+      "seed": 2026081803560,
+      "token_sha256": "1751e703c56c5b4456dda830374a8a349042a57b45746348fedd7f8a1122555a"
+    },
+    {
+      "cuda_rng_state_after_sha256": "bc4b80dd741b8e94a2f1eb25965af597f1250bb4ddc927b0092a861bce7490e9",
+      "cuda_rng_state_before_sha256": "d7ffbda2d11b665cb9fe704ec3499571a802351686ea998a340befa22287c7d7",
+      "elapsed_s": 0.7853089068084955,
+      "output_tokens_per_s": 10431.563845738594,
+      "prompt_seed": 20260818010001,
+      "prompt_sha256": "ce2c98ac1e7a08446e13d13b72262f7d5878c9229939b1ea75eb040bd8d7f0ac",
+      "repetition": 1,
+      "seed": 2026081803561,
+      "token_sha256": "ee8bf936a91cde85998258f64b97d87e2df8b0511ce8a162976f469d56ba9c84"
+    },
+    {
+      "cuda_rng_state_after_sha256": "e023eba637af3e5ef4e5687023fcd75ff4e2501c520f16f69be8fe55c7ef71e6",
+      "cuda_rng_state_before_sha256": "b190375b16bf681aefe8e8d4e5dd0957c4af1fabab9dee90b0e468569ac7dfea",
+      "elapsed_s": 0.7737223710864782,
+      "output_tokens_per_s": 10587.777096966462,
+      "prompt_seed": 20260818010002,
+      "prompt_sha256": "fe06474855d5d4e13df4b0bb8b4808128843e6ddf831102ce976aeffb8503919",
+      "repetition": 2,
+      "seed": 2026081803562,
+      "token_sha256": "78935bc03859dc8b01ce4209b48bd0a39e5eea20cd5eb6ca9f17ca4be59e892d"
+    },
+    {
+      "cuda_rng_state_after_sha256": "6c0c29242b1b58be04ae8d05cf467dd29f184147ed5027df671dbd3096d4f992",
+      "cuda_rng_state_before_sha256": "c5b4902afd6016909649983cf3fcb3a4c1742e0303c17a89024f2bf93298d243",
+      "elapsed_s": 0.7653436940163374,
+      "output_tokens_per_s": 10703.687851676648,
+      "prompt_seed": 20260818010003,
+      "prompt_sha256": "48a791d3a6d9cf5404aad863d3ffa4c982b15c605cce49b70fe3439620dcc645",
+      "repetition": 3,
+      "seed": 2026081803563,
+      "token_sha256": "1bf6ee742b27f36b7ebb864129cdbeaffa930703d02f8ff8830103f6cadd2bcc"
+    },
+    {
+      "cuda_rng_state_after_sha256": "7f8c06f9fd085482ad117f799a51a5c1f549e4c9a8a58bad6db6370e8204616d",
+      "cuda_rng_state_before_sha256": "fba1eefcfb0c929f1f6e20ed0d85890b3d4e2bbd37f8dfa580e3f5b462667abe",
+      "elapsed_s": 0.7645961176604033,
+      "output_tokens_per_s": 10714.153277506559,
+      "prompt_seed": 20260818010004,
+      "prompt_sha256": "41a58c8af5cbcded53ceff95558f2a39643c3110952f154a8297b77db43961f2",
+      "repetition": 4,
+      "seed": 2026081803564,
+      "token_sha256": "47686cc336ec79eb51b7cdac191c32b0206f9bc86f422ad0058d8a7b3f12eaf0"
+    },
+    {
+      "cuda_rng_state_after_sha256": "986f103205fb0c61bef7a7d65195ea2b03e1d22127ae1c8027faf77d2b76f256",
+      "cuda_rng_state_before_sha256": "d54dcb49b9270c4bda1e1f3fc8ad1464536ae86cddb4e39bc999a192bbbbd7fa",
+      "elapsed_s": 0.7737679332494736,
+      "output_tokens_per_s": 10587.153651608854,
+      "prompt_seed": 20260818010005,
+      "prompt_sha256": "4c24a99766dbf4113d41622368609b4178612e8aff3a5fbc8ab2951f7dc6eaab",
+      "repetition": 5,
+      "seed": 2026081803565,
+      "token_sha256": "6dfadc0952bff12c3f310340ccc410140c550d1233e976a72a11aa363b667d04"
+    }
+  ],
+  "pair_id": 2,
+  "pair_order": "flashinfer-exact",
+  "position_in_pair": "second",
+  "run_label": "p02_second_exact",
+  "schema_version": 1,
+  "seed": 2026081801,
+  "source": {
+    "origin_url": "git@github.com:badle0/nano-vllm.git",
+    "path": "benchmarks/topp_performance/flashinfer_e2e_bench.py",
+    "sha256": "2a39bc8d7aae432b60f06ff97f924b9ae22251c582542fb44a6951ff972f69c4"
+  },
+  "started_at_utc": "2026-08-18T05:30:23.030600+00:00",
+  "steady": [
+    {
+      "cuda_rng_state_after_sha256": "bc4b80dd741b8e94a2f1eb25965af597f1250bb4ddc927b0092a861bce7490e9",
+      "cuda_rng_state_before_sha256": "d7ffbda2d11b665cb9fe704ec3499571a802351686ea998a340befa22287c7d7",
+      "elapsed_s": 0.7853089068084955,
+      "output_tokens_per_s": 10431.563845738594,
+      "prompt_seed": 20260818010001,
+      "prompt_sha256": "ce2c98ac1e7a08446e13d13b72262f7d5878c9229939b1ea75eb040bd8d7f0ac",
+      "repetition": 1,
+      "seed": 2026081803561,
+      "token_sha256": "ee8bf936a91cde85998258f64b97d87e2df8b0511ce8a162976f469d56ba9c84"
+    },
+    {
+      "cuda_rng_state_after_sha256": "e023eba637af3e5ef4e5687023fcd75ff4e2501c520f16f69be8fe55c7ef71e6",
+      "cuda_rng_state_before_sha256": "b190375b16bf681aefe8e8d4e5dd0957c4af1fabab9dee90b0e468569ac7dfea",
+      "elapsed_s": 0.7737223710864782,
+      "output_tokens_per_s": 10587.777096966462,
+      "prompt_seed": 20260818010002,
+      "prompt_sha256": "fe06474855d5d4e13df4b0bb8b4808128843e6ddf831102ce976aeffb8503919",
+      "repetition": 2,
+      "seed": 2026081803562,
+      "token_sha256": "78935bc03859dc8b01ce4209b48bd0a39e5eea20cd5eb6ca9f17ca4be59e892d"
+    },
+    {
+      "cuda_rng_state_after_sha256": "6c0c29242b1b58be04ae8d05cf467dd29f184147ed5027df671dbd3096d4f992",
+      "cuda_rng_state_before_sha256": "c5b4902afd6016909649983cf3fcb3a4c1742e0303c17a89024f2bf93298d243",
+      "elapsed_s": 0.7653436940163374,
+      "output_tokens_per_s": 10703.687851676648,
+      "prompt_seed": 20260818010003,
+      "prompt_sha256": "48a791d3a6d9cf5404aad863d3ffa4c982b15c605cce49b70fe3439620dcc645",
+      "repetition": 3,
+      "seed": 2026081803563,
+      "token_sha256": "1bf6ee742b27f36b7ebb864129cdbeaffa930703d02f8ff8830103f6cadd2bcc"
+    },
+    {
+      "cuda_rng_state_after_sha256": "7f8c06f9fd085482ad117f799a51a5c1f549e4c9a8a58bad6db6370e8204616d",
+      "cuda_rng_state_before_sha256": "fba1eefcfb0c929f1f6e20ed0d85890b3d4e2bbd37f8dfa580e3f5b462667abe",
+      "elapsed_s": 0.7645961176604033,
+      "output_tokens_per_s": 10714.153277506559,
+      "prompt_seed": 20260818010004,
+      "prompt_sha256": "41a58c8af5cbcded53ceff95558f2a39643c3110952f154a8297b77db43961f2",
+      "repetition": 4,
+      "seed": 2026081803564,
+      "token_sha256": "47686cc336ec79eb51b7cdac191c32b0206f9bc86f422ad0058d8a7b3f12eaf0"
+    },
+    {
+      "cuda_rng_state_after_sha256": "986f103205fb0c61bef7a7d65195ea2b03e1d22127ae1c8027faf77d2b76f256",
+      "cuda_rng_state_before_sha256": "d54dcb49b9270c4bda1e1f3fc8ad1464536ae86cddb4e39bc999a192bbbbd7fa",
+      "elapsed_s": 0.7737679332494736,
+      "output_tokens_per_s": 10587.153651608854,
+      "prompt_seed": 20260818010005,
+      "prompt_sha256": "4c24a99766dbf4113d41622368609b4178612e8aff3a5fbc8ab2951f7dc6eaab",
+      "repetition": 5,
+      "seed": 2026081803565,
+      "token_sha256": "6dfadc0952bff12c3f310340ccc410140c550d1233e976a72a11aa363b667d04"
+    }
+  ]
+}

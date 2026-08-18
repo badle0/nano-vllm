@@ -22,6 +22,20 @@ A lightweight vLLM implementation built from scratch.
 pip install git+https://github.com/GeeeekExplorer/nano-vllm.git
 ```
 
+FlashInfer is available as an optional, sorting-free top-p sampling backend:
+
+```bash
+pip install '.[fast-sampling]'
+```
+
+The optional extra pins the measured FlashInfer 0.6.17 release and the
+certified Torch 2.10/CUDA-Python 12.x lane. This prevents pip from silently
+replacing a CUDA 12 environment with FlashInfer's newer default CUDA 13 stack,
+which can invalidate compiled extensions such as FlashAttention. FlashInfer's
+wheel also brings a broader CUDA/JIT dependency footprint than nano-vLLM's core
+installation, so treat this as a deployment-level choice rather than a tiny
+sampler-only wheel.
+
 ## Model Download
 
 To download the model weights manually, use the following command:
@@ -83,6 +97,43 @@ an earlier suffix because tokenizer cleanup and normalization are not always
 append-only. Completed caller-delivery metrics are available in
 `stream.metrics[seq_id]`. A retained iterator is not closed by `break` alone;
 the context manager or explicit `stream.close()` performs ID-scoped cleanup.
+
+### Top-p sampling backends
+
+The default `top_p_backend="exact"` matches the audited Transformers 5.14.1
+ascending-sort boundary and tie behavior. It also preserves nano-vLLM's existing
+full-vocabulary exponential fixed-seed sampling stream.
+
+For workloads where all-active top-p throughput matters more than fixed-seed
+parity with that implementation, construct the engine with the optional
+sorting-free backend:
+
+```python
+llm = LLM(
+    "/YOUR/MODEL/PATH",
+    top_p_backend="flashinfer",
+)
+```
+
+`top_p_backend="flashinfer"` is deterministic for a fixed FlashInfer runtime
+and seed, but it is a different sampling contract: boundary ties may select a
+different support, its Philox consumption differs, and the same seed is not
+expected to produce the same tokens or downstream CUDA RNG state as `"exact"`.
+Existing top-k filtering is still applied before top-p. FlashInfer kernels are
+warmed while the engine is constructed; production deployments should install
+and prebuild the optional kernel cache rather than compile it on the first
+served request.
+
+If any stochastic row enables top-p, the fast backend samples the whole batch
+with FlashInfer. Rows with `top_p=1.0` remain mathematically unfiltered, but
+they also use FlashInfer's RNG stream and therefore lose exact-backend
+fixed-seed parity in that mixed batch.
+
+The exact and rejected-candidate measurements behind this choice are recorded
+in `benchmarks/topp_performance/README.md`. On the pinned A100 B256 gate, the
+production wrapper measured 1.017 ms versus 11.649 ms for the exact complete
+sampling path; eight fresh-process Qwen3-0.6B pairs had a +59.56% median E2E
+throughput gain. These are workload-specific results, not a universal speedup.
 
 ## Benchmark
 
