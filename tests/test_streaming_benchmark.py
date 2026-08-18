@@ -1,0 +1,137 @@
+import json
+
+import pytest
+
+from benchmarks.pr5_scripts import repaired_stream_benchmark as benchmark
+from nanovllm import StreamingDetokenizer
+
+
+def _fake_worker(index):
+    order = ["generate", "stream"] if index % 2 == 0 else ["stream", "generate"]
+    request_metrics = {
+        key: {"values": [0.0001], "summary": benchmark._summary([0.0001])}
+        for key in (
+            "caller_ttft",
+            "caller_e2e",
+            "engine_ttft",
+            "engine_e2e",
+            "first_token_to_delivery",
+            "engine_finish_to_delivery",
+        )
+    }
+    memory = {"peak": {"allocated_bytes": 100}}
+    routes = {
+        "generate": {
+            "tokens_per_second": 100.0,
+            "return_seconds": 1.0,
+            "pair_position": order.index("generate"),
+            "memory": memory,
+        },
+        "stream": {
+            "tokens_per_second": 100.0,
+            "first_event_seconds": 0.05,
+            "pair_position": order.index("stream"),
+            "memory": memory,
+            "event_delivery": {
+                "values": [{"engine_to_caller_seconds": 0.0001}],
+            },
+            "request_metric_distributions_seconds": request_metrics,
+        },
+        "tokens_equivalent": True,
+        "texts_equivalent": True,
+        "paired_stream_throughput_delta_percent": 0.0,
+        "caller_exposure_factor": 20.0,
+    }
+    slow = []
+    for sleep_seconds in (0.0, 0.001, 0.004):
+        slow.append({
+            "consumer_sleep_seconds_per_event": sleep_seconds,
+            "median_inter_step_gap_seconds": 0.003 + 8 * sleep_seconds,
+            "elapsed_seconds": 1.0,
+            "max_pending_events_after_delivery": 7,
+            "num_events": 16,
+            "num_steps": 2,
+        })
+    environment = {
+        "repository": {"commit": "a" * 40},
+        "benchmark_script_sha256": "b" * 64,
+        "model": {"parent_manifest_sha256": "c" * 64},
+        "software": {"python": "3.12"},
+        "cpu": {"model": "test"},
+        "gpu": {"total_memory_bytes": 10000},
+    }
+    return {
+        "trial_seed": 1000 + index,
+        "prompt_sha256": f"{index:064x}",
+        "prompts": ["prompt"] * 8,
+        "measurement_order": order,
+        "environment": environment,
+        "core": routes,
+        "slow_consumer": slow,
+        "detokenizer": [{
+            "num_tokens": 64,
+            "median_us_per_token": 10.0,
+            "max_feed_decode_tokens": 40,
+            "feed_decode_tokens_per_input_token": 30.0,
+            "flush_decode_tokens": 64,
+            "full_length_decode_calls": 1,
+        }],
+    }
+
+
+def test_eight_trials_use_distinct_seeds_and_prompt_sets():
+    seeds = [benchmark._trial_seed(20260818, index) for index in range(8)]
+    prompts = [benchmark._trial_prompts(16, index) for index in range(8)]
+
+    assert len(set(seeds)) == 8
+    assert all(len(items) == 16 for items in prompts)
+    assert len({benchmark._canonical_sha256(items) for items in prompts}) == 8
+
+
+def test_result_publication_is_atomic_and_never_overwrites(tmp_path):
+    output = tmp_path / "result.json"
+    benchmark._write_json_exclusive(output, {"attempt": 1})
+
+    with pytest.raises(FileExistsError, match="immutable result"):
+        benchmark._write_json_exclusive(output, {"attempt": 2})
+
+    assert json.loads(output.read_text()) == {"attempt": 1}
+    assert list(tmp_path.iterdir()) == [output]
+
+
+def test_correction_heavy_8k_32k_apply_and_state_gates_are_cpu_only():
+    result = benchmark._measure_correction_scaling(
+        StreamingDetokenizer,
+        [8000, 32000],
+        repeats=2,
+    )
+
+    assert result["all_gates_pass"]
+    assert all(result["gates"].values())
+    assert [item["correction_updates"] for item in result["results"]] == [
+        4000,
+        16000,
+    ]
+    assert [item["state_token_count_before_flush"] for item in result["results"]] == [
+        8000,
+        32000,
+    ]
+
+
+def test_release_parser_predeclares_eight_pairs_and_has_no_overwrite_escape_hatch():
+    parser = benchmark._parser()
+    args = parser.parse_args(["--output", "/tmp/unused-streaming-cert.json"])
+
+    assert args.runs == 8
+    assert args.correction_lengths == [8000, 32000]
+    assert "--overwrite" not in parser.format_help()
+
+
+def test_cpu_synthetic_aggregate_exercises_all_gpu_release_gate_shapes():
+    aggregate = benchmark._aggregate([_fake_worker(index) for index in range(8)])
+
+    assert aggregate["matched_final_decode_consumer"][
+        "paired_mean_delta_percent_90ci"
+    ] == {"mean": 0.0, "low": 0.0, "high": 0.0}
+    assert all(aggregate["gates"].values())
+    assert aggregate["backpressure_roofline"]["4"]["residual_ms"] == 0.0
