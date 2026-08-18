@@ -75,6 +75,106 @@ No incremental decode covered more than 40 tokens, and each sequence performed
 exactly one full-length decode at flush. This structural bound is the release
 gate; it is stronger than interpreting small CPU timing differences as a trend.
 
+### Certification harness follow-up
+
+`benchmarks/pr5_scripts/repaired_stream_benchmark.py` now emits schema version 3
+evidence. The earlier schema-1 JSON remains valid historical evidence, but it is
+not an equivalence certificate: its four pairs reused one seed and its null stream
+did not perform the final detokenization already included by `generate()`.
+
+The hardened protocol requires exactly eight fresh-worker statistical units.
+After short and full-128-token untimed warmups on both routes, every worker runs
+four timed generate/stream pairs: two in each route order, each with a distinct
+prompt set and seed shared by the two routes. Prompt plus completion is asserted
+below one KV-cache block, and an idle/zero-owned-block assertion precedes replacing
+the block manager before every timed route. Each worker contributes the median of
+its four within-round paired throughput deltas; route medians remain descriptive.
+Every worker records its exact argv, round/pair position, prompt hash and text,
+cache-reset policy/state, route timestamps, raw per-event engine-to-caller delay,
+request delivery distributions, and start/end/peak GPU and RSS memory. The parent
+records the clean HEAD and Git tree, tracked source-blob manifest, benchmark hash,
+full model-file manifest and hashes, package/hardware environment, and exact child
+commands. It fingerprints the repository and model again after all workers finish.
+
+Results are atomically published outside the repository and can never overwrite
+an existing path; there is no `--overwrite` escape hatch. The predeclared gates
+include token/text identity, a paired mean 90% interval inside ±2%, event-delivery
+p95 at most 1 ms, minimum 10x caller exposure, every timed stream peak allocation
+within 1% of its paired generate peak (with only zero/zero passing a zero baseline),
+pending storage at most `batch_size - 1`, and the synchronous
+`G(B, delta) = G0 + B * delta` backpressure roofline. The allowed roofline
+residual is `max(2 ms, 10% * B * delta)`.
+
+A CPU-only correction-heavy probe alternates spaces and punctuation so half of
+all feeds replace an earlier suffix. At 8,000 and 32,000 tokens it times every
+immutable `TextUpdate.apply`, verifies exact flush and state release, bounds every
+incremental decode by `W + 2O`, and gates process-time and retained-state scaling.
+The 4x length increase may consume at most 6x process time and 4.5x retained
+state bytes. These ratios use median CPU process time over three repetitions.
+The immutable string API still copies rendered text; this gate certifies the
+declared measured roofline, not zero-copy assembly.
+
+#### Accepted 2026-08-18 certificate
+
+The accepted byte-identical raw artifact is
+[`pr5_results/repaired_streaming_cert_a100_2026-08-18_14002ae.json`](pr5_results/repaired_streaming_cert_a100_2026-08-18_14002ae.json)
+(26,776,996 bytes, SHA-256
+`df662215db769d0c93129b8d29fc9fbcda4998e41cc412d312864c437da7f8c7`).
+Its independently recomputed gates, environment, source/model fingerprints,
+limitations, and superseded-run quarantine are in the adjacent
+[`manifest`](pr5_results/repaired_streaming_cert_a100_2026-08-18_14002ae.manifest.json).
+It certifies clean commit `14002ae04102eef58aea09fa8a2a78eca0103b5f` on one
+A100-SXM4-40GB with Qwen3-0.6B, batch 16, 128 output tokens, and TP1. The focused
+suite passed 56/56 before capture, including seven CUDA-backed tests.
+
+All 20 required gates passed. The eight fresh-worker paired-median deltas had a
+**+0.02062% mean** and central 90% t interval **[-0.20391%, +0.24515%]**, inside
+the predeclared ±2% equivalence band. The descriptive generate/stream throughput
+medians were 4,687.78 and 4,688.55 output tokens/s. Across all 65,536 delivered
+events, engine-to-caller delay was 0.02949 ms median, 0.03972 ms p95, and 0.51713
+ms maximum. Caller exposure was 14.97x median and 13.77x minimum. Every one of
+the 32 paired stream/generate peak-allocation differences was exactly zero bytes.
+
+The measured backpressure residuals were 0.0000, +0.3232, and +0.9078 ms at 0,
+1, and 4 ms/event sleep, within tolerances 2.0, 2.0, and 3.2 ms. The 8k-to-32k
+correction-heavy CPU probe scaled 4.5567x in process time (limit 6x) and 4.1092x
+in retained state bytes (limit 4.5x). One raw timed round was a visible -16.4673%
+outlier; the predeclared four-round median made that worker's independent unit
+-0.5668%. The archive retains every raw observation rather than hiding this
+timing variability. These claims do not generalize beyond the recorded single
+GPU/model/workload, and caller exposure is not a model-TTFT comparison.
+
+The earlier schema-2 run at `cf6da50ec8fca39588ed7ba0b8be734379bb3765`
+(SHA-256 `e3ac8f95424450f48a6f67a58b3575569562aab95e5557f61b85179c6f4643ec`)
+is explicitly **superseded and not archived**. Its memory gate used 1% of total
+GPU capacity instead of 1% of the paired generate peak, and one short warmup plus
+one full-length timed pair per worker retained a large order/first-shape effect.
+It also failed its own throughput interval gate at [-5.20386%, +6.01175%]. The
+CPU validator rejects that artifact hash, commit, and evidence schema.
+
+Validate the accepted archive without CUDA:
+
+```bash
+PYTHONDONTWRITEBYTECODE=1 CUDA_VISIBLE_DEVICES='' /venv/main/bin/python \
+  benchmarks/pr5_scripts/validate_repaired_stream_certificate.py
+```
+
+After committing the harness, produce the GPU artifact from a clean worktree:
+
+```bash
+CERT_COMMIT="$(git rev-parse HEAD)"
+PYTHONPATH=. /venv/main/bin/python \
+  benchmarks/pr5_scripts/repaired_stream_benchmark.py \
+  --model /workspace/models/Qwen3-0.6B \
+  --runs 8 \
+  --seed 20260818 \
+  --output "/workspace/.feat_bench/results/repaired_streaming_cert_${CERT_COMMIT}.json"
+```
+
+The ownership mutex guarantees that simultaneous synchronous session starts
+have exactly one winner. It does not make arbitrary `add_request()`/`step()`
+calls from multiple threads safe; callers must serialize all engine access.
+
 ## Historical contribution record (superseded)
 
 The remainder of this document records the original feature branch. Its API and
@@ -337,18 +437,27 @@ never pays it, which is the payoff of the IDs-only payload decision.
 
 ### Repaired branch
 
+The first command below is the CPU/static suite. Hiding CUDA intentionally skips
+the seven GPU-backed cases; the accepted certificate records their separate 56/56
+pre-capture run.
+
 ```bash
 source /venv/main/bin/activate
-PYTHONPATH=. pytest -q tests                         # 45 passed
+PYTHONDONTWRITEBYTECODE=1 CUDA_VISIBLE_DEVICES='' PYTHONPATH=. pytest -q \
+  tests/test_streaming_benchmark.py tests/test_streaming.py \
+  tests/test_detokenizer.py tests/test_scheduler_cancel.py tests/test_metrics.py
+CERT_COMMIT="$(git rev-parse HEAD)"
 PYTHONPATH=. python benchmarks/pr5_scripts/repaired_stream_benchmark.py \
   --model /workspace/models/Qwen3-0.6B \
-  --runs 4 \
-  --output benchmarks/pr5_results/repaired_streaming_a100_2026-08-17.json
+  --runs 8 \
+  --seed 20260818 \
+  --output "/workspace/.feat_bench/results/repaired_streaming_cert_${CERT_COMMIT}.json"
 ```
 
-The benchmark refuses fewer than three workers for release evidence and refuses
-to overwrite an existing result unless `--overwrite` is explicit. The parent
-does not import torch; every observation initializes and tears down its own
+The current benchmark requires exactly eight fresh workers, four paired rounds
+per worker, a clean worktree, and an output outside the repository. It atomically
+refuses every overwrite; there is no escape hatch. The parent does not import
+torch; every independent statistical unit initializes and tears down its own
 CUDA/model worker.
 
 ### Original branch (historical)

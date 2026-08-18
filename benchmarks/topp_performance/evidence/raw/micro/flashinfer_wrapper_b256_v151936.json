@@ -1,0 +1,507 @@
+{
+  "argv": [
+    "benchmarks/topp_performance/flashinfer_sampling_bench.py",
+    "--batch",
+    "256",
+    "--vocab",
+    "151936",
+    "--temperature",
+    "0.6",
+    "--top-p",
+    "0.9",
+    "--warmups",
+    "5",
+    "--iterations",
+    "25",
+    "--statistical-draws",
+    "131072",
+    "--seed",
+    "20260826",
+    "--expected-commit",
+    "04f095f074ed3bfb171d6bead0175f195074f971",
+    "--output",
+    "/workspace/.feat_bench/results/topp_flashinfer_wrapper_04f095f.json"
+  ],
+  "benchmark": "flashinfer_complete_topp_sampling_development",
+  "branch": "fix/topp-performance",
+  "commit": "04f095f074ed3bfb171d6bead0175f195074f971",
+  "configuration": {
+    "batch": 256,
+    "dtype": "bfloat16",
+    "iterations": 25,
+    "seed": 20260826,
+    "statistical_draws": 131072,
+    "temperature": 0.6,
+    "temperature_argument_kind": "per-row float32 tensor",
+    "top_p": 0.9,
+    "top_p_argument_kind": "per-row float32 tensor",
+    "vocab": 151936,
+    "warmups": 5
+  },
+  "current_exact_complete": {
+    "baseline_allocated_mib": 149.3857421875,
+    "median_cuda_ms": 11.64902400970459,
+    "p95_cuda_ms": 11.815936088562012,
+    "peak_transient_allocated_mib": 616.9599609375,
+    "samples_cuda_ms": [
+      11.819007873535156,
+      11.651071548461914,
+      11.815936088562012,
+      11.802623748779297,
+      11.659263610839844,
+      11.65004825592041,
+      11.655167579650879,
+      11.644927978515625,
+      11.643903732299805,
+      11.637760162353516,
+      11.662336349487305,
+      11.65004825592041,
+      11.654144287109375,
+      11.64902400970459,
+      11.794431686401367,
+      11.64185619354248,
+      11.643903732299805,
+      11.63980770111084,
+      11.65004825592041,
+      10.085375785827637,
+      9.955327987670898,
+      9.93280029296875,
+      9.946111679077148,
+      9.959424018859863,
+      9.933823585510254
+    ]
+  },
+  "determinism_and_rng_contract": {
+    "common_rng_state_before": true,
+    "exact_rng_state_advanced": true,
+    "exact_same_seed_rng_state_repeat": true,
+    "exact_same_seed_tokens_repeat": true,
+    "fixed_seed_difference_fraction": 1.0,
+    "fixed_seed_differing_tokens": 256,
+    "fixed_seed_token_comparisons": 256,
+    "flashinfer_rng_state_advanced": true,
+    "flashinfer_same_seed_rng_state_repeat": true,
+    "flashinfer_same_seed_tokens_repeat": true,
+    "rng_states": {
+      "after_exact": {
+        "hex": "db273501000000000400000000000000",
+        "int64_words": [
+          20260827,
+          4
+        ],
+        "num_bytes": 16
+      },
+      "after_flashinfer": {
+        "hex": "db273501000000000020000000000000",
+        "int64_words": [
+          20260827,
+          8192
+        ],
+        "num_bytes": 16
+      },
+      "before": {
+        "hex": "db273501000000000000000000000000",
+        "int64_words": [
+          20260827,
+          0
+        ],
+        "num_bytes": 16
+      }
+    },
+    "same_rng_state_after_routes": false,
+    "seed": 20260827
+  },
+  "environment": {
+    "compute_capability": [
+      8,
+      0
+    ],
+    "cuda_build": "12.8",
+    "driver": "570.133.20",
+    "gpu": "NVIDIA A100-SXM4-40GB",
+    "python": "3.12.13",
+    "torch": "2.10.0+cu128",
+    "transformers": "5.14.1"
+  },
+  "execution": {
+    "cwd": "/workspace/nano-vllm-topp-performance",
+    "flashinfer_resolved_cache_dir": "/tmp/nv_flashinfer_cache/.cache/flashinfer",
+    "flashinfer_resolved_workspace_dir": "/tmp/nv_flashinfer_cache/.cache/flashinfer/0.6.17/80",
+    "flashinfer_workspace_base": "/tmp/nv_flashinfer_cache",
+    "pythonpath": "/tmp/nv_flashinfer_proto_nodeps:."
+  },
+  "finished_at_utc": "2026-08-18T05:24:41.836539+00:00",
+  "flashinfer_direct_primitive": {
+    "baseline_allocated_mib": 149.3857421875,
+    "median_cuda_ms": 0.9123839735984802,
+    "p95_cuda_ms": 0.9707520008087158,
+    "peak_transient_allocated_mib": 296.75,
+    "samples_cuda_ms": [
+      1.1560959815979004,
+      0.9359359741210938,
+      0.9707520008087158,
+      0.9164800047874451,
+      0.907263994216919,
+      0.9144319891929626,
+      0.9093120098114014,
+      0.8857600092887878,
+      0.9134079813957214,
+      0.9041919708251953,
+      0.9195520281791687,
+      0.9318400025367737,
+      0.9144319891929626,
+      0.8888319730758667,
+      0.9000959992408752,
+      0.9082880020141602,
+      0.9011200070381165,
+      0.9359359741210938,
+      0.9318400025367737,
+      0.9113600254058838,
+      0.8960000276565552,
+      0.9349120259284973,
+      0.9123839735984802,
+      0.9103360176086426,
+      0.9031680226325989
+    ]
+  },
+  "flashinfer_production_complete": {
+    "baseline_allocated_mib": 149.3857421875,
+    "median_cuda_ms": 1.0168319940567017,
+    "p95_cuda_ms": 1.0670080184936523,
+    "peak_transient_allocated_mib": 296.7529296875,
+    "samples_cuda_ms": [
+      1.2953599691390991,
+      1.0250240564346313,
+      1.0106879472732544,
+      1.0199040174484253,
+      1.0147839784622192,
+      1.006592035293579,
+      1.0321919918060303,
+      1.0076160430908203,
+      0.9983999729156494,
+      1.0250240564346313,
+      1.031167984008789,
+      1.0670080184936523,
+      1.0117119550704956,
+      1.0117119550704956,
+      1.0547200441360474,
+      1.0659840106964111,
+      1.0096640586853027,
+      1.001471996307373,
+      1.026047945022583,
+      0.9932799935340881,
+      1.0168319940567017,
+      1.035264015197754,
+      1.0117119550704956,
+      1.018880009651184,
+      1.0168319940567017
+    ]
+  },
+  "flashinfer_provenance": {
+    "api": [
+      "flashinfer.sampling.softmax",
+      "flashinfer.sampling.top_p_sampling_from_probs"
+    ],
+    "git_commit": "a0a6b019b9b27d49d209f85d028a1ae5a9b347d7",
+    "isolated_package_root": "/tmp/nv_flashinfer_proto_nodeps",
+    "license": "Apache-2.0",
+    "module_file": "/tmp/nv_flashinfer_proto_nodeps/flashinfer/__init__.py",
+    "project": "https://github.com/flashinfer-ai/flashinfer",
+    "top_p_deterministic_argument": true,
+    "version": "0.6.17"
+  },
+  "git_status": "",
+  "heterogeneous_temperature_api_validation": {
+    "all_finite": true,
+    "max_abs_error_vs_torch": 1.1920928955078125e-07,
+    "row_sum_max_abs_error": 1.1920928955078125e-07,
+    "temperatures": [
+      0.5,
+      0.6000000238418579,
+      0.800000011920929,
+      1.0
+    ]
+  },
+  "measurement_contract": {
+    "cuda_events_on_current_stream": true,
+    "exact_complete_route": "exact filter_top_p; existing compiled Sampler.forward",
+    "exact_restore_before_each_measurement": true,
+    "exact_restore_in_timed_region": false,
+    "flashinfer_direct_route": "FlashInfer FP32 softmax with per-row temperature; deterministic top_p_sampling_from_probs",
+    "flashinfer_production_route": "Sampler.sample_top_p_flashinfer, including greedy argmax, FlashInfer FP32 softmax and deterministic top-p sample, sample dtype normalization, and greedy torch.where",
+    "flashinfer_source_is_not_mutated": true,
+    "jit_and_torch_compile_warmed_before_measurement": true,
+    "restore_rationale": "restore is repeated-measurement setup only; production receives fresh model logits and does not clone them",
+    "transient_memory_definition": "max_memory_allocated minus memory_allocated after warmup/GC"
+  },
+  "persistent_inputs": {
+    "exact_restore_buffer_bf16_mib": 74.1875,
+    "source_bf16_mib": 74.1875
+  },
+  "schema_version": 1,
+  "source": {
+    "origin_url": "git@github.com:badle0/nano-vllm.git",
+    "path": "benchmarks/topp_performance/flashinfer_sampling_bench.py",
+    "sha256": "17330f81c651db9b8d0f1b77ed55fa513b4c24eb48f4bc4d943fed113933d14a"
+  },
+  "speedup_exact_over_flashinfer_production": 11.456193429978763,
+  "started_at_utc": "2026-08-18T05:24:39.333678+00:00",
+  "statistical_semantic_characterization": {
+    "draws_per_distribution": 131072,
+    "forced_top_tie": {
+      "all_flashinfer_rows_valid": true,
+      "counts": [
+        43578,
+        43780,
+        43714,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "draws": 131072,
+      "draws_outside_expected_support": 0,
+      "exact_support_token_ids": [
+        0,
+        1
+      ],
+      "expected_candidate_support_token_ids": [
+        0,
+        1,
+        2
+      ],
+      "expected_probabilities": [
+        0.3333333333333333,
+        0.3333333333333333,
+        0.3333333333333333,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "frequencies": [
+        0.3324737548828125,
+        0.334014892578125,
+        0.3335113525390625,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "interpretation": "The candidate is characterized against all equal boundary maxima; the current torch.sort(stable=False) support may keep only a token-ID subset according to its pinned CUDA ordering.",
+      "invalid_flashinfer_rows": 0,
+      "logits": [
+        4.0,
+        4.0,
+        4.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "max_abs_frequency_error": 0.0008595784505208148,
+      "max_abs_standardized_residual_on_support": 0.6601562499999857,
+      "name": "forced_top_tie",
+      "observed_token_ids": [
+        0,
+        1,
+        2
+      ],
+      "softmax_probabilities": [
+        0.3234594166278839,
+        0.3234594166278839,
+        0.3234594166278839,
+        0.005924365948885679,
+        0.005924365948885679,
+        0.005924365948885679,
+        0.005924365948885679,
+        0.005924365948885679
+      ],
+      "softmax_sum": 1.0000001192092896,
+      "temperature": 1.0,
+      "top_p": 0.5
+    },
+    "known_unique_logits": {
+      "all_flashinfer_rows_valid": true,
+      "counts": [
+        66380,
+        39059,
+        25633,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "designed_probabilities": [
+        0.41,
+        0.24,
+        0.16,
+        0.09,
+        0.055,
+        0.025,
+        0.013,
+        0.007
+      ],
+      "draws": 131072,
+      "draws_outside_expected_support": 0,
+      "exact_support_token_ids": [
+        0,
+        1,
+        2
+      ],
+      "expected_candidate_support_token_ids": [
+        0,
+        1,
+        2
+      ],
+      "expected_probabilities": [
+        0.5061728703941155,
+        0.2962962704049326,
+        0.1975308592009519,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "frequencies": [
+        0.506439208984375,
+        0.29799652099609375,
+        0.19556427001953125,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "invalid_flashinfer_rows": 0,
+      "logits": [
+        -0.891598105430603,
+        -1.4271163940429688,
+        -1.8325815200805664,
+        -2.4079456329345703,
+        -2.9004220962524414,
+        -3.6888794898986816,
+        -4.342805862426758,
+        -4.9618449211120605
+      ],
+      "max_abs_frequency_error": 0.001966589181420647,
+      "max_abs_standardized_residual_on_support": 1.7882859407882519,
+      "name": "known_unique_logits",
+      "observed_token_ids": [
+        0,
+        1,
+        2
+      ],
+      "sanity_pass": true,
+      "softmax_probabilities": [
+        0.4100000262260437,
+        0.23999997973442078,
+        0.1599999964237213,
+        0.08999999612569809,
+        0.05500001087784767,
+        0.025000005960464478,
+        0.01300000213086605,
+        0.007000003010034561
+      ],
+      "softmax_sum": 1.0,
+      "temperature": 1.0,
+      "top_p": 0.8
+    },
+    "uniform_tie": {
+      "all_flashinfer_rows_valid": true,
+      "counts": [
+        16249,
+        16397,
+        16523,
+        16380,
+        16361,
+        16246,
+        16447,
+        16469
+      ],
+      "draws": 131072,
+      "draws_outside_expected_support": 0,
+      "exact_support_token_ids": [
+        0,
+        1,
+        2,
+        3,
+        5
+      ],
+      "expected_candidate_support_token_ids": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7
+      ],
+      "expected_probabilities": [
+        0.125,
+        0.125,
+        0.125,
+        0.125,
+        0.125,
+        0.125,
+        0.125,
+        0.125
+      ],
+      "frequencies": [
+        0.12397003173828125,
+        0.12509918212890625,
+        0.12606048583984375,
+        0.124969482421875,
+        0.12482452392578125,
+        0.1239471435546875,
+        0.12548065185546875,
+        0.12564849853515625
+      ],
+      "interpretation": "The current torch.sort(stable=False) full-sort route selects token identities at the tie boundary according to its pinned CUDA ordering; the candidate is characterized against tie-symmetric support.",
+      "invalid_flashinfer_rows": 0,
+      "logits": [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "max_abs_frequency_error": 0.00106048583984375,
+      "max_abs_standardized_residual_on_support": 1.1609160195570933,
+      "name": "uniform_tie",
+      "observed_token_ids": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7
+      ],
+      "softmax_probabilities": [
+        0.125,
+        0.125,
+        0.125,
+        0.125,
+        0.125,
+        0.125,
+        0.125,
+        0.125
+      ],
+      "softmax_sum": 1.0,
+      "temperature": 1.0,
+      "top_p": 0.6
+    }
+  }
+}

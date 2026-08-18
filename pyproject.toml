@@ -19,6 +19,13 @@ dependencies = [
     "xxhash",
 ]
 
+[project.optional-dependencies]
+fast-sampling = [
+    "flashinfer-python==0.6.17",
+    "torch>=2.10,<2.11",
+    "cuda-python>=12,<13",
+]
+
 [project.urls]
 Homepage="https://github.com/GeeeekExplorer/nano-vllm"
 
