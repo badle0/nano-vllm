@@ -19,6 +19,7 @@ from nanovllm.engine.sequence import Sequence, StreamOutput
 from nanovllm.engine.scheduler import Scheduler
 from nanovllm.engine.model_runner import ModelRunner
 from nanovllm.metrics import compute_metrics
+from nanovllm.layers.sampler import require_flashinfer_sampling
 
 
 _PYTHON_GC_LEASE_LOCK = Lock()
@@ -216,6 +217,8 @@ class LLMEngine:
         config_fields = {field.name for field in fields(Config)}
         config_kwargs = {k: v for k, v in kwargs.items() if k in config_fields}
         config = Config(model, **config_kwargs)
+        if config.top_p_backend == "flashinfer":
+            require_flashinfer_sampling()
         Sequence.block_size = config.kvcache_block_size
         ctx = mp.get_context("spawn")
         for i in range(1, config.tensor_parallel_size):

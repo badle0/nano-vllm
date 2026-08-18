@@ -215,27 +215,38 @@ class ModelRunner:
                 warmup_logits = torch.zeros(2, vocab_size)
                 self.sampler.filter_top_k(warmup_logits, None, top_k)
             warmup_temperatures = torch.ones(2, dtype=torch.float32)
-            warmup_probability_cutoffs = torch.full(
-                (1,), 1.0 - 0.9, dtype=torch.float32
-            )
-            warmup_logits = torch.zeros(2, vocab_size)
-            row_indices = torch.zeros(1, dtype=torch.int64)
-            self.sampler.filter_top_p(
-                warmup_logits,
-                warmup_temperatures,
-                row_indices,
-                warmup_probability_cutoffs,
-            )
-            warmup_logits = torch.zeros(2, vocab_size)
-            warmup_probability_cutoffs = torch.full(
-                (2,), 1.0 - 0.9, dtype=torch.float32
-            )
-            self.sampler.filter_top_p(
-                warmup_logits,
-                warmup_temperatures,
-                None,
-                warmup_probability_cutoffs,
-            )
+            if self.config.top_p_backend == "exact":
+                warmup_probability_cutoffs = torch.full(
+                    (1,), 1.0 - 0.9, dtype=torch.float32
+                )
+                warmup_logits = torch.zeros(2, vocab_size)
+                row_indices = torch.zeros(1, dtype=torch.int64)
+                self.sampler.filter_top_p(
+                    warmup_logits,
+                    warmup_temperatures,
+                    row_indices,
+                    warmup_probability_cutoffs,
+                )
+                warmup_logits = torch.zeros(2, vocab_size)
+                warmup_probability_cutoffs = torch.full(
+                    (2,), 1.0 - 0.9, dtype=torch.float32
+                )
+                self.sampler.filter_top_p(
+                    warmup_logits,
+                    warmup_temperatures,
+                    None,
+                    warmup_probability_cutoffs,
+                )
+            else:
+                warmup_logits = torch.zeros(2, vocab_size)
+                warmup_top_ps = torch.full((2,), 0.9, dtype=torch.float32)
+                cuda_rng_state = torch.cuda.get_rng_state()
+                self.sampler.sample_top_p_flashinfer(
+                    warmup_logits,
+                    warmup_temperatures,
+                    warmup_top_ps,
+                )
+                torch.cuda.set_rng_state(cuda_rng_state)
             del warmup_logits
         torch.cuda.empty_cache()
 
@@ -382,6 +393,22 @@ class ModelRunner:
             )
         return temperatures, top_k_buckets, top_p_plan, False
 
+    @staticmethod
+    def _expand_top_ps(batch_size: int, top_p_plan):
+        """Expand active-row metadata to FlashInfer's full-batch p vector."""
+
+        rows, active_top_ps = top_p_plan
+        if rows is None:
+            if len(active_top_ps) != batch_size:
+                raise ValueError("homogeneous top-p metadata must cover the batch")
+            return active_top_ps
+        if len(rows) != len(active_top_ps):
+            raise ValueError("top-p rows and values must have the same length")
+        top_ps = [1.0] * batch_size
+        for row, top_p in zip(rows, active_top_ps):
+            top_ps[row] = top_p
+        return tuple(top_ps)
+
     def prepare_sample(self, seqs: list[Sequence]):
         (
             temperatures,
@@ -408,18 +435,29 @@ class ModelRunner:
         )
         top_p_plan = None
         if host_top_p_plan is not None:
-            rows, top_ps = host_top_p_plan
-            row_indices = (
-                None
-                if rows is None
-                else torch.tensor(rows, dtype=torch.int64, pin_memory=True).cuda(non_blocking=True)
-            )
-            probability_cutoffs = torch.tensor(
-                tuple(1.0 - top_p for top_p in top_ps),
-                dtype=torch.float32,
-                pin_memory=True,
-            ).cuda(non_blocking=True)
-            top_p_plan = (row_indices, probability_cutoffs)
+            if self.config.top_p_backend == "flashinfer":
+                top_ps = self._expand_top_ps(
+                    len(temperatures), host_top_p_plan
+                )
+                top_ps = torch.tensor(
+                    top_ps,
+                    dtype=torch.float32,
+                    pin_memory=True,
+                ).cuda(non_blocking=True)
+                top_p_plan = (None, top_ps)
+            else:
+                rows, top_ps = host_top_p_plan
+                row_indices = (
+                    None
+                    if rows is None
+                    else torch.tensor(rows, dtype=torch.int64, pin_memory=True).cuda(non_blocking=True)
+                )
+                probability_cutoffs = torch.tensor(
+                    tuple(1.0 - top_p for top_p in top_ps),
+                    dtype=torch.float32,
+                    pin_memory=True,
+                ).cuda(non_blocking=True)
+                top_p_plan = (row_indices, probability_cutoffs)
         return temperatures, top_k_buckets, top_p_plan, False
 
     def _select_varlen_graph_key(self, num_tokens: int, num_seqs: int):
@@ -577,12 +615,21 @@ class ModelRunner:
             else:
                 for top_k, row_indices in top_k_buckets:
                     logits = self.sampler.filter_top_k(logits, row_indices, top_k)
-                if top_p_plan is not None:
-                    row_indices, probability_cutoffs = top_p_plan
-                    logits = self.sampler.filter_top_p(
-                        logits, temperatures, row_indices, probability_cutoffs
+                if (
+                    top_p_plan is not None
+                    and self.config.top_p_backend == "flashinfer"
+                ):
+                    _, top_ps = top_p_plan
+                    tokens = self.sampler.sample_top_p_flashinfer(
+                        logits, temperatures, top_ps
                     )
-                tokens = self.sampler(logits, temperatures)
+                else:
+                    if top_p_plan is not None:
+                        row_indices, probability_cutoffs = top_p_plan
+                        logits = self.sampler.filter_top_p(
+                            logits, temperatures, row_indices, probability_cutoffs
+                        )
+                    tokens = self.sampler(logits, temperatures)
             token_ids = tokens.tolist()
         else:
             token_ids = None

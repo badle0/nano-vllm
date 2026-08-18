@@ -1,0 +1,191 @@
+{
+  "accepted_gates": {
+    "all_required_gates_pass": true,
+    "all_seeded_text_equivalent": true,
+    "all_seeded_tokens_equivalent": true,
+    "all_timed_prompt_sets_distinct": true,
+    "all_timed_round_seeds_distinct": true,
+    "all_worker_pins_identical": true,
+    "backpressure_matches_synchronous_roofline": true,
+    "balanced_pair_order": true,
+    "cache_neutral_core_policy_asserted": true,
+    "correction_heavy_cpu_scaling": true,
+    "eight_distinct_prompt_sets": true,
+    "eight_distinct_seeds": true,
+    "event_delivery_p95_at_most_1ms": true,
+    "full_length_warmup_covers_both_routes": true,
+    "incremental_detokenizer_decode_bounded": true,
+    "minimum_caller_exposure_at_least_10x": true,
+    "paired_mean_90ci_inside_plus_or_minus_2_percent": true,
+    "pending_storage_bounded_by_slow_batch_minus_one": true,
+    "route_positions_match_declared_order": true,
+    "stream_peak_memory_within_1_percent_of_generate": true
+  },
+  "artifact": {
+    "evidence_schema_version": 3,
+    "filename": "repaired_streaming_cert_a100_2026-08-18_14002ae.json",
+    "sha256": "df662215db769d0c93129b8d29fc9fbcda4998e41cc412d312864c437da7f8c7",
+    "size_bytes": 26776996
+  },
+  "certification_date": "2026-08-18",
+  "limitations": [
+    "This is one A100-SXM4-40GB, Qwen3-0.6B, batch-16, 128-output-token, TP1 configuration; it does not establish other hardware/model/workload behavior.",
+    "The eight independent statistical units are fresh workers; each is the predeclared median of four paired rounds, not 32 independent process replicates.",
+    "One raw round measured -16.46727667217114 percent; the robust worker median was -0.5668358397655948 percent. Raw timing outliers remain visible in the archived JSON.",
+    "Caller first-event exposure is a public delivery-boundary comparison, not model TTFT."
+  ],
+  "manifest_schema_version": 1,
+  "provenance": {
+    "benchmark_script_sha256": "7fc48d2856106034bf7687d3c969115a010eb8a07bfdbd2ca6a3e65763a8384b",
+    "branch": "fix/token-streaming-cert",
+    "commit": "14002ae04102eef58aea09fa8a2a78eca0103b5f",
+    "gpu": {
+      "compute_capability": [
+        8,
+        0
+      ],
+      "driver_version": "570.133.20",
+      "name": "NVIDIA A100-SXM4-40GB",
+      "total_memory_bytes": 42406903808,
+      "uuid": "GPU-0dd9d697-b14a-affe-e840-ce58e73c8c4c"
+    },
+    "model_manifest_sha256": "af8d673a7672068277eeeabf2a26f793ae19ab3938318cb8fac73cbbf6c45575",
+    "model_size_bytes": 1519211936,
+    "recorded_at_utc": "2026-08-18T12:28:32.500139+00:00",
+    "software": {
+      "flash_attn": "2.8.1",
+      "python": "3.12.13",
+      "tokenizers": "0.22.2",
+      "torch": "2.10.0+cu128",
+      "torch_cuda": "12.8",
+      "transformers": "5.14.1",
+      "triton": "3.6.0"
+    },
+    "source_manifest_sha256": "c4c06472303b4b1b65d9b650b94b39c5a6969097abdd4c12f68121ef731f6761",
+    "source_tree": "383ba5daa010907b7d12c340cdbd0e7b510da9ef"
+  },
+  "recomputed_summary": {
+    "backpressure_roofline": {
+      "0": {
+        "expected_gap_ms": 3.1952904537320137,
+        "observed_gap_ms": 3.1952904537320137,
+        "residual_ms": 0.0,
+        "tolerance_ms": 2.0,
+        "within_tolerance": true
+      },
+      "1": {
+        "expected_gap_ms": 11.195290453732014,
+        "observed_gap_ms": 11.518478393554688,
+        "residual_ms": 0.3231879398226738,
+        "tolerance_ms": 2.0,
+        "within_tolerance": true
+      },
+      "4": {
+        "expected_gap_ms": 35.195290453732014,
+        "observed_gap_ms": 36.10309399664402,
+        "residual_ms": 0.9078035429120064,
+        "tolerance_ms": 3.2,
+        "within_tolerance": true
+      }
+    },
+    "correction_scaling": {
+      "process_time_ratio": 4.556747728289189,
+      "process_time_ratio_limit": 6.0,
+      "state_bytes_ratio": 4.109223552392086,
+      "state_bytes_ratio_limit": 4.5,
+      "token_ratio": 4.0
+    },
+    "delivery_ms": {
+      "count": 65536,
+      "max": 0.5171280354261398,
+      "median": 0.02948939800262451,
+      "min": 0.019881874322891235,
+      "p95": 0.039721373468637466,
+      "p99": 0.055047869682312026
+    },
+    "event_count": 65536,
+    "exposure_factor": {
+      "count": 8,
+      "max": 15.264217730749042,
+      "median": 14.970932529446047,
+      "min": 13.772968323828076,
+      "p95": 15.201295389161722,
+      "p99": 15.251633262431579
+    },
+    "fresh_worker_units": 8,
+    "gates": {
+      "all_required_gates_pass": true,
+      "all_seeded_text_equivalent": true,
+      "all_seeded_tokens_equivalent": true,
+      "all_timed_prompt_sets_distinct": true,
+      "all_timed_round_seeds_distinct": true,
+      "all_worker_pins_identical": true,
+      "backpressure_matches_synchronous_roofline": true,
+      "balanced_pair_order": true,
+      "cache_neutral_core_policy_asserted": true,
+      "correction_heavy_cpu_scaling": true,
+      "eight_distinct_prompt_sets": true,
+      "eight_distinct_seeds": true,
+      "event_delivery_p95_at_most_1ms": true,
+      "full_length_warmup_covers_both_routes": true,
+      "incremental_detokenizer_decode_bounded": true,
+      "minimum_caller_exposure_at_least_10x": true,
+      "paired_mean_90ci_inside_plus_or_minus_2_percent": true,
+      "pending_storage_bounded_by_slow_batch_minus_one": true,
+      "route_positions_match_declared_order": true,
+      "stream_peak_memory_within_1_percent_of_generate": true
+    },
+    "maximum_paired_peak_delta_bytes": 0,
+    "raw_paired_delta_percent": {
+      "count": 32,
+      "max": 4.057911685509197,
+      "median": -0.06968310798634025,
+      "min": -16.46727667217114,
+      "p95": 1.7704396821029342,
+      "p99": 3.3981872916348994
+    },
+    "raw_timed_pairs": 32,
+    "worker_paired_delta_percent": {
+      "central_90_percent_t_interval": [
+        -0.20391318937027936,
+        0.24515417329619305
+      ],
+      "mean": 0.020620491962956844,
+      "values": [
+        0.277101956521808,
+        0.07953449524634171,
+        -0.40994280045511533,
+        -0.5668358397655948,
+        0.19742509621430426,
+        0.019660621583839077,
+        0.19236885057749564,
+        0.3756515557805762
+      ]
+    },
+    "worst_raw_round": {
+      "delta_percent": -16.46727667217114,
+      "order": [
+        "stream",
+        "generate"
+      ],
+      "round": 2,
+      "worker": 3,
+      "worker_median_percent": -0.5668358397655948
+    }
+  },
+  "status": "accepted",
+  "superseded_runs": [
+    {
+      "archived": false,
+      "commit": "cf6da50ec8fca39588ed7ba0b8be734379bb3765",
+      "evidence_schema_version": 2,
+      "reasons": [
+        "The memory gate compared the stream-minus-generate peak delta with one percent of total GPU capacity, not one percent of its paired generate peak.",
+        "Only short 8-token warmups preceded one 128-token timed pair per worker, leaving a large first-full-length/order effect and a failed -5.203860880871134 to +6.0117494522766775 percent interval.",
+        "The run therefore did not meet its own all-required-gates acceptance condition."
+      ],
+      "sha256": "e3ac8f95424450f48a6f67a58b3575569562aab95e5557f61b85179c6f4643ec",
+      "status": "superseded_not_archived"
+    }
+  ]
+}

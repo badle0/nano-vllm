@@ -16,11 +16,18 @@ class Config:
     eos: int = -1
     kvcache_block_size: int = 256
     num_kvcache_blocks: int = -1
+    top_p_backend: str = "exact"
     # Appended to preserve Config's existing positional field order. This is an
     # opt-in, reference-counted process-global lease owned by LLMEngine.
     disable_python_gc: bool = False
 
     def __post_init__(self):
+        if not isinstance(self.top_p_backend, str):
+            raise TypeError("top_p_backend must be a string")
+        if self.top_p_backend not in {"exact", "flashinfer"}:
+            raise ValueError(
+                "top_p_backend must be either 'exact' or 'flashinfer'"
+            )
         if type(self.disable_python_gc) is not bool:
             raise TypeError("disable_python_gc must be a bool")
         if self.disable_python_gc and self.tensor_parallel_size != 1:

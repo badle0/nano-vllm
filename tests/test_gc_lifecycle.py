@@ -13,6 +13,7 @@ from nanovllm.engine import llm_engine as engine_module
 class FakeConfig:
     model: str
     tensor_parallel_size: int = 1
+    top_p_backend: str = "exact"
     disable_python_gc: bool = False
     kvcache_block_size: int = 256
     eos: int = -1
