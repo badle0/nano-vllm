@@ -7,9 +7,11 @@ instance and never changes scheduler or model-runner production code.
 from __future__ import annotations
 
 import argparse
+import gc
 import json
 import random
 import sys
+from collections.abc import Callable
 from pathlib import Path
 from time import perf_counter
 
@@ -21,6 +23,9 @@ from benchmarks.chunked_prefill_tail.common import (
     model_identity,
     timing_summary,
     validate_release_pin,
+)
+from benchmarks.chunked_prefill_tail.release_policy import (
+    evaluate_chunk_tail_release_profile,
 )
 
 
@@ -46,6 +51,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--cold-steps", type=int, default=3)
     parser.add_argument("--max-tokens", type=int, default=192)
     parser.add_argument("--temperature", type=float, default=0.0)
+    parser.add_argument(
+        "--disable-python-gc",
+        action="store_true",
+        help="opt in to engine-owned process-wide cyclic-GC suppression",
+    )
     parser.add_argument("--expected-commit")
     parser.add_argument("--expected-source-sha256")
     parser.add_argument("--output", type=Path)
@@ -140,7 +150,10 @@ def _summaries(steps: list[dict]) -> dict[str, object]:
     return {name: timing_summary(rows) for name, rows in groups.items()}
 
 
-def main(argv: list[str] | None = None) -> int:
+def _main_impl(
+    argv: list[str] | None,
+    register_engine: Callable[[object], None],
+) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
     if handle_pin_query(args.print_source_sha256, args.show_pin):
@@ -170,10 +183,39 @@ def main(argv: list[str] | None = None) -> int:
         environment,
     )
     result["arguments"] = vars(args) | {"output": str(args.output)}
+    result["release_policy"] = evaluate_chunk_tail_release_profile(
+        args.tau,
+        {
+            "model_resolved_path": model["resolved_path"],
+            "gpu": environment.get("gpu"),
+            "torch": environment.get("torch"),
+            "cuda": environment.get("cuda_build"),
+            "python_gc_mode": (
+                "engine_option_after_successful_initialization"
+                if args.disable_python_gc
+                else "engine_default_no_gc_change"
+            ),
+            # This harness measures bounded engine steps rather than complete
+            # request-metric ITLs, so it must not self-certify from reference
+            # evidence even when every configuration field matches.
+            "measurement_protocol": "bounded_per_step_diagnostic",
+            "interactive_count": args.interactive_count,
+            "interactive_prompt_len": args.interactive_prompt_len,
+            "pre_long_steps": args.pre_long_steps,
+            "long_count": args.long_count,
+            "long_prompt_len": args.long_prompt_len,
+            "max_tokens": args.max_tokens,
+            "temperature": args.temperature,
+            "max_model_len": args.max_model_len,
+            "gpu_memory_utilization": args.gpu_memory_utilization,
+            "max_num_seqs": args.max_num_seqs,
+        },
+    )
 
     torch.manual_seed(args.seed)
     torch.cuda.manual_seed_all(args.seed)
     rng = random.Random(args.seed)
+    gc_enabled_before_engine = gc.isenabled()
     engine_started = perf_counter()
     llm = LLM(
         args.model,
@@ -182,8 +224,19 @@ def main(argv: list[str] | None = None) -> int:
         max_model_len=args.max_model_len,
         gpu_memory_utilization=args.gpu_memory_utilization,
         enforce_eager=False,
+        disable_python_gc=args.disable_python_gc,
     )
+    # Register immediately so an embedding caller that catches a later
+    # diagnostic failure still gets deterministic engine/GC cleanup.
+    register_engine(llm)
     torch.cuda.synchronize()
+    gc_enabled_after_engine_init = gc.isenabled()
+    if args.disable_python_gc and gc_enabled_after_engine_init:
+        raise RuntimeError("engine did not disable Python GC after successful init")
+    if not args.disable_python_gc and (
+        gc_enabled_after_engine_init != gc_enabled_before_engine
+    ):
+        raise RuntimeError("default engine initialization changed Python GC state")
     engine_init_ms = (perf_counter() - engine_started) * 1000.0
     runner = llm.model_runner
     scheduler = llm.scheduler
@@ -429,6 +482,7 @@ def main(argv: list[str] | None = None) -> int:
                 "max_num_seqs": runner.config.max_num_seqs,
                 "max_model_len": runner.config.max_model_len,
                 "gpu_memory_utilization": runner.config.gpu_memory_utilization,
+                "disable_python_gc": runner.config.disable_python_gc,
                 "kvcache_block_size": runner.config.kvcache_block_size,
                 "num_kvcache_blocks": runner.config.num_kvcache_blocks,
             },
@@ -467,12 +521,23 @@ def main(argv: list[str] | None = None) -> int:
         "steps": steps,
         "timing_summaries": _summaries(steps),
         "elapsed_ms_before_write": (perf_counter() - started) * 1000.0,
-        # Recompute immediately before release: this is both retained evidence
-        # and a guard against source mutation during a long diagnostic run.
-        "provenance_after_run": validate_release_pin(
-            args.expected_commit, args.expected_source_sha256
-        ),
     })
+    # Explicit exit proves the opt-in restoration contract in the same retained
+    # artifact. The registered atexit callback is idempotent and becomes a no-op.
+    llm.exit()
+    if gc.isenabled() != gc_enabled_before_engine:
+        raise RuntimeError("engine exit did not restore the prior Python GC state")
+    result["python_gc"] = {
+        "disable_requested": args.disable_python_gc,
+        "enabled_before_engine": gc_enabled_before_engine,
+        "enabled_after_engine_init": gc_enabled_after_engine_init,
+        "enabled_after_engine_exit": gc.isenabled(),
+    }
+    # Recompute immediately before release: this is both retained evidence and
+    # a guard against source mutation during a long diagnostic run.
+    result["provenance_after_run"] = validate_release_pin(
+        args.expected_commit, args.expected_source_sha256
+    )
     immutable_write_json(args.output, result)
     print(json.dumps({
         "output": str(args.output),
@@ -481,6 +546,20 @@ def main(argv: list[str] | None = None) -> int:
         "peak_allocated_bytes": result["memory"]["peak_allocated_bytes"],
     }, sort_keys=True))
     return 0
+
+
+def main(argv: list[str] | None = None) -> int:
+    engine = None
+
+    def register_engine(created_engine) -> None:
+        nonlocal engine
+        engine = created_engine
+
+    try:
+        return _main_impl(argv, register_engine)
+    finally:
+        if engine is not None:
+            engine.exit()
 
 
 if __name__ == "__main__":

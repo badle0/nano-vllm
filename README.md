@@ -43,6 +43,23 @@ outputs = llm.generate(prompts, sampling_params)
 outputs[0]["text"]
 ```
 
+For workloads whose latency is sensitive to process-wide cyclic-GC pauses, an
+engine can explicitly opt in with `disable_python_gc=True`. The default is
+`False`. Suppression begins only after successful engine initialization, and
+overlapping opted-in engines share a locked reference-counted lease. The final
+`exit()` (including its atexit path) restores the pre-first-acquire GC state.
+The lease is cooperative—other code must not toggle GC while it is active—and
+the option currently supports `tensor_parallel_size=1` only.
+
+In historical A100 evidence for the 16-interactive/2-long chunked-prefill
+workload, `max_num_batched_tokens=256` met the strict maximum-ITL SLO below
+10 ms in 5/5 manually GC-disabled runs (worst 8.057 ms). Tau 512 passed only
+2/5 runs (median/worst 13.003/17.763 ms), so it is a throughput/TTFT tradeoff,
+not a latency fix. Those legacy artifacts lack model-content and self-pinned
+source hashes; they are reference evidence and never certify a current run.
+Re-certify through the retained harness after any source, model, software,
+hardware, or workload change.
+
 ### Request metrics
 
 Each `generate()` result includes a `metrics` dictionary. Fields prefixed with

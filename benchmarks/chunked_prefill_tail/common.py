@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import gc
 import hashlib
 import json
 import math
@@ -163,6 +164,7 @@ def environment_identity(torch_module, transformers_module) -> dict[str, object]
         "cuda_build": torch_module.version.cuda,
         "transformers": transformers_module.__version__,
         "flash_attn": flash_attn.__version__,
+        "python_gc_enabled": gc.isenabled(),
         # A fixed non-secret allowlist makes execution-affecting state visible
         # without copying credentials or unrelated process environment.
         "environment_variables": {

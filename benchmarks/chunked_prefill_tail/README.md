@@ -48,13 +48,63 @@ Treat a cell as a correctness pass only when all of the following hold:
    steps, and queue/mid-chunk state is consistent with the intended workload.
 4. Judge a latency promise from steady route-specific p95/max, not a pooled
    median. Attribute a threshold breach using the phase spans and prefix state.
-   In particular, do not certify tau 512 for a sub-10-ms bound merely because
-   graph routing hits; compare tau 256 and tau 512 with the same workload.
+   Historical tau-256 evidence met the latency SLO below; tau 512 is explicitly
+   a throughput/TTFT-only historical reference, not a sub-10-ms latency fix.
 5. Peak allocated/reserved memory and KV-block consumption must fit the release
    headroom, with no monotonic per-step growth unexplained by longer live KV.
 
 These are diagnostic gates. They identify the limiting component before any
 production optimization is proposed.
+
+## Release classification
+
+Five retained A100-SXM4-40GB processes per tau, seeds 20260821 through 20260825,
+ran with Python GC disabled manually before engine construction at evidence commit
+`4a5742ab4003c1ecf7e442a812cbba3e04e06450`. Its `nanovllm/` tree is identical
+to this branch's production base
+`1ffe033bfc60dab6875634e90ffe816d772ec338`. The release SLO is strict maximum
+interactive ITL below 10 ms. Each process used 16 64-token interactive requests,
+40 steps before admitting two 2,048-token requests, temperature 0.6, and 256
+completion tokens per request (`max_model_len=4096`, GPU utilization 0.8).
+
+| tau | per-run maximum ITL (ms) | median / worst (ms) | SLO runs | historical role |
+| ---: | --- | ---: | ---: | --- |
+| 256 | 8.057, 6.924, 7.436, 7.575, 7.302 | 7.436 / 8.057 | 5/5 | **latency SLO met at evidence commit** |
+| 512 | 9.752, 17.763, 9.202, 13.003, 16.355 | 13.003 / 17.763 | 2/5 | **throughput/TTFT only** |
+
+Tau 512 slightly raises observed completion throughput (~3.18–3.24k token/s)
+and lowers long-request maximum TTFT (~65.9–78.5 ms versus tau 256's
+~109.3–122.7 ms), but its repeated ITL breaches remain after GC suppression.
+Therefore GC control fixes one outlier cause, not tau 512's latency contract.
+Other tau values remain performance-unverified by the retained evidence.
+
+The exact arrays, seeds, artifact basenames, hardware, commits, and historical role are in
+`release_policy.py`; every new step-diagnostic JSON embeds that reference plus
+a recorded-field `matches_historical_recorded_configuration` verdict. The
+legacy files record a commit and model path but no self-pinned source or
+model-content hash, so
+`applies_to_current_run` is always false: neither a matching configuration, a
+bounded diagnostic, nor a run using the new engine option is relabeled as
+certified by prior manual-GC evidence. The retained inputs are named
+`roofline_chunk_tip_tau{256,512}_seed<seed>_gcdisabled.json` under the external
+evidence directory `/workspace/.feat_bench/results/`.
+
+## Optional Python GC control
+
+`LLM(..., disable_python_gc=True)` opts one engine into process-wide cyclic-GC
+suppression after initialization succeeds. The default is `False`. The engine
+records whether GC was enabled. A locked reference-counted lease keeps GC
+disabled while any opted-in engine remains; the final idempotent `exit()`/atexit
+cleanup restores the pre-first-acquire state even if model-runner cleanup
+raises. This is cooperative process-global ownership: code sharing the process
+must not call `gc.enable()` while a lease is active. The option currently rejects
+`tensor_parallel_size>1`; worker-process GC behavior is not certified. Nano-vllm
+GPU/process-group diagnostics still use one engine per fresh process for
+independent measurements.
+
+The step harness exposes the same choice as `--disable-python-gc` and retains
+GC state before init, after init, and after explicit engine exit. Omit the flag
+for the default-enabled control run.
 
 ## Reproducible commands
 
@@ -69,9 +119,11 @@ export PIN_SOURCE="$(PYTHONPATH=. PYTHONDONTWRITEBYTECODE=1 /venv/main/bin/pytho
 mkdir -p /workspace/.feat_bench/chunk-tail
 ```
 
-Run the high-segment mixed-tail comparison. These commands build 63 live decode
-rows, then admit one 2,048-token prompt, reproducing 64-segment mixed steps while
-holding every workload parameter except tau constant:
+Run the high-segment mixed-tail comparison. Tau 256 is the historical latency
+reference; tau 512 is retained only to characterize its throughput/TTFT tradeoff.
+These commands build 63 live decode rows, then admit one 2,048-token prompt,
+reproducing 64-segment mixed steps while holding every other workload parameter
+constant:
 
 ```bash
 PYTHONPATH=. PYTHONDONTWRITEBYTECODE=1 TORCHINDUCTOR_CACHE_DIR=/tmp/nv_chunk_tail_tau256 \
@@ -79,7 +131,7 @@ PYTHONPATH=. PYTHONDONTWRITEBYTECODE=1 TORCHINDUCTOR_CACHE_DIR=/tmp/nv_chunk_tai
   --model /workspace/models/Qwen3-0.6B --tau 256 --max-num-seqs 64 \
   --max-model-len 4096 --interactive-count 63 --long-count 1 \
   --long-prompt-len 2048 --pre-long-steps 80 --measured-steps 96 \
-  --max-tokens 256 --cold-steps 3 --seed 20260822 \
+  --max-tokens 256 --cold-steps 3 --seed 20260822 --disable-python-gc \
   --expected-commit "$PIN_COMMIT" --expected-source-sha256 "$PIN_SOURCE" \
   --output /workspace/.feat_bench/chunk-tail/tail_tau256_seed20260822.json
 
@@ -88,7 +140,7 @@ PYTHONPATH=. PYTHONDONTWRITEBYTECODE=1 TORCHINDUCTOR_CACHE_DIR=/tmp/nv_chunk_tai
   --model /workspace/models/Qwen3-0.6B --tau 512 --max-num-seqs 64 \
   --max-model-len 4096 --interactive-count 63 --long-count 1 \
   --long-prompt-len 2048 --pre-long-steps 80 --measured-steps 96 \
-  --max-tokens 256 --cold-steps 3 --seed 20260822 \
+  --max-tokens 256 --cold-steps 3 --seed 20260822 --disable-python-gc \
   --expected-commit "$PIN_COMMIT" --expected-source-sha256 "$PIN_SOURCE" \
   --output /workspace/.feat_bench/chunk-tail/tail_tau512_seed20260822.json
 ```

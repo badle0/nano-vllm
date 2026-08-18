@@ -16,8 +16,17 @@ class Config:
     eos: int = -1
     kvcache_block_size: int = 256
     num_kvcache_blocks: int = -1
+    # Appended to preserve Config's existing positional field order. This is an
+    # opt-in, reference-counted process-global lease owned by LLMEngine.
+    disable_python_gc: bool = False
 
     def __post_init__(self):
+        if type(self.disable_python_gc) is not bool:
+            raise TypeError("disable_python_gc must be a bool")
+        if self.disable_python_gc and self.tensor_parallel_size != 1:
+            raise ValueError(
+                "disable_python_gc currently supports tensor_parallel_size=1 only"
+            )
         for name in ("max_num_batched_tokens", "max_num_seqs"):
             value = getattr(self, name)
             if type(value) is not int:
