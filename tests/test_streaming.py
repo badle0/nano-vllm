@@ -1,4 +1,5 @@
-from threading import Lock
+from queue import Queue
+from threading import Barrier, Lock, Thread
 from types import MethodType
 
 import pytest
@@ -143,6 +144,84 @@ def test_second_session_and_public_engine_drivers_are_rejected():
 
     with engine.stream(["second"], SamplingParams(max_tokens=1)) as second:
         assert len(list(second)) == 1
+
+
+def test_stream_rejects_a_manually_queued_request_without_cancelling_it():
+    engine, _ = make_fake_engine()
+    seq_id = engine.add_request("manual", SamplingParams(max_tokens=1))
+
+    with pytest.raises(RuntimeError, match="manually queued requests"):
+        engine.stream(["stream"], SamplingParams(max_tokens=1))
+
+    assert [sequence.seq_id for sequence in engine.scheduler.sequences] == [seq_id]
+    outputs, _ = engine.step()
+    assert outputs == [(seq_id, [20])]
+    assert engine.scheduler.is_finished()
+
+
+def test_simultaneous_stream_starts_have_exactly_one_owner():
+    engine, _ = make_fake_engine()
+    barrier = Barrier(3)
+    outcomes = Queue()
+
+    def start_stream(name):
+        barrier.wait()
+        try:
+            session = engine.stream([name], SamplingParams(max_tokens=2))
+            outcomes.put(("session", session))
+        except BaseException as error:
+            outcomes.put(("error", error))
+
+    threads = [
+        Thread(target=start_stream, args=(name,))
+        for name in ("first", "second")
+    ]
+    for thread in threads:
+        thread.start()
+    barrier.wait()
+    for thread in threads:
+        thread.join(timeout=5)
+        assert not thread.is_alive()
+
+    results = [outcomes.get_nowait(), outcomes.get_nowait()]
+    sessions = [value for kind, value in results if kind == "session"]
+    errors = [value for kind, value in results if kind == "error"]
+    assert len(sessions) == len(errors) == 1
+    assert isinstance(errors[0], RuntimeError)
+    assert "active stream session" in str(errors[0])
+    sessions[0].close()
+    assert engine.scheduler.is_finished()
+    assert engine._active_session is None
+
+
+def test_pending_events_drain_before_the_next_engine_step():
+    engine, _ = make_fake_engine()
+    original_step = engine._step
+    step_calls = 0
+
+    def counted_step():
+        nonlocal step_calls
+        step_calls += 1
+        return original_step()
+
+    engine._step = counted_step
+    session = engine.stream(
+        ["first", "second", "third"],
+        SamplingParams(max_tokens=2),
+    )
+    try:
+        next(session)
+        assert step_calls == 1
+        assert len(session._pending) == 2
+        next(session)
+        next(session)
+        assert step_calls == 1
+        assert len(session._pending) == 0
+        next(session)
+        assert step_calls == 2
+        assert len(session._pending) == 2
+    finally:
+        session.close()
 
 
 def test_context_exit_cleans_up_a_retained_partial_stream():

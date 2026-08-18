@@ -97,6 +97,11 @@ an earlier suffix because tokenizer cleanup and normalization are not always
 append-only. Completed caller-delivery metrics are available in
 `stream.metrics[seq_id]`. A retained iterator is not closed by `break` alone;
 the context manager or explicit `stream.close()` performs ID-scoped cleanup.
+The ownership lock makes simultaneous `generate()`/`stream()` starts fail
+atomically; it does not make the engine a generally thread-safe dispatcher.
+Serialize all public engine access in one application thread. Concurrent or
+asynchronous request dispatch requires a separate central step owner and is not
+part of this synchronous API.
 
 ### Top-p sampling backends
 
