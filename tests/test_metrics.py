@@ -241,3 +241,27 @@ def test_engine_metrics_invariants(llm):
     ]
     assert submission_delays == sorted(submission_delays)
     assert len({output["metrics"]["caller_e2e"] for output in outputs}) == 1
+
+
+def test_real_engine_step_preserves_legacy_pair_unpacking(llm):
+    """Exercise the public pair contract through scheduling and model execution."""
+    assert llm.is_finished()
+    llm.add_request(
+        [101, 102, 103],
+        SamplingParams(temperature=0.6, ignore_eos=True, max_tokens=4),
+    )
+
+    completed = []
+    for _ in range(16):
+        if llm.is_finished():
+            break
+        step_outputs, num_tokens = llm.step()
+        assert isinstance(num_tokens, int)
+        for seq_id, token_ids in step_outputs:
+            assert isinstance(seq_id, int)
+            assert isinstance(token_ids, list)
+            completed.append((seq_id, token_ids))
+
+    assert llm.is_finished()
+    assert len(completed) == 1
+    assert len(completed[0][1]) == 4
