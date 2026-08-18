@@ -1,9 +1,19 @@
 import json
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 
 from benchmarks.pr5_scripts import repaired_stream_benchmark as benchmark
+from benchmarks.pr5_scripts.validate_repaired_stream_certificate import (
+    ACCEPTED_ARTIFACT_SHA256,
+    ACCEPTED_COMMIT,
+    CertificateValidationError,
+    SUPERSEDED_ARTIFACT_SHA256,
+    SUPERSEDED_COMMIT,
+    validate_archive,
+    validate_evidence,
+)
 from nanovllm import StreamingDetokenizer
 
 
@@ -226,3 +236,63 @@ def test_core_prefix_reset_requires_idle_ownership_and_replaces_cache_metadata()
     scheduler.block_manager.used_block_ids.add(0)
     with pytest.raises(AssertionError, match="owns KV-cache blocks"):
         benchmark._reset_core_prefix_cache(llm, FakeBlockManager, "stream", 1)
+
+
+def test_accepted_streaming_certificate_archive_recomputes_every_gate():
+    results = Path(__file__).resolve().parents[1] / "benchmarks/pr5_results"
+    summary = validate_archive(
+        results / "repaired_streaming_cert_a100_2026-08-18_14002ae.json",
+        results / "repaired_streaming_cert_a100_2026-08-18_14002ae.manifest.json",
+    )
+
+    assert ACCEPTED_COMMIT == "14002ae04102eef58aea09fa8a2a78eca0103b5f"
+    assert ACCEPTED_ARTIFACT_SHA256 == (
+        "df662215db769d0c93129b8d29fc9fbcda4998e41cc412d312864c437da7f8c7"
+    )
+    assert summary["gates"]["all_required_gates_pass"]
+    assert summary["raw_timed_pairs"] == 32
+    assert summary["event_count"] == 65_536
+
+
+@pytest.mark.parametrize(
+    ("document", "raw_sha256"),
+    [
+        ({"schema_version": 2}, None),
+        ({
+            "schema_version": 3,
+            "provenance": {"repository": {"commit": SUPERSEDED_COMMIT}},
+        }, None),
+        ({
+            "schema_version": 3,
+            "provenance": {"repository": {"commit": ACCEPTED_COMMIT}},
+        }, SUPERSEDED_ARTIFACT_SHA256),
+    ],
+)
+def test_streaming_certificate_validator_rejects_superseded_cf6_evidence(
+    document,
+    raw_sha256,
+):
+    with pytest.raises(CertificateValidationError, match="superseded cf6da50"):
+        validate_evidence(document, raw_sha256=raw_sha256)
+
+
+def test_streaming_certificate_validator_rejects_unknown_artifact_hash():
+    document = {
+        "schema_version": 3,
+        "provenance": {"repository": {"commit": ACCEPTED_COMMIT}},
+    }
+
+    with pytest.raises(CertificateValidationError, match="artifact SHA-256"):
+        validate_evidence(document, raw_sha256="0" * 64)
+
+
+def test_streaming_certificate_validator_rejects_flipped_recorded_gate():
+    artifact = (
+        Path(__file__).resolve().parents[1]
+        / "benchmarks/pr5_results/repaired_streaming_cert_a100_2026-08-18_14002ae.json"
+    )
+    document = json.loads(artifact.read_text())
+    document["aggregate"]["gates"]["event_delivery_p95_at_most_1ms"] = False
+
+    with pytest.raises(CertificateValidationError, match="recorded accepted gates"):
+        validate_evidence(document)
