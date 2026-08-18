@@ -89,7 +89,10 @@ they also use FlashInfer's RNG stream and therefore lose exact-backend
 fixed-seed parity in that mixed batch.
 
 The exact and rejected-candidate measurements behind this choice are recorded
-in `benchmarks/topp_performance/README.md`.
+in `benchmarks/topp_performance/README.md`. On the pinned A100 B256 gate, the
+production wrapper measured 1.017 ms versus 11.649 ms for the exact complete
+sampling path; eight fresh-process Qwen3-0.6B pairs had a +59.56% median E2E
+throughput gain. These are workload-specific results, not a universal speedup.
 
 ## Benchmark
 

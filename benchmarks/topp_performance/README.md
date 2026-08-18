@@ -1,9 +1,10 @@
 # Top-p performance development
 
 This directory contains development-only gates for replacing the exact
-Transformers-compatible full-vocabulary top-p sort.  Runtime changes remain on
-`fix/topp-performance`; release evidence must be produced later from a clean,
-pinned runtime commit on a separate evidence descendant.
+Transformers-compatible full-vocabulary top-p sort, the resulting optional
+backend, and the rejected alternatives.  Clean production-wrapper and
+fresh-process E2E evidence is archived under `evidence/`; the exact backend
+remains the default.
 
 The first primitive is a CUDA BF16 counting-sort reconstruction.  It must return
 the exact same FP32 ascending value tensor as:
@@ -152,8 +153,17 @@ recorded from base commit
 `42affe47b3a97bb0ef2470f31c1e8b311cbc7a21` on
 `fix/topp-performance`.  The JSON embeds all CUDA samples, environment and GPU
 versions, resolved FlashInfer cache/package paths, git status, API provenance,
-RNG states, and statistical counts.  A clean-commit rerun of the updated
-harness is required to claim the production wrapper's 1.6 ms gate.
+RNG states, and statistical counts.  It established primitive feasibility but
+did not by itself establish the production wrapper's 1.6 ms gate.
+
+That clean rerun and the paired E2E gate are now complete. The shipped wrapper
+measured 1.017 ms median / 1.067 ms p95 / 296.75 MiB transient versus
+11.649 ms / 11.816 ms / 616.96 MiB for the exact route. Eight fresh-process
+B256 Qwen3-0.6B pairs all improved: the median paired E2E gain was +59.56%
+(ratio 1.5956x), with pair ratios spanning 1.5780x to 1.6160x. See
+`evidence/README.md` for the protocol, semantic boundary, complete table,
+checksums, raw files, and validator. The older external JSON above is retained
+only as pre-integration primitive history.
 
 Run its focused tests and development benchmark with:
 
