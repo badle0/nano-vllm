@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import argparse
 import gc
+import hashlib
 import importlib.util
 import json
 import math
@@ -76,6 +77,14 @@ def driver_version() -> str:
         ],
         text=True,
     ).strip()
+
+
+def file_sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        while chunk := handle.read(1024 * 1024):
+            digest.update(chunk)
+    return digest.hexdigest()
 
 
 def measure_route(
@@ -385,6 +394,7 @@ def main() -> None:
     parser.add_argument("--iterations", type=int, default=25)
     parser.add_argument("--statistical-draws", type=int, default=131_072)
     parser.add_argument("--seed", type=int, default=20260826)
+    parser.add_argument("--expected-commit", required=True)
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
     if not torch.cuda.is_available():
@@ -395,6 +405,18 @@ def main() -> None:
         parser.error("warmups must be nonnegative")
     if not (0.0 < args.top_p <= 1.0) or args.temperature <= 0.0:
         parser.error("top-p must be in (0, 1] and temperature must be positive")
+    if args.output.exists():
+        raise SystemExit(f"refusing to overwrite existing evidence: {args.output}")
+    if args.output.resolve().is_relative_to(ROOT):
+        raise SystemExit("raw evidence output must be outside the git checkout")
+    commit = git_output("rev-parse", "HEAD")
+    if commit != args.expected_commit:
+        raise SystemExit(
+            f"wrong checkout: expected {args.expected_commit}, observed {commit}"
+        )
+    git_status = git_output("status", "--short")
+    if git_status:
+        raise SystemExit(f"benchmark requires a clean checkout:\n{git_status}")
 
     started_at = datetime.now(UTC)
     torch.manual_seed(args.seed)
@@ -541,9 +563,9 @@ def main() -> None:
         "benchmark": "flashinfer_complete_topp_sampling_development",
         "started_at_utc": started_at.isoformat(),
         "finished_at_utc": finished_at.isoformat(),
-        "commit": git_output("rev-parse", "HEAD"),
+        "commit": commit,
         "branch": git_output("branch", "--show-current"),
-        "git_status": git_output("status", "--short"),
+        "git_status": git_status,
         "argv": sys.argv,
         "execution": {
             "cwd": str(Path.cwd()),
@@ -579,6 +601,11 @@ def main() -> None:
                 "flashinfer.sampling.top_p_sampling_from_probs",
             ],
             "top_p_deterministic_argument": True,
+        },
+        "source": {
+            "path": str(Path(__file__).resolve().relative_to(ROOT)),
+            "sha256": file_sha256(Path(__file__).resolve()),
+            "origin_url": git_output("remote", "get-url", "origin"),
         },
         "configuration": {
             "batch": args.batch,

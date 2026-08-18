@@ -181,6 +181,7 @@ FLASHINFER_WORKSPACE_BASE=/tmp/nv_flashinfer_cache \
   benchmarks/topp_performance/flashinfer_sampling_bench.py \
   --batch 256 --vocab 151936 --temperature 0.6 --top-p 0.9 \
   --warmups 5 --iterations 25 --statistical-draws 131072 \
+  --expected-commit "$(git rev-parse HEAD)" \
   --output \
   /workspace/.feat_bench/results/flashinfer_topp_sampling_b256_v151936.json
 ```
