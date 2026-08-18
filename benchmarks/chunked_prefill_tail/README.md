@@ -205,6 +205,15 @@ TORCHINDUCTOR_CACHE_DIR=/tmp/nv_chunk_decode_jitter \
 The default 4,096-token context permits up to 2,008 steps per batch. Use a new
 output path for every run; immutable evidence is never overwritten.
 
+The retained A100 run at `d9639fc` is archived under
+`evidence/2026-08-18-a100-decode-jitter-d9639fc/`. Eight of 2,000 API steps
+exceeded 10 ms. Seven kept runner CUDA below the corresponding profile p99 but
+had a greater-than-10 ms post-enqueue/`tokens.tolist()` API residual; one had a
+10.027 ms model CUDA span. Every stall row had zero context switches and thread
+CPU matched wall within 0.000209 ms, consistent with busy driver polling rather
+than descheduling. This intrusive result is attribution only: it neither
+certifies latency nor establishes a production regression or fix target.
+
 ## Reproducible commands
 
 First pin the exact committed source. `git status --porcelain` must print
