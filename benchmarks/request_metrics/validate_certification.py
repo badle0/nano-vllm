@@ -20,6 +20,11 @@ from certification_common import (
 )
 
 
+LOG_TOST_PAIR_COUNT = 8
+LOG_TOST_T_CRITICAL_90_DF7 = 1.894578605061305
+LOG_TOST_BOUNDS = (0.98, 1.02)
+
+
 def require_close(actual: float, expected: float, context: str) -> None:
     if not math.isclose(actual, expected, rel_tol=1e-11, abs_tol=1e-12):
         raise ValueError(f"{context}: {actual} != {expected}")
@@ -65,6 +70,65 @@ def recompute_pair(baseline: dict, repair: dict) -> dict:
             ),
         }
     return comparisons
+
+
+def paired_log_efficiency_tost90(efficiencies: list[float]) -> dict:
+    """Return the 90% Student-t CI used by a 5% two-one-sided equivalence test."""
+    if len(efficiencies) != LOG_TOST_PAIR_COUNT:
+        raise ValueError(
+            f"paired log-efficiency TOST requires {LOG_TOST_PAIR_COUNT} pairs"
+        )
+    if any(efficiency <= 0 for efficiency in efficiencies):
+        raise ValueError("efficiencies must be positive before log transformation")
+    log_efficiencies = [math.log(efficiency) for efficiency in efficiencies]
+    mean_log = statistics.mean(log_efficiencies)
+    sample_sd_log = statistics.stdev(log_efficiencies)
+    standard_error_log = sample_sd_log / math.sqrt(len(log_efficiencies))
+    half_width_log = LOG_TOST_T_CRITICAL_90_DF7 * standard_error_log
+    lower = math.exp(mean_log - half_width_log)
+    upper = math.exp(mean_log + half_width_log)
+    return {
+        "method": "paired log-efficiency Student-t 90% CI (TOST alpha=0.05)",
+        "pairs": len(efficiencies),
+        "degrees_of_freedom": len(efficiencies) - 1,
+        "t_critical": LOG_TOST_T_CRITICAL_90_DF7,
+        "equivalence_bounds": list(LOG_TOST_BOUNDS),
+        "median_efficiency": statistics.median(efficiencies),
+        "geometric_mean_efficiency": math.exp(mean_log),
+        "sample_sd_log_efficiency": sample_sd_log,
+        "standard_error_log_efficiency": standard_error_log,
+        "ci90_lower": lower,
+        "ci90_upper": upper,
+        "equivalence_gate_pass": (
+            lower >= LOG_TOST_BOUNDS[0] and upper <= LOG_TOST_BOUNDS[1]
+        ),
+    }
+
+
+def validate_archive_provenance(root: Path, statistics_result: dict) -> bool:
+    provenance_path = root / "archive_provenance.json"
+    if not provenance_path.exists():
+        return False
+    provenance = json.loads(provenance_path.read_text())
+    if provenance["copied_byte_for_byte"] is not True:
+        raise ValueError("archive does not declare byte-for-byte preservation")
+    files = provenance["files"]
+    if provenance["artifact_count"] != len(files) or len(files) != 17:
+        raise ValueError("archive provenance must cover exactly 17 run artifacts")
+    for relative_path, expected_digest in files.items():
+        path = (root / relative_path).resolve(strict=True)
+        if not path.is_relative_to(root):
+            raise ValueError("archived artifact escapes the archive directory")
+        if sha256_file(path) != expected_digest:
+            raise ValueError(f"archived artifact hash mismatch: {relative_path}")
+    if files.get("manifest.json") != provenance["source_manifest_sha256"]:
+        raise ValueError("source manifest hash and archived manifest hash differ")
+    require_nested_close(
+        statistics_result,
+        provenance["expected_statistics"],
+        "archive.expected_statistics",
+    )
+    return True
 
 
 def validate_run(payload: dict, pair: dict, side: str, source: dict, model: dict) -> None:
@@ -258,12 +322,33 @@ def validate_manifest(
             "individual_gate_pass": min(efficiencies) >= individual_floor,
         }
     require_nested_close(manifest["aggregate"], recomputed_aggregate, "aggregate")
-    gate_pass = all(
+    manifest_gate_pass = all(
         item["median_gate_pass"] and item["individual_gate_pass"]
         for item in recomputed_aggregate.values()
     )
-    if manifest["gate_pass"] != gate_pass:
+    if manifest["gate_pass"] != manifest_gate_pass:
         raise ValueError("stored aggregate gate result is incorrect")
+
+    equivalence = {}
+    if len(pair_runs) == LOG_TOST_PAIR_COUNT:
+        equivalence = {
+            key: paired_log_efficiency_tost90(
+                recomputed_aggregate[key]["pair_efficiencies"]
+            )
+            for key in case_names
+        }
+    statistics_result = {
+        key: {
+            "median_efficiency": recomputed_aggregate[key]["median_efficiency"],
+            "log_efficiency_tost90": equivalence[key],
+        }
+        for key in equivalence
+    }
+    equivalence_gate_pass = all(
+        result["equivalence_gate_pass"] for result in equivalence.values()
+    )
+    gate_pass = manifest_gate_pass and equivalence_gate_pass
+    archive_validated = validate_archive_provenance(root, statistics_result)
 
     if check_source:
         for side, expected in manifest["sources"].items():
@@ -279,6 +364,8 @@ def validate_manifest(
         "raw_files": len(pair_runs) * 2,
         "cases": len(case_names),
         "gate_pass": gate_pass,
+        "equivalence": equivalence,
+        "archive_validated": archive_validated,
     }
 
 
@@ -293,9 +380,17 @@ def main() -> None:
         check_source=args.check_source,
         check_model=args.check_model,
     )
+    for key, interval in result["equivalence"].items():
+        print(
+            f"{key}: median={interval['median_efficiency']:.9f}, "
+            f"log-TOST90=[{interval['ci90_lower']:.9f}, "
+            f"{interval['ci90_upper']:.9f}], "
+            f"equivalent={interval['equivalence_gate_pass']}"
+        )
     print(
         f"validated {result['raw_files']} raw files, {result['pairs']} balanced "
-        f"pairs, and {result['cases']} cases; gate_pass={result['gate_pass']}"
+        f"pairs, and {result['cases']} cases; archive={result['archive_validated']}; "
+        f"gate_pass={result['gate_pass']}"
     )
 
 

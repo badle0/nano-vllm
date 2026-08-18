@@ -20,6 +20,7 @@ from certification_common import (  # noqa: E402
     summarize_observations,
 )
 from validate_certification import (  # noqa: E402
+    paired_log_efficiency_tost90,
     recompute_pair,
     validate_manifest,
 )
@@ -187,6 +188,8 @@ def test_validator_recomputes_balanced_pairs_and_rejects_tampering(tmp_path):
         "raw_files": 4,
         "cases": 1,
         "gate_pass": True,
+        "equivalence": {},
+        "archive_validated": False,
     }
 
     raw_path = tmp_path / "pair1_baseline.json"
@@ -204,3 +207,15 @@ def test_exclusive_output_refuses_overwrite(tmp_path):
     exclusive_json_dump(output, {"value": 1})
     with pytest.raises(ValueError, match="refusing to overwrite"):
         exclusive_json_dump(output, {"value": 2})
+
+
+def test_paired_log_efficiency_tost90_gates_entire_interval():
+    equivalent = paired_log_efficiency_tost90([1.0] * 8)
+    assert equivalent["ci90_lower"] == pytest.approx(1.0)
+    assert equivalent["ci90_upper"] == pytest.approx(1.0)
+    assert equivalent["equivalence_gate_pass"] is True
+
+    outside = paired_log_efficiency_tost90([1.03] * 8)
+    assert outside["ci90_lower"] == pytest.approx(1.03)
+    assert outside["ci90_upper"] == pytest.approx(1.03)
+    assert outside["equivalence_gate_pass"] is False

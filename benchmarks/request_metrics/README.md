@@ -126,3 +126,7 @@ For long-output host-list scaling, use a separate fresh output directory and a
 smaller batch set, for example `--batches 1,64 --output-lengths 32,256,2048`.
 That separate probe must also set `--max-model-len 4096`. The runner deliberately
 refuses to reuse an existing directory, including one left by an interrupted run.
+
+The completed A100 certification is archived byte-for-byte under
+`certification/2026-08-18-a100-b3efbdb/`, including all 16 raw process outputs,
+the original manifest, recomputed equivalence statistics, and file hashes.
