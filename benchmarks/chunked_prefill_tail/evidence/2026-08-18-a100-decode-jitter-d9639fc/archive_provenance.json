@@ -1,0 +1,38 @@
+{
+  "schema_version": 1,
+  "kind": "chunked_prefill_decode_jitter_repository_archive",
+  "classification": "intrusive_diagnostic_only_non_certifying",
+  "copied_byte_for_byte": true,
+  "artifact": {
+    "archive_path": "decode_jitter_tau256_seed20260836_d9639fc.json",
+    "original_path": "/workspace/.feat_bench/chunk-tail/decode_jitter_tau256_seed20260836_d9639fc.json",
+    "bytes": 5571547,
+    "original_mode": "0444",
+    "sha256": "6e8236dfb68c4ab42047c39ade251bad27d0697d2767d8bac215abd57092de79"
+  },
+  "source_run": {
+    "commit": "d9639fc5604f88069edbf0c36e71d0f0c83b3c91",
+    "tree": "c98567308092051083d248edb5cc0a5d84c01069",
+    "source_sha256": "5b2a4946700b72a0e1472f8dc21410cd7477396f6c975a8c86a9311d44b7b55e",
+    "model_sha256": "0c659d1dba2804b0943c24bbece1858e93273147f7a11693fa99062df8c5997b",
+    "started_at_utc": "2026-08-18T13:43:21.064721+00:00",
+    "completed_at_utc": "2026-08-18T13:43:48.836715+00:00",
+    "gpu": "NVIDIA A100-SXM4-40GB",
+    "seed": 20260836,
+    "tau": 256,
+    "steps_per_batch": 1000,
+    "batch_sizes": [
+      16,
+      18
+    ]
+  },
+  "result": {
+    "api_wall_threshold_ms_strictly_greater_than": 10.0,
+    "stall_count": 8,
+    "normal_runner_cuda_post_enqueue_sync_residual_count": 7,
+    "model_cuda_spike_count": 1,
+    "stall_api_context_switch_count": 0,
+    "latency_certified": false,
+    "production_performance_claim": false
+  }
+}
