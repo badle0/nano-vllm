@@ -1,0 +1,70 @@
+{
+  "artifact_count": 17,
+  "collection_repair_commit": "b3efbdba905aa8006f8f586204edf19bd5670186",
+  "copied_byte_for_byte": true,
+  "copied_utc": "2026-08-18T12:02:52Z",
+  "expected_statistics": {
+    "b256_o32": {
+      "log_efficiency_tost90": {
+        "ci90_lower": 0.9964147345152693,
+        "ci90_upper": 1.0014303716714061,
+        "degrees_of_freedom": 7,
+        "equivalence_bounds": [
+          0.98,
+          1.02
+        ],
+        "equivalence_gate_pass": true,
+        "geometric_mean_efficiency": 0.998919405119598,
+        "median_efficiency": 0.9982724689115456,
+        "method": "paired log-efficiency Student-t 90% CI (TOST alpha=0.05)",
+        "pairs": 8,
+        "sample_sd_log_efficiency": 0.0037479826700487547,
+        "standard_error_log_efficiency": 0.0013251119808805683,
+        "t_critical": 1.894578605061305
+      },
+      "median_efficiency": 0.9982724689115456
+    },
+    "b64_o32": {
+      "log_efficiency_tost90": {
+        "ci90_lower": 0.989955166725619,
+        "ci90_upper": 1.0026484328648761,
+        "degrees_of_freedom": 7,
+        "equivalence_bounds": [
+          0.98,
+          1.02
+        ],
+        "equivalence_gate_pass": true,
+        "geometric_mean_efficiency": 0.9962815849567476,
+        "median_efficiency": 0.9979708826205353,
+        "method": "paired log-efficiency Student-t 90% CI (TOST alpha=0.05)",
+        "pairs": 8,
+        "sample_sd_log_efficiency": 0.009510223313050481,
+        "standard_error_log_efficiency": 0.0033623716976281946,
+        "t_critical": 1.894578605061305
+      },
+      "median_efficiency": 0.9979708826205353
+    }
+  },
+  "files": {
+    "manifest.json": "5fac7dc227ee86a8aee9e845ca8d928d10c83731fe2d5bc12e228444fab196d9",
+    "pair01_pos1_baseline.json": "03962e61d87a0397dc799078cd827cc43248a7c108e9f3bfda3ebe1315697ab4",
+    "pair01_pos2_repair.json": "edc8d73be22377eaa39ed041ae1cd88b9e78eec9500a5c0627ce20e70667f1fe",
+    "pair02_pos1_repair.json": "f27ed92bede9fb15035dd0a36b344ec7797abc3536432dc88deb3aa41767e12c",
+    "pair02_pos2_baseline.json": "261f7a6661712bad9c3f0896d3b2637327d727c3445af33dff75eca79b958763",
+    "pair03_pos1_baseline.json": "b88d5500f400edbeb6cde15a90cf2b9558995cd016a1cc122b91ecd617df989f",
+    "pair03_pos2_repair.json": "2b5b42be8f0963a30cb9ee9c9cf81e85f5297131fd506e97e5b79373960379ae",
+    "pair04_pos1_repair.json": "2345a178ce52102d04a6008718806f087b78547c2df50694b6b805a718d3ec3c",
+    "pair04_pos2_baseline.json": "7298b0124694f3db707d8744c8a823aa2acc8a7e074ccb79a11fa719ddb24acb",
+    "pair05_pos1_baseline.json": "4df95b81c3809f60850c767f61cd894dd33098e9e34cf4b06add068d15b84498",
+    "pair05_pos2_repair.json": "ccb72729b22083b86d586afa3cd25c8eadf584a1b8223e1255a200c431955a2f",
+    "pair06_pos1_repair.json": "c8ba9d67f2d0bb6a1df53990e95eff537c5386e8be917a78025fac1ea2a4a077",
+    "pair06_pos2_baseline.json": "f7342bea5306dc57dc0054f5d712829c4577680178409c39333e9e794021b0d5",
+    "pair07_pos1_baseline.json": "73c042acaf183ef3874ff8315dc7bd6d440a86d380b664bad326fa1d543ba2f9",
+    "pair07_pos2_repair.json": "042ddad2cf5683bcd033fe1d9b0dec680aa865f141517f85efe77efbf47f5dfd",
+    "pair08_pos1_repair.json": "7a61ce67b95ff540b10d8e0ebf41d00d85d7103ad96db46a4c98626134ae52c0",
+    "pair08_pos2_baseline.json": "6d6dc722c519083d37934fdff8dadd90ec82912294a0338769a8fd8ac8c6bd6c"
+  },
+  "schema_version": 1,
+  "source_directory": "/workspace/.feat_bench/results/metrics-cert-b3efbdb-a100-20260818",
+  "source_manifest_sha256": "5fac7dc227ee86a8aee9e845ca8d928d10c83731fe2d5bc12e228444fab196d9"
+}

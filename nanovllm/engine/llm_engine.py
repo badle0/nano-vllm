@@ -18,6 +18,7 @@ from nanovllm.engine.sequence import Sequence, StreamOutput
 from nanovllm.engine.scheduler import Scheduler
 from nanovllm.engine.model_runner import ModelRunner
 from nanovllm.metrics import compute_metrics
+from nanovllm.layers.sampler import require_flashinfer_sampling
 
 class StepOutput(NamedTuple):
     events: list[StreamOutput]
@@ -149,6 +150,8 @@ class LLMEngine:
         config_fields = {field.name for field in fields(Config)}
         config_kwargs = {k: v for k, v in kwargs.items() if k in config_fields}
         config = Config(model, **config_kwargs)
+        if config.top_p_backend == "flashinfer":
+            require_flashinfer_sampling()
         Sequence.block_size = config.kvcache_block_size
         self.ps = []
         self.events = []
