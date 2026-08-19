@@ -90,6 +90,38 @@ def test_length_changing_rewrite_remains_exact_across_window_shifts():
     assert rendered == tokenizer.decode(token_ids)
 
 
+class NonSplittableTokenizer:
+
+    def decode(self, token_ids):
+        return f"<{','.join(str(token_id) for token_id in token_ids)}>"
+
+
+def test_overlap_exhaustion_fails_before_admitting_token_and_can_flush_exactly():
+    tokenizer = NonSplittableTokenizer()
+    window_size = 4
+    boundary_overlap = 2
+    hard_limit = window_size + 2 * boundary_overlap
+    detokenizer = StreamingDetokenizer(
+        tokenizer,
+        window_size=window_size,
+        boundary_overlap=boundary_overlap,
+    )
+    rendered = ""
+    for token_id in range(hard_limit):
+        rendered = detokenizer.feed(0, token_id).apply(rendered)
+        assert rendered == tokenizer.decode(list(range(token_id + 1)))
+
+    with pytest.raises(RuntimeError, match="exceeded.*boundary overlap"):
+        detokenizer.feed(0, hard_limit)
+
+    state = detokenizer._states[0]
+    assert state.token_ids == list(range(hard_limit))
+    final = detokenizer.flush(0)
+    assert final.final
+    assert final.apply(rendered) == tokenizer.decode(list(range(hard_limit)))
+    assert detokenizer._states == {}
+
+
 class FragmentTokenizer:
 
     def decode(self, token_ids):

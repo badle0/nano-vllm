@@ -1,0 +1,37 @@
+{
+  "created_at_utc": "2026-08-18T13:17:55.768358+00:00",
+  "files": [
+    {
+      "bytes": 255150,
+      "path": "runs/run-01-seed20260831.json",
+      "sha256": "b589426bd51fb1f59f4d478b643bdd93c5c74ba89a42def8273049f2488b55e5"
+    },
+    {
+      "bytes": 256488,
+      "path": "runs/run-02-seed20260832.json",
+      "sha256": "26fda42aa340900714838f0a38512ecf44afe5c9f0b37480826ae3869b0695b8"
+    },
+    {
+      "bytes": 255567,
+      "path": "runs/run-03-seed20260833.json",
+      "sha256": "2d14b0169efd6d283052bfaf4ec6033a6b39bacec4baff03d72829a82506a198"
+    },
+    {
+      "bytes": 255501,
+      "path": "runs/run-04-seed20260834.json",
+      "sha256": "9272c5cc6ac61a44d8cf99283a18e7ce811835e5d27f719dac02eda2341c361a"
+    },
+    {
+      "bytes": 256404,
+      "path": "runs/run-05-seed20260835.json",
+      "sha256": "9477475ab3f19df7196aaa457c1f90b9b05702538b8bcb3146481d29c35974d0"
+    },
+    {
+      "bytes": 23246,
+      "path": "aggregate.json",
+      "sha256": "96cbd5c79b004fe86592877bb4e10cb70e510bb7a9c6591acfb762ed74f16df1"
+    }
+  ],
+  "kind": "chunked_prefill_certification_archive",
+  "schema_version": 1
+}

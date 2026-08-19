@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import atexit
+import gc
 from collections import deque
 from collections.abc import Iterator
 from dataclasses import fields
-from threading import Lock
+from threading import Event, Lock
 from time import perf_counter
 from typing import NamedTuple
 
@@ -18,6 +19,59 @@ from nanovllm.engine.sequence import Sequence, StreamOutput
 from nanovllm.engine.scheduler import Scheduler
 from nanovllm.engine.model_runner import ModelRunner
 from nanovllm.metrics import compute_metrics
+from nanovllm.layers.sampler import require_flashinfer_sampling
+
+
+_PYTHON_GC_LEASE_LOCK = Lock()
+_PYTHON_GC_LEASE_COUNT = 0
+_PYTHON_GC_PRE_FIRST_ENABLED: bool | None = None
+
+
+def _acquire_python_gc_lease() -> bool:
+    """Disable cyclic GC and return the state before the first active lease."""
+    global _PYTHON_GC_LEASE_COUNT, _PYTHON_GC_PRE_FIRST_ENABLED
+    with _PYTHON_GC_LEASE_LOCK:
+        first = _PYTHON_GC_LEASE_COUNT == 0
+        if first:
+            _PYTHON_GC_PRE_FIRST_ENABLED = gc.isenabled()
+        try:
+            # Reassert the lease invariant on overlapping acquisition in case
+            # unrelated process code changed the global setting.
+            gc.disable()
+        except BaseException:
+            if first:
+                restore_enabled = _PYTHON_GC_PRE_FIRST_ENABLED
+                _PYTHON_GC_PRE_FIRST_ENABLED = None
+                if restore_enabled:
+                    gc.enable()
+                else:
+                    gc.disable()
+            raise
+        if _PYTHON_GC_PRE_FIRST_ENABLED is None:
+            raise RuntimeError("Python GC lease baseline is missing")
+        _PYTHON_GC_LEASE_COUNT += 1
+        return _PYTHON_GC_PRE_FIRST_ENABLED
+
+
+def _release_python_gc_lease() -> None:
+    """Release one lease and restore pre-first state after the final owner."""
+    global _PYTHON_GC_LEASE_COUNT, _PYTHON_GC_PRE_FIRST_ENABLED
+    with _PYTHON_GC_LEASE_LOCK:
+        if _PYTHON_GC_LEASE_COUNT <= 0:
+            raise RuntimeError("Python GC lease underflow")
+        _PYTHON_GC_LEASE_COUNT -= 1
+        if _PYTHON_GC_LEASE_COUNT:
+            gc.disable()
+            return
+        restore_enabled = _PYTHON_GC_PRE_FIRST_ENABLED
+        _PYTHON_GC_PRE_FIRST_ENABLED = None
+        if restore_enabled is None:
+            raise RuntimeError("Python GC lease baseline is missing")
+        if restore_enabled:
+            gc.enable()
+        else:
+            gc.disable()
+
 
 class StepOutput(NamedTuple):
     events: list[StreamOutput]
@@ -146,13 +200,26 @@ class StreamSession(Iterator[StreamOutput]):
 class LLMEngine:
 
     def __init__(self, model, *, _clock=None, **kwargs):
+        # GC is process-global, so it is touched only after every fallible
+        # initialization step succeeds. None means this engine does not own a
+        # GC-state restoration obligation.
+        self._python_gc_was_enabled: bool | None = None
+        self._python_gc_lease_active = False
+        self._exit_started = False
+        self._exit_lock = Lock()
+        self._exit_complete = Event()
+        self._atexit_callback = None
+        self._atexit_registered = False
+        self.model_runner = None
+        self.ps = []
+        self.events = []
         self._clock = perf_counter if _clock is None else _clock
         config_fields = {field.name for field in fields(Config)}
         config_kwargs = {k: v for k, v in kwargs.items() if k in config_fields}
         config = Config(model, **config_kwargs)
+        if config.top_p_backend == "flashinfer":
+            require_flashinfer_sampling()
         Sequence.block_size = config.kvcache_block_size
-        self.ps = []
-        self.events = []
         ctx = mp.get_context("spawn")
         for i in range(1, config.tensor_parallel_size):
             event = ctx.Event()
@@ -166,13 +233,91 @@ class LLMEngine:
         self.scheduler = Scheduler(config, clock=self._clock)
         self._session_lock = Lock()
         self._active_session: tuple[object, str] | None = None
-        atexit.register(self.exit)
+        self._atexit_callback = self.exit
+
+        # Only the post-init registration/lease phase is transactional. In
+        # particular, do not join a spawned TP worker before rank 0 exists to
+        # signal its loop; the GC option rejects TP and is acquired below.
+        try:
+            atexit.register(self._atexit_callback)
+            self._atexit_registered = True
+            if config.disable_python_gc:
+                lease_acquired = False
+                try:
+                    baseline = _acquire_python_gc_lease()
+                    lease_acquired = True
+                    self._python_gc_was_enabled = baseline
+                    self._python_gc_lease_active = True
+                except BaseException:
+                    if lease_acquired:
+                        _release_python_gc_lease()
+                        self._python_gc_was_enabled = None
+                    raise
+        except BaseException:
+            # Rank 0 is fully initialized here, so exit can safely signal every
+            # worker, release a partial lease, and unregister the callback.
+            try:
+                self.exit()
+            except BaseException:
+                pass
+            raise
 
     def exit(self):
-        self.model_runner.call("exit")
-        del self.model_runner
-        for p in self.ps:
-            p.join()
+        # Explicit exit and the registered atexit callback can both run. Claim
+        # cleanup once so model/process teardown and GC restoration are
+        # idempotent even when exit is called repeatedly or concurrently.
+        with self._exit_lock:
+            if self._exit_started:
+                owns_cleanup = False
+            else:
+                self._exit_started = True
+                owns_cleanup = True
+        if not owns_cleanup:
+            self._exit_complete.wait()
+            return
+
+        first_error = None
+        try:
+            runner = getattr(self, "model_runner", None)
+            if runner is not None:
+                try:
+                    runner.call("exit")
+                except BaseException as error:
+                    first_error = error
+                finally:
+                    self.model_runner = None
+            for process in self.ps:
+                try:
+                    process.join()
+                except BaseException as error:
+                    if first_error is None:
+                        first_error = error
+        finally:
+            try:
+                self._restore_python_gc()
+            except BaseException as error:
+                if first_error is None:
+                    first_error = error
+            try:
+                if self._atexit_registered:
+                    atexit.unregister(self._atexit_callback)
+                    self._atexit_registered = False
+            except BaseException as error:
+                if first_error is None:
+                    first_error = error
+            finally:
+                self._exit_complete.set()
+        if first_error is not None:
+            raise first_error
+
+    def _restore_python_gc(self):
+        if not self._python_gc_lease_active:
+            return
+        self._python_gc_lease_active = False
+        try:
+            _release_python_gc_lease()
+        finally:
+            self._python_gc_was_enabled = None
 
     @staticmethod
     def _normalize_batch(
