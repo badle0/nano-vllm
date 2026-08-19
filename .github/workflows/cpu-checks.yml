@@ -1,0 +1,53 @@
+name: CPU checks
+
+on:
+  pull_request:
+    branches:
+      - fork-main
+  push:
+    branches:
+      - fork-main
+
+permissions:
+  contents: read
+
+jobs:
+  syntax-and-evidence:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Check Python syntax
+        run: python -m compileall -q nanovllm benchmarks tests
+
+      - name: Validate historical request-metrics provenance
+        run: python benchmarks/request_metrics/validate_provenance.py
+
+      - name: Validate request-metrics certificate
+        run: >-
+          python benchmarks/request_metrics/validate_certification.py
+          benchmarks/request_metrics/certification/2026-08-18-a100-b3efbdb/manifest.json
+
+      - name: Validate sampling evidence
+        run: python benchmarks/sampling_evidence/validate_provenance.py
+
+      - name: Validate top-p evidence
+        run: python benchmarks/topp_performance/evidence/validate_provenance.py
+
+      - name: Validate streaming certificate
+        run: python benchmarks/pr5_scripts/validate_repaired_stream_certificate.py
+
+      - name: Validate retained chunk evidence
+        run: >-
+          python benchmarks/chunked_prefill_tail/validate_retained_evidence.py
+          benchmarks/chunked_prefill_tail/evidence/2026-08-18-a100-contract-phase-e50e732
+          benchmarks/chunked_prefill_tail/evidence/2026-08-18-a100-full-completion-ba1bde4
+
+
+

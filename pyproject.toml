@@ -1,10 +1,10 @@
-[build-system]
+version = "0.3.0rc1"[build-system]
 requires = ["setuptools>=61"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "nano-vllm"
-version = "0.2.0"
+version = "0.3.0rc1"
 authors = [{ name = "Xingkai Yu" }]
 license = "MIT"
 license-files = ["LICENSE"]
@@ -27,7 +27,9 @@ fast-sampling = [
 ]
 
 [project.urls]
-Homepage="https://github.com/GeeeekExplorer/nano-vllm"
+Homepage = "https://github.com/badle0/nano-vllm"
+Upstream = "https://github.com/GeeeekExplorer/nano-vllm"
+Issues = "https://github.com/badle0/nano-vllm/issues"
 
 [tool.setuptools.packages.find]
 where = ["."]
