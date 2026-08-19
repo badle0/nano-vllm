@@ -1,4 +1,5 @@
 import dataclasses
+import builtins
 import importlib.util
 import math
 import pathlib
@@ -19,6 +20,74 @@ _sp = pathlib.Path(__file__).resolve().parents[1] / "nanovllm/layers/sampler.py"
 _ss = importlib.util.spec_from_file_location("sampler", _sp)
 _sm = importlib.util.module_from_spec(_ss); _ss.loader.exec_module(_sm)
 Sampler = _sm.Sampler
+
+
+def test_flashinfer_backend_reports_missing_optional_dependency(monkeypatch):
+    real_import = builtins.__import__
+
+    def import_without_flashinfer(name, *args, **kwargs):
+        if name == "flashinfer":
+            raise ModuleNotFoundError("No module named 'flashinfer'")
+        return real_import(name, *args, **kwargs)
+
+    _sm._load_flashinfer_sampling.cache_clear()
+    monkeypatch.setattr(builtins, "__import__", import_without_flashinfer)
+
+    with pytest.raises(RuntimeError, match="fast-sampling"):
+        _sm._load_flashinfer_sampling()
+
+
+def test_flashinfer_backend_routes_mixed_greedy_rows(monkeypatch):
+    observed = {}
+
+    class FakeSampling:
+        @staticmethod
+        def softmax(logits, temperature):
+            observed["temperature"] = temperature.clone()
+            return torch.softmax(logits.float() / temperature[:, None], dim=-1)
+
+        @staticmethod
+        def top_p_sampling_from_probs(probs, top_ps, deterministic):
+            observed["top_ps"] = top_ps.clone()
+            observed["deterministic"] = deterministic
+            return torch.tensor([3, 0], dtype=torch.int32)
+
+    monkeypatch.setattr(_sm, "_load_flashinfer_sampling", lambda: FakeSampling)
+    logits = torch.tensor([[1.0, 5.0, 2.0, 4.0], [4.0, 1.0, 0.0, 2.0]])
+    temperatures = torch.tensor([0.0, 0.6])
+    top_ps = torch.tensor([1.0, 0.9])
+
+    tokens = Sampler().sample_top_p_flashinfer(logits, temperatures, top_ps)
+
+    assert tokens.tolist() == [1, 0]
+    assert observed["temperature"].tolist() == pytest.approx([1e-10, 0.6])
+    assert torch.equal(observed["top_ps"], top_ps)
+    assert observed["deterministic"] is True
+
+
+@pytest.mark.skipif(
+    not torch.cuda.is_available()
+    or importlib.util.find_spec("flashinfer") is None,
+    reason="CUDA and the optional FlashInfer package are required",
+)
+def test_flashinfer_backend_actual_api_repeats_for_the_same_seed():
+    _sm._load_flashinfer_sampling.cache_clear()
+    logits = torch.randn(4, 8192, dtype=torch.bfloat16, device="cuda")
+    temperatures = torch.tensor([0.0, 0.6, 0.8, 1.0], device="cuda")
+    top_ps = torch.tensor([1.0, 0.9, 0.8, 1.0], device="cuda")
+    sampler = Sampler().cuda()
+
+    torch.cuda.manual_seed(20260827)
+    first = sampler.sample_top_p_flashinfer(logits, temperatures, top_ps)
+    first_state = torch.cuda.get_rng_state().clone()
+    torch.cuda.manual_seed(20260827)
+    second = sampler.sample_top_p_flashinfer(logits, temperatures, top_ps)
+    second_state = torch.cuda.get_rng_state().clone()
+
+    assert torch.equal(first, second)
+    assert torch.equal(first_state, second_state)
+    assert first[0] == logits[0].argmax()
+    assert ((first >= 0) & (first < logits.size(1))).all()
 
 def _filter_top_k(logits, *buckets):
     sampler = Sampler()

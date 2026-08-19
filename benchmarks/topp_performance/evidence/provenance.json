@@ -1,0 +1,377 @@
+{
+  "artifact_kind": "fast_top_p_sampling_release_evidence",
+  "code_under_test": {
+    "exact_top_p_parent": "42affe47b3a97bb0ef2470f31c1e8b311cbc7a21",
+    "optional_backend_implementation": "0e3d9ee9f7c1869a86d752f3969c48b082ef021c",
+    "micro_commit": "04f095f074ed3bfb171d6bead0175f195074f971",
+    "e2e_commit": "b68f1913e46c96987d873f3405883396de4f119f",
+    "note": "The production source is unchanged after 0e3d9ee; later commits add and harden benchmark/provenance files."
+  },
+  "contract": {
+    "default_backend": "exact",
+    "exact": "Audited Transformers 5.14.1 ascending-sort support and nano-vLLM full-vocabulary exponential fixed-seed stream.",
+    "flashinfer": "Opt-in mathematical/distributional top-p sampling, deterministic within the pinned FlashInfer runtime but with different boundary-tie support, token identities, and Philox consumption.",
+    "not_claimed": [
+      "Fixed-seed token equivalence between backends",
+      "Identical CUDA RNG state after the two backends",
+      "Transformers boundary-tie identity for the FlashInfer backend",
+      "Tensor-parallel two-GPU certification"
+    ]
+  },
+  "dependency_provenance": {
+    "flashinfer": "0.6.17",
+    "flashinfer_source_commit": "a0a6b019b9b27d49d209f85d028a1ae5a9b347d7",
+    "license": "Apache-2.0",
+    "benchmark_installation": "Isolated --no-deps target at /tmp/nv_flashinfer_proto_nodeps; CUDA-Python distribution absent and embedded as null in every E2E result.",
+    "project_extra": "flashinfer-python==0.6.17, torch>=2.10,<2.11, cuda-python>=12,<13",
+    "resolver_check": "A post-implementation dry run in the validated environment retained Torch 2.10.0+cu128, Triton 3.6.0, and FlashAttention 2.8.1. This resolver observation is not embedded benchmark metadata."
+  },
+  "environment": {
+    "e2e_embedded": {
+      "compute_capability": [8, 0],
+      "cuda_build": "12.8",
+      "cuda_python": null,
+      "flash_attn": "2.8.1",
+      "flashinfer_python": "0.6.17",
+      "gpu": "NVIDIA A100-SXM4-40GB",
+      "gpu_total_memory_bytes": 42406903808,
+      "gpu_uuid": "GPU-0dd9d697-b14a-affe-e840-ce58e73c8c4c",
+      "kernel": "5.15.0-1079-nvidia",
+      "nvidia_driver": "570.133.20",
+      "platform": "Linux-5.15.0-1079-nvidia-x86_64-with-glibc2.39",
+      "python": "3.12.13",
+      "torch": "2.10.0+cu128",
+      "transformers": "5.14.1",
+      "triton": "3.6.0"
+    }
+  },
+  "harnesses": [
+    {
+      "path": "benchmarks/topp_performance/flashinfer_sampling_bench.py",
+      "sha256": "17330f81c651db9b8d0f1b77ed55fa513b4c24eb48f4bc4d943fed113933d14a"
+    },
+    {
+      "path": "benchmarks/topp_performance/flashinfer_e2e_bench.py",
+      "sha256": "2a39bc8d7aae432b60f06ff97f924b9ae22251c582542fb44a6951ff972f69c4"
+    }
+  ],
+  "model": {
+    "embedded_fingerprint": {
+      "resolved_path": "/workspace/models/Qwen3-0.6B",
+      "files": [
+        {
+          "path": "config.json",
+          "bytes": 726,
+          "sha256": "660db3b73d788119c04535e48cf9be5f55bc3100841a718637ae695b442f27dd"
+        },
+        {
+          "path": "generation_config.json",
+          "bytes": 239,
+          "sha256": "2325da0f15bb848e018c5ae071b7943332e9f871d6b60e2ed22ca97d4cb993d2"
+        },
+        {
+          "path": "tokenizer.json",
+          "bytes": 11422654,
+          "sha256": "aeb13307a71acd8fe81861d94ad54ab689df773318809eed3cbe794b4492dae4"
+        },
+        {
+          "path": "tokenizer_config.json",
+          "bytes": 9732,
+          "sha256": "d5d09f07b48c3086c508b30d1c9114bd1189145b74e982a265350c923acd8101"
+        },
+        {
+          "path": "model.safetensors",
+          "bytes": 1503300328,
+          "sha256": "f47f71177f32bcd101b7573ec9171e6a57f4f4d31148d38e382306f42996874b"
+        }
+      ]
+    }
+  },
+  "protocol": {
+    "micro": {
+      "batch": 256,
+      "dtype": "bfloat16",
+      "iterations": 25,
+      "seed": 20260826,
+      "statistical_draws": 131072,
+      "temperature": 0.6,
+      "temperature_argument_kind": "per-row float32 tensor",
+      "top_p": 0.9,
+      "top_p_argument_kind": "per-row float32 tensor",
+      "vocab": 151936,
+      "warmups": 5
+    },
+    "e2e": {
+      "fresh_process_pairs": 8,
+      "pair_is_statistical_unit": true,
+      "mirrored_seed_pairs": [[1, 2], [3, 4], [5, 6], [7, 8]],
+      "chronological_run_labels": [
+        "p01_first_exact",
+        "p01_second_flashinfer",
+        "p02_first_flashinfer",
+        "p02_second_exact",
+        "p03_first_flashinfer",
+        "p03_second_exact",
+        "p04_first_exact",
+        "p04_second_flashinfer",
+        "p05_first_exact",
+        "p05_second_flashinfer",
+        "p06_first_flashinfer",
+        "p06_second_exact",
+        "p07_first_flashinfer",
+        "p07_second_exact",
+        "p08_first_exact",
+        "p08_second_flashinfer"
+      ],
+      "configuration": {
+        "batch": 256,
+        "blocks_per_sequence_at_max_output": 1,
+        "cuda_graphs": true,
+        "effective_max_model_len": 1024,
+        "effective_num_kvcache_blocks": 1076,
+        "first_observation_classification": "shape-cold after engine and sampler JIT warmup",
+        "gpu_memory_utilization": 0.8,
+        "ignore_eos": true,
+        "kvcache_block_size": 256,
+        "max_model_len": 1024,
+        "max_num_seqs": 256,
+        "model": "/workspace/models/Qwen3-0.6B",
+        "model_vocab_size": 151936,
+        "output_tokens": 32,
+        "preemption_excluded_by_capacity": true,
+        "prompt_tokens": 128,
+        "prompts_distinct_across_repetitions": true,
+        "repetitions": 6,
+        "required_peak_blocks_no_sharing": 256,
+        "shape_cold_observations_excluded": 1,
+        "temperature": 0.6,
+        "top_p": 0.9
+      },
+      "interpretation": "Each fresh process contains six runs; run zero is excluded as shape-cold. The median of the five steady runs gives one backend observation, and the FlashInfer/exact ratio within each fresh-process pair is one process-pair timing replicate. Scope is warmed TP1 on one A100/Qwen3-0.6B/B256/p=0.9/temperature=0.6; backend token trajectories differ."
+    }
+  },
+  "release_results": {
+    "micro": {
+      "acceptance": {
+        "maximum_median_cuda_ms": 1.6,
+        "maximum_observed_cuda_ms": 1.2953599691390991,
+        "maximum_allowed_observed_cuda_ms": 1.6,
+        "passes": true
+      },
+      "routes": {
+        "current_exact_complete": {
+          "median_cuda_ms": 11.64902400970459,
+          "p95_cuda_ms": 11.815936088562012,
+          "peak_transient_allocated_mib": 616.9599609375
+        },
+        "flashinfer_direct_primitive": {
+          "median_cuda_ms": 0.9123839735984802,
+          "p95_cuda_ms": 0.9707520008087158,
+          "peak_transient_allocated_mib": 296.75
+        },
+        "flashinfer_production_complete": {
+          "median_cuda_ms": 1.0168319940567017,
+          "p95_cuda_ms": 1.0670080184936523,
+          "peak_transient_allocated_mib": 296.7529296875
+        }
+      },
+      "exact_over_production_speedup": 11.456193429978763,
+      "timing_order": [
+        "current_exact_complete",
+        "flashinfer_direct_primitive",
+        "flashinfer_production_complete"
+      ],
+      "ratio_caveat": "Sequential route timing and a late exact-route shift make 11.46x descriptive; all 25 production-wrapper samples independently remained below 1.6 ms.",
+      "same_seed_repeatable_within_flashinfer": true,
+      "exact_vs_flashinfer_fixed_seed_differing_tokens": 256,
+      "unique_logit_statistical_sanity_pass": true
+    },
+    "e2e": {
+      "pair_ratios": [
+        1.5915238138710328,
+        1.6159706423991318,
+        1.578040623413508,
+        1.6012706882842969,
+        1.5917904692077538,
+        1.603999747230955,
+        1.5980599169589096,
+        1.5931926068417432
+      ],
+      "derived": {
+        "median_pair_ratio": 1.5956262619003265,
+        "median_pair_gain_percent": 59.56262619003265,
+        "mean_pair_ratio": 1.5967310635259164,
+        "mean_pair_gain_percent": 59.673106352591645,
+        "sample_sd_pair_ratio": 0.011076018823837953,
+        "minimum_pair_ratio": 1.578040623413508,
+        "maximum_pair_ratio": 1.6159706423991318,
+        "exact_first_median_ratio": 1.5924915380247486,
+        "flashinfer_first_median_ratio": 1.6010298320949323,
+        "exact_process_median_tps": 10731.92230971655,
+        "flashinfer_process_median_tps": 17107.319668778648,
+        "mean_ratio_t95_low": 1.5874712800631448,
+        "mean_ratio_t95_high": 1.605990846988688,
+        "ratio_of_process_median_throughputs": 1.5940592165198486
+      },
+      "mean_ratio_t95": {
+        "method": "Two-sided Student t interval over eight fresh-process pair ratios",
+        "degrees_of_freedom": 7,
+        "t_critical_df7": 2.364624251,
+        "interpretation": "A descriptive interval treating eight fresh-process ratios as units. Four prompt seeds are mirrored in opposite order, so this is not an eight-corpus-sample or universal model/hardware guarantee."
+      },
+      "all_pairs_improved": true,
+      "mirrored_token_and_rng_digests_repeat_within_each_backend": true
+    }
+  },
+  "micro_artifact": {
+    "path": "benchmarks/topp_performance/evidence/raw/micro/flashinfer_wrapper_b256_v151936.json",
+    "sha256": "3bbdeaced3058005864ffbec46738b88bee68174783a8b5a5e6642acf09f5679",
+    "commit": "04f095f074ed3bfb171d6bead0175f195074f971"
+  },
+  "e2e_artifacts": [
+    {
+      "path": "benchmarks/topp_performance/evidence/raw/e2e/p01_first_exact.json",
+      "sha256": "f8a216ae344c27fd24162b9671dbb57ba5ea90ef62d5303e81bbfb21a1e4a07e",
+      "pair_id": 1,
+      "backend": "exact",
+      "pair_order": "exact-flashinfer",
+      "position": "first",
+      "seed": 2026081801
+    },
+    {
+      "path": "benchmarks/topp_performance/evidence/raw/e2e/p01_second_flashinfer.json",
+      "sha256": "592a062a04db72664276d243f1b159723766a5bb4661e027a6918163d5bffbf1",
+      "pair_id": 1,
+      "backend": "flashinfer",
+      "pair_order": "exact-flashinfer",
+      "position": "second",
+      "seed": 2026081801
+    },
+    {
+      "path": "benchmarks/topp_performance/evidence/raw/e2e/p02_first_flashinfer.json",
+      "sha256": "77b69f9c3b5ed4706fb4128db641ab0664962d43d9628320e6d8a3eba0c7b6ce",
+      "pair_id": 2,
+      "backend": "flashinfer",
+      "pair_order": "flashinfer-exact",
+      "position": "first",
+      "seed": 2026081801
+    },
+    {
+      "path": "benchmarks/topp_performance/evidence/raw/e2e/p02_second_exact.json",
+      "sha256": "82d7e4fb58c9f9f1b218ffad435ee3f18324771c527ef5c32e3e4a1111d27f58",
+      "pair_id": 2,
+      "backend": "exact",
+      "pair_order": "flashinfer-exact",
+      "position": "second",
+      "seed": 2026081801
+    },
+    {
+      "path": "benchmarks/topp_performance/evidence/raw/e2e/p03_first_flashinfer.json",
+      "sha256": "ba2b7ca1f7449eaafe4977aa82872821f1b94cc1ffc578f0fca72fa092f001c6",
+      "pair_id": 3,
+      "backend": "flashinfer",
+      "pair_order": "flashinfer-exact",
+      "position": "first",
+      "seed": 2026081802
+    },
+    {
+      "path": "benchmarks/topp_performance/evidence/raw/e2e/p03_second_exact.json",
+      "sha256": "92a70a908a2a3fd37ba4571c28a53c9f753df63eb2b070e85c90c35b772e7ed9",
+      "pair_id": 3,
+      "backend": "exact",
+      "pair_order": "flashinfer-exact",
+      "position": "second",
+      "seed": 2026081802
+    },
+    {
+      "path": "benchmarks/topp_performance/evidence/raw/e2e/p04_first_exact.json",
+      "sha256": "44f5ff5e8e226b8d22fac778c1da185cc99b3823aa658b09b4dc3d90820201c0",
+      "pair_id": 4,
+      "backend": "exact",
+      "pair_order": "exact-flashinfer",
+      "position": "first",
+      "seed": 2026081802
+    },
+    {
+      "path": "benchmarks/topp_performance/evidence/raw/e2e/p04_second_flashinfer.json",
+      "sha256": "557256b278799ed169747034b02846fe705564127ff3123b77f5058cc4823e36",
+      "pair_id": 4,
+      "backend": "flashinfer",
+      "pair_order": "exact-flashinfer",
+      "position": "second",
+      "seed": 2026081802
+    },
+    {
+      "path": "benchmarks/topp_performance/evidence/raw/e2e/p05_first_exact.json",
+      "sha256": "7eecca3b662a5a797f49bb9c81ed986100b70ccc657a93c31d4fc44abb05c310",
+      "pair_id": 5,
+      "backend": "exact",
+      "pair_order": "exact-flashinfer",
+      "position": "first",
+      "seed": 2026081803
+    },
+    {
+      "path": "benchmarks/topp_performance/evidence/raw/e2e/p05_second_flashinfer.json",
+      "sha256": "58c4097363c0908b5d1182f3b8ce48e1b91569a97d0bf046c875d70394ce9782",
+      "pair_id": 5,
+      "backend": "flashinfer",
+      "pair_order": "exact-flashinfer",
+      "position": "second",
+      "seed": 2026081803
+    },
+    {
+      "path": "benchmarks/topp_performance/evidence/raw/e2e/p06_first_flashinfer.json",
+      "sha256": "1bed0316e38a819380cf2287e73f15f5732f7e4e6365ba21f693b6d7ba69ba90",
+      "pair_id": 6,
+      "backend": "flashinfer",
+      "pair_order": "flashinfer-exact",
+      "position": "first",
+      "seed": 2026081803
+    },
+    {
+      "path": "benchmarks/topp_performance/evidence/raw/e2e/p06_second_exact.json",
+      "sha256": "e545fd8e9516070db92eca42a5849358f4e77de124a29aaed7a1cfa034e9ed91",
+      "pair_id": 6,
+      "backend": "exact",
+      "pair_order": "flashinfer-exact",
+      "position": "second",
+      "seed": 2026081803
+    },
+    {
+      "path": "benchmarks/topp_performance/evidence/raw/e2e/p07_first_flashinfer.json",
+      "sha256": "ecbe2cf581fbae0f1ab891336928c3824d86b64ad447fc0c45ee6522082079ab",
+      "pair_id": 7,
+      "backend": "flashinfer",
+      "pair_order": "flashinfer-exact",
+      "position": "first",
+      "seed": 2026081804
+    },
+    {
+      "path": "benchmarks/topp_performance/evidence/raw/e2e/p07_second_exact.json",
+      "sha256": "7887a09e6a89737a66c441e57b9d19c075003009ed77030a5cb98f4cbc31ebec",
+      "pair_id": 7,
+      "backend": "exact",
+      "pair_order": "flashinfer-exact",
+      "position": "second",
+      "seed": 2026081804
+    },
+    {
+      "path": "benchmarks/topp_performance/evidence/raw/e2e/p08_first_exact.json",
+      "sha256": "d7410d24efaf844f544b21bdb2c61f717ba338b908f9ed8f98430cab4ab5b308",
+      "pair_id": 8,
+      "backend": "exact",
+      "pair_order": "exact-flashinfer",
+      "position": "first",
+      "seed": 2026081804
+    },
+    {
+      "path": "benchmarks/topp_performance/evidence/raw/e2e/p08_second_flashinfer.json",
+      "sha256": "1821bc122c19f7644d1a4de1de888b859531099dddecc36d8fec724bc2e3f935",
+      "pair_id": 8,
+      "backend": "flashinfer",
+      "pair_order": "exact-flashinfer",
+      "position": "second",
+      "seed": 2026081804
+    }
+  ]
+}

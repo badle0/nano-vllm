@@ -1,0 +1,37 @@
+{
+  "created_at_utc": "2026-08-18T13:17:42.977146+00:00",
+  "files": [
+    {
+      "bytes": 256781,
+      "path": "runs/run-01-seed20260826.json",
+      "sha256": "470ec70acc936141ad94fbf2229cdaeb6ab86a37e6a1950bbf8ae9effbf7ebf5"
+    },
+    {
+      "bytes": 254451,
+      "path": "runs/run-02-seed20260827.json",
+      "sha256": "b54f33cefc7f7ea2dc729f96df887c04d54c5e0d76fcc66fdded82523ef89aae"
+    },
+    {
+      "bytes": 254888,
+      "path": "runs/run-03-seed20260828.json",
+      "sha256": "0d8b9be9a6f357814aa548ae427b3306f0da67f9fa284a53d2d40ee86352a1d2"
+    },
+    {
+      "bytes": 256265,
+      "path": "runs/run-04-seed20260829.json",
+      "sha256": "6209885a2588cb78aee3ebd8f123ec347572ff097d6093bc3e28b4efd9cfbc2b"
+    },
+    {
+      "bytes": 256682,
+      "path": "runs/run-05-seed20260830.json",
+      "sha256": "982f6cec01b7cf34765461b66d5df6aafd77e029c2e50b0f5a336d940ed63e0f"
+    },
+    {
+      "bytes": 23201,
+      "path": "aggregate.json",
+      "sha256": "940abdbd92baa91dead963bff71b0c85ef85d448923340b3b77e1d78d839cadd"
+    }
+  ],
+  "kind": "chunked_prefill_certification_archive",
+  "schema_version": 1
+}

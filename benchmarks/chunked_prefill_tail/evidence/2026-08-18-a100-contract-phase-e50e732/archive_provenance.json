@@ -1,0 +1,47 @@
+{
+  "artifact_count": 4,
+  "classifications": {
+    "contract_4x511_maxlen512_e50e732.json": "correctness_contract_pass",
+    "tail_tau256_seed20260822_e50e732.json": "phase_diagnostic_non_certifying",
+    "tail_tau512_seed20260822_e50e732.json": "phase_diagnostic_non_certifying",
+    "tau64_128_maxlen_matrix_e50e732.json": "correctness_contract_pass"
+  },
+  "copied_byte_for_byte": true,
+  "evidence_commit": "e50e732568727ae9127eac22d23c7dd7054e6b71",
+  "evidence_source_sha256": "ba43d751ae343d47f5efd642bf070bacf64f86931e10c205474dbfa2d8e74db8",
+  "evidence_tree": "1fa18dea8d797d80cd8812d5c995c951030936d2",
+  "files": [
+    {
+      "bytes": 19651,
+      "original_mode": "0444",
+      "original_path": "/workspace/.feat_bench/chunk-tail/contract_4x511_maxlen512_e50e732.json",
+      "path": "contract_4x511_maxlen512_e50e732.json",
+      "sha256": "56f1ad9f901bb5c719615958dcda6fb90b3b95d57269c334ddadf029ed90ae6d"
+    },
+    {
+      "bytes": 1935500,
+      "original_mode": "0444",
+      "original_path": "/workspace/.feat_bench/chunk-tail/tail_tau256_seed20260822_e50e732.json",
+      "path": "tail_tau256_seed20260822_e50e732.json",
+      "sha256": "75ff66e05f9ad66297b7bdd1706e6bfa158f54dbefa62fb7fef18e07dfc68ce9"
+    },
+    {
+      "bytes": 1935859,
+      "original_mode": "0444",
+      "original_path": "/workspace/.feat_bench/chunk-tail/tail_tau512_seed20260822_e50e732.json",
+      "path": "tail_tau512_seed20260822_e50e732.json",
+      "sha256": "e434b3de22aa1439403a957703d91727854db11054c701e251bbb1ee492c1cc9"
+    },
+    {
+      "bytes": 26906,
+      "original_mode": "0444",
+      "original_path": "/workspace/.feat_bench/chunk-tail/tau64_128_maxlen_matrix_e50e732.json",
+      "path": "tau64_128_maxlen_matrix_e50e732.json",
+      "sha256": "2ecb58ff0e7695166f381a83056d378e1ce089b7c7d312a13903aaa8cff002a9"
+    }
+  ],
+  "kind": "chunked_prefill_contract_phase_repository_archive",
+  "model_sha256": "0c659d1dba2804b0943c24bbece1858e93273147f7a11693fa99062df8c5997b",
+  "original_root": "/workspace/.feat_bench/chunk-tail",
+  "schema_version": 1
+}
