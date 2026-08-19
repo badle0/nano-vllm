@@ -219,7 +219,18 @@ def validate_manifest(
         raise ValueError("manifest artifact kind mismatch")
     for tool_name in ("harness", "runner"):
         record = manifest[tool_name]
-        if sha256_file(Path(record["path"])) != record["sha256"]:
+
+        # Archived manifests preserve the original absolute collection path.
+        # In a portable repository checkout, validate the byte-identical tool
+        # retained beside this certification archive instead.
+        repository_tool = root.parents[1] / Path(record["path"]).name
+        tool_path = (
+            repository_tool
+            if repository_tool.is_file()
+            else Path(record["path"])
+        )
+
+        if sha256_file(tool_path) != record["sha256"]:
             raise ValueError(f"{tool_name} hash mismatch")
 
     pair_runs = manifest["pair_runs"]
