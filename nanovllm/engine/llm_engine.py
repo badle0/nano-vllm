@@ -2,12 +2,28 @@ from __future__ import annotations
 
 import atexit
 import gc
+import warnings
+import weakref
 from collections import deque
 from collections.abc import Iterator
 from dataclasses import fields
 from threading import Event, Lock
 from time import perf_counter
 from typing import NamedTuple
+
+
+class AdmissionLimits(NamedTuple):
+    """Static request bounds checked before tokenized work enters the engine.
+
+    Snapshotted after the model runner sizes the KV cache, so ``kvcache_blocks``
+    is the real pool. A fake test engine may omit the attribute entirely, which
+    skips these GPU-derived checks (capacity and emptiness checks still run).
+    """
+
+    max_model_len: int | None
+    vocab_size: int | None
+    block_size: int | None
+    kvcache_blocks: int | None
 
 from tqdm.auto import tqdm
 from transformers import AutoTokenizer
@@ -20,6 +36,7 @@ from nanovllm.engine.scheduler import Scheduler
 from nanovllm.engine.model_runner import ModelRunner
 from nanovllm.metrics import compute_metrics
 from nanovllm.layers.sampler import require_flashinfer_sampling
+from nanovllm.utils.errors import record_cleanup_failure
 
 
 _PYTHON_GC_LEASE_LOCK = Lock()
@@ -98,8 +115,10 @@ class StreamSession(Iterator[StreamOutput]):
         self.seq_ids: tuple[int, ...] = ()
         self.metrics: dict[int, dict] = {}
         self._closed = False
+        self._finalizer = None
 
         params = engine._normalize_batch(prompts, sampling_params)
+        sequences = ()
         lease = engine._acquire_session("stream")
         self._lease = lease
         try:
@@ -108,17 +127,84 @@ class StreamSession(Iterator[StreamOutput]):
                 params,
                 submission_time=submission_time,
             )
-        except BaseException:
+            self.seq_ids = tuple(seq.seq_id for seq in sequences)
+            self._sequences = {seq.seq_id: seq for seq in sequences}
+            self._remaining = set(self.seq_ids)
+            if self.seq_ids:
+                # The callback retains the engine, not this session. The
+                # engine reference is required to cancel work reliably.
+                self._finalizer = weakref.finalize(
+                    self,
+                    StreamSession._finalize_abandoned,
+                    engine,
+                    lease,
+                    self.seq_ids,
+                )
+                # LLMEngine owns process teardown through its own atexit hook.
+                self._finalizer.atexit = False
+        except BaseException as error:
             self._closed = True
-            self._lease = None
-            engine._release_session(lease)
+            finalizer, self._finalizer = self._finalizer, None
+            lease, self._lease = self._lease, None
+            self._engine = None
+            try:
+                if finalizer is not None:
+                    finalizer.detach()
+            except BaseException as cleanup_error:
+                record_cleanup_failure(
+                    error, "StreamSession finalizer rollback", cleanup_error
+                )
+            try:
+                engine.scheduler.cancel(seq.seq_id for seq in sequences)
+            except BaseException as cleanup_error:
+                record_cleanup_failure(
+                    error, "StreamSession admission rollback", cleanup_error
+                )
+            if lease is not None:
+                try:
+                    engine._release_session(lease)
+                except BaseException as cleanup_error:
+                    record_cleanup_failure(
+                        error, "StreamSession lease rollback", cleanup_error
+                    )
             raise
 
-        self.seq_ids = tuple(seq.seq_id for seq in sequences)
-        self._sequences = {seq.seq_id: seq for seq in sequences}
-        self._remaining = set(self.seq_ids)
         if not self.seq_ids:
             self.close()
+
+    @staticmethod
+    def _warn_abandoned(count: int) -> None:
+        try:
+            warnings.warn(
+                "a StreamSession was garbage-collected without close(); "
+                f"automatic cleanup was attempted for its {count} request(s); "
+                "use the context manager or call close() explicitly",
+                RuntimeWarning,
+                stacklevel=1,
+            )
+        except Exception:
+            # Warning filters must never control cancellation or lease release.
+            pass
+
+    @staticmethod
+    def _finalize_abandoned(engine: "LLMEngine", lease: object, seq_ids):
+        first_error = None
+        try:
+            engine.scheduler.cancel(seq_ids)
+        except BaseException as error:
+            first_error = error
+        try:
+            engine._release_session(lease)
+        except BaseException as error:
+            if first_error is None:
+                first_error = error
+            else:
+                record_cleanup_failure(
+                    first_error, "StreamSession finalizer lease release", error
+                )
+        StreamSession._warn_abandoned(len(seq_ids))
+        if first_error is not None:
+            raise first_error
 
     @property
     def closed(self) -> bool:
@@ -172,28 +258,66 @@ class StreamSession(Iterator[StreamOutput]):
             if not self._remaining and not self._pending:
                 self.close()
             return event
-        except BaseException:
-            self.close()
+        except BaseException as error:
+            try:
+                self.close()
+            except BaseException as cleanup_error:
+                record_cleanup_failure(
+                    error, "StreamSession iteration cleanup", cleanup_error
+                )
             raise
 
     def close(self):
         if self._closed:
             return
         self._closed = True
+        finalizer, self._finalizer = self._finalizer, None
+        engine, self._engine = self._engine, None
+        lease, self._lease = self._lease, None
+        first_error = None
+        try:
+            if finalizer is not None:
+                finalizer.detach()
+        except BaseException as error:
+            first_error = error
         self._pending.clear()
         self._remaining.clear()
-        lease, self._lease = self._lease, None
+        self._sequences.clear()
         try:
-            self._engine.scheduler.cancel(self.seq_ids)
-        finally:
-            if lease is not None:
-                self._engine._release_session(lease)
+            engine.scheduler.cancel(self.seq_ids)
+        except BaseException as error:
+            if first_error is None:
+                first_error = error
+            else:
+                record_cleanup_failure(
+                    first_error, "StreamSession request cancellation", error
+                )
+        if lease is not None:
+            try:
+                engine._release_session(lease)
+            except BaseException as error:
+                if first_error is None:
+                    first_error = error
+                else:
+                    record_cleanup_failure(
+                        first_error, "StreamSession lease release", error
+                    )
+        if first_error is not None:
+            raise first_error
 
     def __enter__(self):
         return self
 
     def __exit__(self, exc_type, exc_value, traceback):
-        self.close()
+        if exc_value is None:
+            self.close()
+        else:
+            try:
+                self.close()
+            except BaseException as cleanup_error:
+                record_cleanup_failure(
+                    exc_value, "StreamSession context cleanup", cleanup_error
+                )
         return False
 
 
@@ -219,26 +343,27 @@ class LLMEngine:
         config = Config(model, **config_kwargs)
         if config.top_p_backend == "flashinfer":
             require_flashinfer_sampling()
-        Sequence.block_size = config.kvcache_block_size
-        ctx = mp.get_context("spawn")
-        for i in range(1, config.tensor_parallel_size):
-            event = ctx.Event()
-            process = ctx.Process(target=ModelRunner, args=(config, i, event))
-            process.start()
-            self.ps.append(process)
-            self.events.append(event)
-        self.model_runner = ModelRunner(config, 0, self.events)
+        # Tokenizer failure must precede GPU/process-group ownership.
         self.tokenizer = AutoTokenizer.from_pretrained(config.model, use_fast=True)
         config.eos = self.tokenizer.eos_token_id
-        self.scheduler = Scheduler(config, clock=self._clock)
         self._session_lock = Lock()
         self._active_session: tuple[object, str] | None = None
         self._atexit_callback = self.exit
+        previous_block_size = Sequence.block_size
 
-        # Only the post-init registration/lease phase is transactional. In
-        # particular, do not join a spawned TP worker before rank 0 exists to
-        # signal its loop; the GC option rejects TP and is acquired below.
         try:
+            Sequence.block_size = config.kvcache_block_size
+            ctx = mp.get_context("spawn")
+            for i in range(1, config.tensor_parallel_size):
+                event = ctx.Event()
+                process = ctx.Process(target=ModelRunner, args=(config, i, event))
+                process.start()
+                self.ps.append(process)
+                self.events.append(event)
+            self.model_runner = ModelRunner(config, 0, self.events)
+            # allocate_kv_cache writes the sized pool back into config.
+            self._admission_limits = self._snapshot_admission_limits(config)
+            self.scheduler = Scheduler(config, clock=self._clock)
             atexit.register(self._atexit_callback)
             self._atexit_registered = True
             if config.disable_python_gc:
@@ -253,13 +378,21 @@ class LLMEngine:
                         _release_python_gc_lease()
                         self._python_gc_was_enabled = None
                     raise
-        except BaseException:
-            # Rank 0 is fully initialized here, so exit can safely signal every
-            # worker, release a partial lease, and unregister the callback.
-            try:
-                self.exit()
-            except BaseException:
-                pass
+        except BaseException as error:
+            if self.model_runner is not None:
+                try:
+                    self.exit()
+                except BaseException as cleanup_error:
+                    record_cleanup_failure(
+                        error, "LLMEngine cleanup", cleanup_error
+                    )
+            else:
+                cleanup_error = self._join_workers(abort=True)
+                if cleanup_error is not None:
+                    record_cleanup_failure(
+                        error, "LLMEngine worker cleanup", cleanup_error
+                    )
+            Sequence.block_size = previous_block_size
             raise
 
     def exit(self):
@@ -286,12 +419,9 @@ class LLMEngine:
                     first_error = error
                 finally:
                     self.model_runner = None
-            for process in self.ps:
-                try:
-                    process.join()
-                except BaseException as error:
-                    if first_error is None:
-                        first_error = error
+            process_error = self._join_workers(abort=False)
+            if first_error is None:
+                first_error = process_error
         finally:
             try:
                 self._restore_python_gc()
@@ -310,6 +440,77 @@ class LLMEngine:
         if first_error is not None:
             raise first_error
 
+    def _join_workers(self, *, abort: bool) -> BaseException | None:
+        """Bounded cleanup for every worker owned by this engine."""
+        first_error = None
+
+        def record(error):
+            nonlocal first_error
+            if first_error is None:
+                first_error = error
+
+        def probe_alive(process) -> bool:
+            is_alive = getattr(process, "is_alive", None)
+            if not callable(is_alive):
+                return False
+            try:
+                return bool(is_alive())
+            except BaseException as error:
+                record(error)
+                # A failed probe cannot establish that termination is safe to
+                # skip, so continue conservatively as though it were alive.
+                return True
+
+        processes, self.ps = self.ps, []
+        self.events.clear()
+        for process in processes:
+            is_alive = getattr(process, "is_alive", None)
+            terminate = getattr(process, "terminate", None)
+            kill = getattr(process, "kill", None)
+            if abort and callable(terminate):
+                try:
+                    if not callable(is_alive) or probe_alive(process):
+                        terminate()
+                except BaseException as error:
+                    record(error)
+            try:
+                try:
+                    process.join(timeout=5.0)
+                except TypeError:
+                    # Compatibility with simple process doubles in unit tests.
+                    process.join()
+            except BaseException as error:
+                record(error)
+
+            alive = probe_alive(process)
+            if alive and not abort and callable(terminate):
+                try:
+                    terminate()
+                    process.join(timeout=5.0)
+                except BaseException as error:
+                    record(error)
+                alive = probe_alive(process)
+                if first_error is None:
+                    record(RuntimeError("tensor-parallel worker did not exit cooperatively"))
+            if alive and callable(kill):
+                try:
+                    kill()
+                    process.join(timeout=5.0)
+                except BaseException as error:
+                    record(error)
+                alive = probe_alive(process)
+            if alive:
+                record(RuntimeError("tensor-parallel worker could not be stopped"))
+                self.ps.append(process)
+            else:
+                close = getattr(process, "close", None)
+                if callable(close):
+                    try:
+                        close()
+                    except BaseException as error:
+                        record(error)
+        return first_error
+
     def _restore_python_gc(self):
         if not self._python_gc_lease_active:
             return
@@ -324,6 +525,8 @@ class LLMEngine:
         prompts: list[str] | list[list[int]],
         sampling_params: SamplingParams | list[SamplingParams],
     ) -> list[SamplingParams]:
+        if not isinstance(prompts, list):
+            raise TypeError("prompts must be a list of strings or token-id lists")
         if not isinstance(sampling_params, list):
             return [sampling_params] * len(prompts)
         if len(sampling_params) != len(prompts):
@@ -332,6 +535,20 @@ class LLMEngine:
                 "(the same number of items)"
             )
         return sampling_params
+
+    @staticmethod
+    def _snapshot_admission_limits(config) -> AdmissionLimits:
+        """Snapshot each independently available request-admission bound."""
+        def positive_int(value):
+            return value if type(value) is int and value > 0 else None
+
+        hf_config = getattr(config, "hf_config", None)
+        return AdmissionLimits(
+            positive_int(getattr(config, "max_model_len", None)),
+            positive_int(getattr(hf_config, "vocab_size", None)),
+            positive_int(getattr(config, "kvcache_block_size", None)),
+            positive_int(getattr(config, "num_kvcache_blocks", None)),
+        )
 
     def _acquire_session(self, kind: str) -> object:
         with self._session_lock:
@@ -375,10 +592,72 @@ class LLMEngine:
         # Fail before tokenization or sequence-id allocation when the bounded
         # scheduler cannot own another request.
         self.scheduler.require_capacity()
+        if not isinstance(sampling_params, SamplingParams):
+            raise TypeError("sampling_params must be a SamplingParams instance")
+        # Snapshot into the exact base class so a subclass cannot bypass
+        # validation by overriding __init__ or validate().
+        sampling_params = SamplingParams(
+            temperature=sampling_params.temperature,
+            max_tokens=sampling_params.max_tokens,
+            ignore_eos=sampling_params.ignore_eos,
+            top_k=sampling_params.top_k,
+            top_p=sampling_params.top_p,
+        )
         if isinstance(prompt, str):
-            prompt = self.tokenizer.encode(prompt)
+            prompt_ids = list(self.tokenizer.encode(prompt))
+        elif isinstance(prompt, list):
+            prompt_ids = list(prompt)
+        else:
+            raise TypeError("prompt must be a string or a list of token ids")
+        if not prompt_ids:
+            raise ValueError("prompt must contain at least one token")
+        limits = getattr(self, "_admission_limits", None)
+        vocab_size = limits.vocab_size if limits is not None else None
+        for token in prompt_ids:
+            if type(token) is not int:
+                raise TypeError(
+                    "prompt token ids must be integers, got "
+                    f"{type(token).__name__}"
+                )
+            if token < 0:
+                raise ValueError("prompt token ids must be non-negative")
+            if vocab_size is not None and token >= vocab_size:
+                raise ValueError(
+                    f"prompt token id {token} is outside the model vocabulary "
+                    f"[0, {vocab_size})"
+                )
+
+        max_model_len = limits.max_model_len if limits is not None else None
+        processed_tokens = len(prompt_ids) + sampling_params.max_tokens - 1
+        if max_model_len is not None:
+            if len(prompt_ids) > max_model_len:
+                raise ValueError(
+                    f"prompt length {len(prompt_ids)} exceeds max_model_len "
+                    f"{max_model_len}"
+                )
+            if processed_tokens > max_model_len:
+                raise ValueError(
+                    f"prompt length {len(prompt_ids)} + max_tokens "
+                    f"{sampling_params.max_tokens} - 1 = {processed_tokens} "
+                    f"model-processed tokens exceeds max_model_len "
+                    f"{max_model_len}; reduce max_tokens or raise max_model_len"
+                )
+
+        block_size = limits.block_size if limits is not None else None
+        kvcache_blocks = limits.kvcache_blocks if limits is not None else None
+        if block_size is not None and kvcache_blocks is not None:
+            blocks_needed = (
+                processed_tokens + block_size - 1
+            ) // block_size
+            if blocks_needed > kvcache_blocks:
+                raise ValueError(
+                    f"request needs {blocks_needed} KV-cache blocks for "
+                    f"{processed_tokens} model-processed tokens but the pool "
+                    f"has only {kvcache_blocks}; reduce prompt length or "
+                    "max_tokens, or raise gpu_memory_utilization"
+                )
         seq = Sequence(
-            prompt,
+            prompt_ids,
             sampling_params,
             submission_time=submission_time,
             engine_arrival_time=self._clock(),
@@ -406,8 +685,13 @@ class LLMEngine:
                         submission_time=submission_time,
                     )
                 )
-        except BaseException:
-            self.scheduler.cancel(seq.seq_id for seq in admitted)
+        except BaseException as error:
+            try:
+                self.scheduler.cancel(seq.seq_id for seq in admitted)
+            except BaseException as cleanup_error:
+                record_cleanup_failure(
+                    error, "batch admission rollback", cleanup_error
+                )
             raise
         return admitted
 
@@ -475,6 +759,11 @@ class LLMEngine:
         prompts: list[str] | list[list[int]],
         sampling_params: SamplingParams | list[SamplingParams],
     ) -> StreamSession:
+        """Start one capacity-bounded synchronous stream session.
+
+        Raises SchedulerCapacityError before tokenization when the prompt count
+        exceeds the scheduler's available sequence slots.
+        """
         params = self._normalize_batch(prompts, sampling_params)
         submission_time = self._clock()
         return StreamSession(
@@ -493,11 +782,17 @@ class LLMEngine:
         sampling_params: SamplingParams | list[SamplingParams],
         use_tqdm: bool = True,
     ) -> list[dict]:
+        """Generate one capacity-bounded batch in input order.
+
+        Raises SchedulerCapacityError before tokenization when the prompt count
+        exceeds the scheduler's available sequence slots.
+        """
         params = self._normalize_batch(prompts, sampling_params)
         submission_time = self._clock()
         lease = self._acquire_session("generate")
         sequences = []
         pbar = None
+        primary_error = None
         try:
             sequences = self._admit_batch(
                 prompts,
@@ -543,10 +838,37 @@ class LLMEngine:
                     delivery_time=delivery_time,
                 )
             return results
+        except BaseException as error:
+            primary_error = error
+            raise
         finally:
+            cleanup_error = None
             if pbar is not None:
-                pbar.close()
+                try:
+                    pbar.close()
+                except BaseException as error:
+                    cleanup_error = error
             try:
                 self.scheduler.cancel(seq.seq_id for seq in sequences)
-            finally:
+            except BaseException as error:
+                if cleanup_error is None:
+                    cleanup_error = error
+                else:
+                    record_cleanup_failure(
+                        cleanup_error, "generate request cancellation", error
+                    )
+            try:
                 self._release_session(lease)
+            except BaseException as error:
+                if cleanup_error is None:
+                    cleanup_error = error
+                else:
+                    record_cleanup_failure(
+                        cleanup_error, "generate lease release", error
+                    )
+            if cleanup_error is not None:
+                if primary_error is None:
+                    raise cleanup_error
+                record_cleanup_failure(
+                    primary_error, "generate cleanup", cleanup_error
+                )

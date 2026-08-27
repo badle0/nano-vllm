@@ -1,7 +1,7 @@
 """Fresh-process GPU worker for low-budget ragged CUDA-graph routing.
 
-Run one configuration per process because nano-vllm owns a process group and
-most of the selected GPU memory for the lifetime of an engine::
+Run one configuration per process to isolate compiler/cache state and make
+configuration timings statistically independent::
 
     PYTHONPATH=. python tests/run_varlen_graph_config.py --tau 64 --max-model-len 512
     PYTHONPATH=. python tests/run_varlen_graph_config.py --tau 128 --max-model-len 512

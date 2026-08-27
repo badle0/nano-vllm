@@ -63,7 +63,12 @@ class Sampler(nn.Module):
             end = min(start + self.TOP_P_CHUNK_SIZE, active_logits.size(0))
             chunk_logits = active_logits[start:end]
             chunk_temperatures = active_temperatures[start:end].clamp_min(1e-10)
-            scaled_logits = chunk_logits.float().div_(
+            # Tensor.float() aliases FP32 input. Use a private workspace so
+            # filtering does not pre-scale logits that forward() will scale.
+            scaled_logits = chunk_logits.to(
+                dtype=torch.float32,
+                copy=True,
+            ).div_(
                 chunk_temperatures.unsqueeze(dim=1)
             )
             sorted_logits, sorted_indices = torch.sort(
