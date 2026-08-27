@@ -210,3 +210,17 @@ def test_nonpositive_remaining_never_schedules_waiting_work():
     assert waiter.num_scheduled_tokens == 0
     assert not waiter.block_table
     assert all(sequence.num_scheduled_tokens == 1 for sequence in seqs)
+
+
+def test_schedule_without_pending_work_has_typed_error():
+    scheduler = make_scheduler()
+    with pytest.raises(RuntimeError, match="no pending requests"):
+        scheduler.schedule()
+
+
+def test_resource_stalled_waiter_has_distinct_typed_error():
+    scheduler = make_scheduler()
+    scheduler.block_manager.free_block_ids.clear()
+    scheduler.add(make_sequence())
+    with pytest.raises(RuntimeError, match="pending work.*KV-cache"):
+        scheduler.schedule()

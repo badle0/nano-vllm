@@ -11,6 +11,10 @@ class SamplingParams:
     top_p: float = 1.0       # 1.0 = disabled (full nucleus)
 
     def __post_init__(self):
+        self.validate()
+
+    def validate(self) -> None:
+        """Validate current values, including after caller mutation."""
         if isinstance(self.temperature, bool) or not isinstance(self.temperature, (int, float)):
             raise TypeError("temperature must be a number")
         if not isfinite(self.temperature):
@@ -27,3 +31,9 @@ class SamplingParams:
             raise ValueError("top_p must be finite")
         if not 0.0 < self.top_p <= 1.0:
             raise ValueError("top_p must be in (0, 1]")
+        if type(self.max_tokens) is not int:
+            raise TypeError("max_tokens must be an integer")
+        if self.max_tokens < 1:
+            raise ValueError("max_tokens must be >= 1")
+        if type(self.ignore_eos) is not bool:
+            raise TypeError("ignore_eos must be a bool")

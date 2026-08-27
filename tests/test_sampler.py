@@ -196,6 +196,9 @@ invalid = (
     {"top_p": float("nan")},
     {"top_p": 0.0},
     {"top_p": 1.1},
+    {"max_tokens": 0},
+    {"max_tokens": True},
+    {"ignore_eos": 1},
 )
 for kwargs in invalid:
     try:
@@ -446,6 +449,67 @@ def test_topp_random_support_matches_transformers(dtype):
     expected = _transformers_top_p_support(logits, temperatures, top_ps)
 
     assert torch.equal(actual, expected)
+
+
+@pytest.mark.parametrize(
+    ("rows", "top_ps"),
+    [
+        (None, [0.9, 0.9]),
+        ((1,), [0.9]),
+    ],
+)
+def test_topp_fp32_filter_preserves_retained_values(rows, top_ps):
+    original = torch.tensor(
+        [[2.0, 1.0, 0.0, -1.0], [2.0, 1.0, 0.0, -1.0]],
+        dtype=torch.float32,
+    )
+    temperatures = torch.full((2,), 0.5)
+
+    filtered = _filter_top_p(
+        original.clone(),
+        temperatures,
+        top_ps,
+        rows=rows,
+    )
+    retained = torch.isfinite(filtered)
+
+    assert torch.equal(filtered[retained], original[retained])
+
+
+def test_topp_fp32_applies_temperature_exactly_once():
+    num_rows = 256
+    logits = torch.tensor(
+        [2.0, 1.0, 0.0, -1.0],
+        dtype=torch.float32,
+    ).repeat(num_rows, 1)
+    temperatures = torch.full((num_rows,), 0.5)
+
+    # At T=0.5 and p=0.9, exactly the first two tokens form the support.
+    expected_filtered = logits.clone()
+    expected_filtered[:, 2:] = float("-inf")
+    actual_filtered = _filter_top_p(
+        logits.clone(),
+        temperatures,
+        [0.9] * num_rows,
+    )
+
+    assert torch.equal(
+        torch.isfinite(actual_filtered),
+        torch.isfinite(expected_filtered),
+    )
+
+    torch.manual_seed(42)
+    expected = _main_sampler(expected_filtered.clone(), temperatures)
+    torch.manual_seed(42)
+    sampler = Sampler()
+    actual = Sampler.forward.__wrapped__(
+        sampler,
+        actual_filtered.clone(),
+        temperatures,
+    )
+
+    assert torch.equal(actual, expected)
+
 
 @pytest.mark.parametrize("dtype", [torch.float32, torch.bfloat16])
 def test_topp_forced_tie_support_matches_transformers(dtype):

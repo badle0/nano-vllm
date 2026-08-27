@@ -125,7 +125,16 @@ class Scheduler:
                 self.mid_chunk_seq = seq
                 break
 
-        assert scheduled_seqs
+        if not scheduled_seqs:
+            if not self.waiting and not self.running:
+                raise RuntimeError("cannot schedule: no pending requests")
+            # Admission prevents a single request from exceeding the pool.
+            # Keep a typed guard for internal corruption or a pool exhausted by
+            # work that could not be preempted.
+            raise RuntimeError(
+                "scheduler could not schedule pending work with the available "
+                "KV-cache blocks"
+            )
         self._check_mid_chunk_invariant()
         # is_prefill return semantics are now "ragged step": any prefill work present
         return scheduled_seqs, len(scheduled_seqs) > num_decodes
@@ -157,7 +166,7 @@ class Scheduler:
                 seq.first_token_time = now
             seq.token_times.append(now)
             finished = (not seq.ignore_eos and token_id == self.eos) \
-                    or seq.num_completion_tokens == seq.max_tokens
+                    or seq.num_completion_tokens >= seq.max_tokens
             if finished:
                 seq.finish_time = now
                 seq.status = SequenceStatus.FINISHED

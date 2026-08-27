@@ -1,5 +1,8 @@
+import gc
 import pickle
 import struct
+from datetime import timedelta
+
 import torch
 import torch.distributed as dist
 from multiprocessing.synchronize import Event
@@ -11,6 +14,7 @@ from nanovllm.engine.tp_transport import ScheduledSequence, compact_run_args
 from nanovllm.models.qwen3 import Qwen3ForCausalLM
 from nanovllm.layers.sampler import Sampler
 from nanovllm.utils.context import set_context, get_context, reset_context
+from nanovllm.utils.errors import record_cleanup_failure
 from nanovllm.utils.loader import load_model
 
 
@@ -18,6 +22,7 @@ TP_SHM_MAGIC = b"NVTP"
 TP_SHM_HEADER = struct.Struct("<4sI")
 TP_SHM_MIN_SIZE = 64 * 1024
 TP_SHM_MAX_SIZE = 64 * 1024 * 1024
+TP_PROCESS_GROUP_TIMEOUT = timedelta(seconds=30)
 
 
 class TensorParallelTransportError(RuntimeError):
@@ -60,6 +65,9 @@ def tensor_parallel_shm_size(config: Config) -> int:
 class ModelRunner:
 
     def __init__(self, config: Config, rank: int, event: Event | list[Event]):
+        self._closed = False
+        self._owns_process_group = False
+        self.shm = None
         self.config = config
         hf_config = config.hf_config
         self.block_size = config.kvcache_block_size
@@ -71,48 +79,165 @@ class ModelRunner:
             tensor_parallel_shm_size(config) if self.world_size > 1 else 0
         )
 
-        dist.init_process_group("nccl", "tcp://localhost:2333", world_size=self.world_size, rank=rank)
-        torch.cuda.set_device(rank)
+        default_device = torch.get_default_device()
         default_dtype = torch.get_default_dtype()
-        torch.set_default_dtype(hf_config.dtype)
-        torch.set_default_device("cuda")
-        self.model = Qwen3ForCausalLM(hf_config)
-        load_model(self.model, config.model)
-        self.sampler = Sampler()
-        self.warmup_model()
-        self.allocate_kv_cache()
-        if not self.enforce_eager:
-            self.capture_cudagraph()
-            self.capture_varlen_graphs()
-        torch.set_default_device("cpu")
-        torch.set_default_dtype(default_dtype)
-        if not self.enforce_eager:
-            self._pretouch_eager_prefill()
-
-        if self.world_size > 1:
-            if rank == 0:
-                self.shm = SharedMemory(
-                    name="nanovllm", create=True, size=self.tp_shm_size
+        try:
+            torch.cuda.set_device(rank)
+            dist.init_process_group(
+                "nccl",
+                "tcp://localhost:2333",
+                world_size=self.world_size,
+                rank=rank,
+                timeout=TP_PROCESS_GROUP_TIMEOUT,
+            )
+            self._owns_process_group = True
+            try:
+                torch.set_default_dtype(hf_config.dtype)
+                torch.set_default_device("cuda")
+                self.model = Qwen3ForCausalLM(hf_config)
+                load_model(self.model, config.model)
+                self.sampler = Sampler()
+                self.warmup_model()
+                self.allocate_kv_cache()
+                if not self.enforce_eager:
+                    self.capture_cudagraph()
+                    self.capture_varlen_graphs()
+            except BaseException as error:
+                restore_error = self._restore_torch_defaults(
+                    default_device, default_dtype
                 )
-                dist.barrier()
+                if restore_error is not None:
+                    record_cleanup_failure(
+                        error,
+                        "restoring Torch defaults",
+                        restore_error,
+                    )
+                raise
             else:
-                dist.barrier()
-                self.shm = SharedMemory(name="nanovllm")
-                self.loop()
+                restore_error = self._restore_torch_defaults(
+                    default_device, default_dtype
+                )
+                if restore_error is not None:
+                    raise restore_error
+
+            if not self.enforce_eager:
+                self._pretouch_eager_prefill()
+
+            if self.world_size > 1:
+                if rank == 0:
+                    self.shm = SharedMemory(
+                        name="nanovllm", create=True, size=self.tp_shm_size
+                    )
+                    dist.barrier()
+                else:
+                    dist.barrier()
+                    self.shm = SharedMemory(name="nanovllm")
+                    self.loop()
+        except BaseException as error:
+            cleanup_error = self._close(abort=True)
+            if cleanup_error is not None:
+                record_cleanup_failure(
+                    error,
+                    "ModelRunner cleanup",
+                    cleanup_error,
+                )
+            raise
+
+    @staticmethod
+    def _restore_torch_defaults(default_device, default_dtype):
+        first_error = None
+        try:
+            torch.set_default_device(default_device)
+        except BaseException as error:
+            first_error = error
+        try:
+            torch.set_default_dtype(default_dtype)
+        except BaseException as error:
+            if first_error is None:
+                first_error = error
+        return first_error
 
     def exit(self):
-        if self.world_size > 1:
-            self.shm.close()
-            dist.barrier()
+        error = self._close(abort=False)
+        if error is not None:
+            raise error
+
+    def _close(self, *, abort: bool) -> BaseException | None:
+        """Release all owned resources; return the first cleanup error."""
+        if self._closed:
+            return None
+        self._closed = True
+        first_error = None
+
+        def attempt(operation):
+            nonlocal first_error
+            try:
+                operation()
+            except BaseException as error:
+                if first_error is None:
+                    first_error = error
+
+        def probe(operation) -> bool:
+            nonlocal first_error
+            try:
+                return bool(operation())
+            except BaseException as error:
+                if first_error is None:
+                    first_error = error
+                return False
+
+        shm, self.shm = self.shm, None
+        if shm is not None:
+            attempt(shm.close)
+            if not abort and self._owns_process_group:
+                attempt(dist.barrier)
             if self.rank == 0:
-                self.shm.unlink()
-        if not self.enforce_eager:
-            del self.graphs, self.graph_pool
-            for name in ("varlen_graphs", "varlen_vars"):
-                if hasattr(self, name):
-                    delattr(self, name)
-        torch.cuda.synchronize()
-        dist.destroy_process_group()
+                attempt(shm.unlink)
+
+        # Failed graph capture or eager pretouch can leave global tensor
+        # references even when the owning attribute was never completed.
+        attempt(reset_context)
+        if probe(torch.cuda.is_initialized):
+            attempt(torch.cuda.synchronize)
+
+        # Graphs own references into their pool/static buffers, so release
+        # graph objects before those tensors and before the model itself.
+        for name in (
+            "varlen_graphs",
+            "graphs",
+            "varlen_vars",
+            "graph_vars",
+            "graph_pool",
+        ):
+            if hasattr(self, name):
+                attempt(lambda name=name: delattr(self, name))
+
+        model = getattr(self, "model", None)
+        if model is not None:
+            def clear_module_cache_views():
+                for module in model.modules():
+                    if hasattr(module, "k_cache"):
+                        module.k_cache = None
+                    if hasattr(module, "v_cache"):
+                        module.v_cache = None
+
+            attempt(clear_module_cache_views)
+        model = None
+        for name in ("kv_cache", "sampler", "model"):
+            if hasattr(self, name):
+                attempt(lambda name=name: delattr(self, name))
+
+        if self._owns_process_group:
+            try:
+                if probe(dist.is_initialized):
+                    attempt(dist.destroy_process_group)
+            finally:
+                self._owns_process_group = False
+
+        attempt(gc.collect)
+        if probe(torch.cuda.is_initialized):
+            attempt(torch.cuda.empty_cache)
+        return first_error
 
     def loop(self):
         while True:
@@ -260,8 +385,30 @@ class ModelRunner:
         num_kv_heads = hf_config.num_key_value_heads // self.world_size
         head_dim = getattr(hf_config, "head_dim", hf_config.hidden_size // hf_config.num_attention_heads)
         block_bytes = 2 * hf_config.num_hidden_layers * self.block_size * num_kv_heads * head_dim * hf_config.dtype.itemsize
-        config.num_kvcache_blocks = int(total * config.gpu_memory_utilization - used - peak + current) // block_bytes
-        assert config.num_kvcache_blocks > 0
+        memory_budget = int(total * config.gpu_memory_utilization)
+        transient_peak = max(peak - current, 0)
+        usable = memory_budget - used - transient_peak
+        auto_blocks = usable // block_bytes
+        requested_blocks = config.num_kvcache_blocks
+        if auto_blocks <= 0:
+            raise RuntimeError(
+                "cannot allocate any KV-cache blocks: "
+                f"total={total}, free={free}, budget={memory_budget}, "
+                f"used={used}, current_allocated={current}, peak_allocated={peak}, "
+                f"transient_peak={transient_peak}, usable={usable}, "
+                f"block_bytes={block_bytes}; raise gpu_memory_utilization or "
+                "free GPU memory held by this process or another process"
+            )
+        if requested_blocks == -1:
+            config.num_kvcache_blocks = auto_blocks
+        elif requested_blocks > auto_blocks:
+            raise RuntimeError(
+                f"requested num_kvcache_blocks={requested_blocks} requires "
+                f"{requested_blocks * block_bytes} bytes, but only {usable} "
+                f"profiled bytes ({auto_blocks} blocks) are usable"
+            )
+        # A positive explicit value is an exact, validated override. This is
+        # useful for reproducible tests and intentionally does not auto-expand.
         self.kv_cache = torch.empty(2, hf_config.num_hidden_layers, config.num_kvcache_blocks, self.block_size, num_kv_heads, head_dim)
         layer_id = 0
         for module in self.model.modules():

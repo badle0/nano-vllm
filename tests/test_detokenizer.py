@@ -141,6 +141,55 @@ def test_incomplete_utf8_fragment_is_held_then_corrected():
     assert detokenizer.flush(0).apply(rendered) == "🎉"
 
 
+class PersistentReplacementTokenizer:
+
+    def __init__(self):
+        self.decode_lengths = []
+
+    def decode(self, token_ids):
+        self.decode_lengths.append(len(token_ids))
+        if len(token_ids) >= 2 and token_ids[-2:] == [1, 2]:
+            return "\ufffd" * (len(token_ids) - 2) + "🎉"
+        return "\ufffd" * len(token_ids)
+
+
+def test_persistent_replacement_suffix_makes_bounded_correctable_progress():
+    tokenizer = PersistentReplacementTokenizer()
+    window_size = 4
+    boundary_overlap = 2
+    detokenizer = StreamingDetokenizer(
+        tokenizer,
+        window_size=window_size,
+        boundary_overlap=boundary_overlap,
+    )
+
+    token_ids = [1] * 64
+    rendered = ""
+    max_retained = 0
+    for token_id in token_ids:
+        rendered = detokenizer.feed(0, token_id).apply(rendered)
+        state = detokenizer._states[0]
+        retained = len(state.token_ids) - state.window_start_token
+        max_retained = max(max_retained, retained)
+
+    assert rendered == "\ufffd" * 64
+    assert max_retained < window_size + boundary_overlap
+
+    token_ids.append(2)
+    rendered = detokenizer.feed(0, 2).apply(rendered)
+    expected = "\ufffd" * 63 + "🎉"
+    assert rendered == expected
+
+    incremental_decode_lengths = list(tokenizer.decode_lengths)
+    rendered = detokenizer.flush(0).apply(rendered)
+    assert rendered == expected
+    assert max(incremental_decode_lengths) <= (
+        window_size + 2 * boundary_overlap
+    )
+    assert tokenizer.decode_lengths[-1] == len(token_ids)
+    assert detokenizer._states == {}
+
+
 def test_state_is_freed(tok):
     detokenizer = StreamingDetokenizer(tok)
     for token_id in tok.encode("你好🎉"):

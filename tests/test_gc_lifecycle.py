@@ -187,6 +187,7 @@ def test_failed_initialization_never_disables_gc(fake_engine, monkeypatch):
         fake_engine("fake-model", disable_python_gc=True)
 
     assert gc.isenabled()
+    assert FakeRunner.instances[-1].calls == [("exit", ())]
 
 
 def test_failed_atexit_registration_never_disables_gc(fake_engine, monkeypatch):

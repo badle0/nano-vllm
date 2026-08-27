@@ -7,7 +7,7 @@ import torch
 
 from nanovllm import LLM, SamplingParams, SchedulerCapacityError
 from nanovllm.engine.llm_engine import LLMEngine, StepOutput
-from nanovllm.engine.sequence import SequenceStatus, StreamOutput
+from nanovllm.engine.sequence import Sequence, SequenceStatus, StreamOutput
 
 MODEL_PATH = "/workspace/models/Qwen3-0.6B"
 PROMPTS = [
@@ -294,11 +294,16 @@ def test_length_validation_precedes_initialized_engine_state(method):
             )
 
 
+def test_sequence_rejects_an_empty_token_list():
+    with pytest.raises(ValueError, match="at least one token"):
+        Sequence([])
+
+
 @pytest.mark.parametrize("method", ["stream", "generate"])
 def test_admission_failure_rolls_back_only_admitted_ids(method):
     engine, _ = make_fake_engine()
     params = SamplingParams(max_tokens=1)
-    with pytest.raises(IndexError):
+    with pytest.raises(ValueError, match="at least one token"):
         if method == "stream":
             engine.stream([[1], []], params)
         else:
@@ -315,10 +320,21 @@ def test_admission_failure_rolls_back_only_admitted_ids(method):
 
 def test_string_tokenization_failure_is_transactional():
     engine, _ = make_fake_engine()
-    with pytest.raises(IndexError):
+    with pytest.raises(ValueError, match="at least one token"):
         engine.stream(["first", "bad"], SamplingParams(max_tokens=1))
     assert len(engine.scheduler.cancel_calls[0]) == 1
     assert engine.scheduler.is_finished()
+    assert engine._active_session is None
+
+
+@pytest.mark.parametrize("prompt", [[], "bad"])
+def test_add_request_rejects_prompt_that_tokenizes_to_empty(prompt):
+    engine, _ = make_fake_engine()
+    with pytest.raises(ValueError, match="at least one token"):
+        engine.add_request(prompt, SamplingParams(max_tokens=1))
+
+    assert engine.scheduler.sequences == []
+    assert engine.scheduler.available_capacity == engine.scheduler.max_num_seqs
     assert engine._active_session is None
 
 

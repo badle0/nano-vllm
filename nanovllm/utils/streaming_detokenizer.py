@@ -48,6 +48,10 @@ class StreamingDetokenizer:
     correction. For a fixed window this changes tokenizer work from quadratic
     to linear. Intermediate correctness assumes rewrites remain inside the
     configured overlap; final text is always exact.
+
+    Short-lived trailing replacement characters are withheld. If one persists
+    until the normal frontier threshold, it is emitted as correctable text so
+    an exactly splittable invalid-byte run cannot prevent bounded progress.
     """
 
     def __init__(self, tokenizer, window_size: int = 32, boundary_overlap: int = 8):
@@ -102,7 +106,16 @@ class StreamingDetokenizer:
             state.token_ids[state.window_start_token:]
         )
 
-        if new_window.endswith("\ufffd"):
+        window_tokens = len(state.token_ids) - state.window_start_token
+        frontier_threshold = self.window_size + self.boundary_overlap
+        # Hide ordinary incomplete UTF-8 fragments, but do not let a persistent
+        # replacement suffix bypass frontier advancement until the hard guard.
+        # TextUpdate can repair an emitted replacement when later tokens make
+        # the tokenizer output complete.
+        if (
+            new_window.endswith("\ufffd")
+            and window_tokens < frontier_threshold
+        ):
             return TextUpdate(seq_id, state.rendered_length, 0, "")
 
         common = self._common_prefix_length(state.window_text, new_window)

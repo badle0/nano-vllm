@@ -89,7 +89,56 @@ outputs = llm.generate(prompts, sampling_params)
 print(outputs[0]["text"])
 ```
 
+A prompt must contain at least one token. A string that tokenizes to no tokens
+or an explicit empty token list is rejected with `ValueError`; use the model's
+chat template or an appropriate control token for an intentionally empty turn.
+Explicit token prompts must be `list[int]`, and all token IDs—including IDs
+returned by the tokenizer—are checked against the model vocabulary before GPU
+execution.
+
+The context limit applies to tokens actually processed by the model:
+`len(prompt) + max_tokens - 1 <= max_model_len`. The final sampled token is
+returned but is not fed back into the model or stored in KV cache. The same
+processed-token count is used to reject a request that cannot fit in the entire
+KV pool.
+
 Call `llm.exit()` when the engine is no longer needed.
+
+### Bounded Batch Admission
+
+One `generate()` or `stream()` call can admit at most `max_num_seqs`
+prompts (512 by default). This is a hard per-call admission limit, not only a
+CUDA batch-width setting. An oversized call raises `SchedulerCapacityError`
+synchronously before tokenization or partial admission.
+
+Split larger offline workloads into windows no larger than the configured
+limit, slicing per-prompt sampling parameters at the same boundaries:
+
+```python
+def generate_in_windows(llm, prompts, sampling_params, window_size=512):
+    outputs = []
+    for start in range(0, len(prompts), window_size):
+        stop = start + window_size
+        window_params = (
+            sampling_params[start:stop]
+            if isinstance(sampling_params, list)
+            else sampling_params
+        )
+        outputs.extend(
+            llm.generate(prompts[start:stop], window_params)
+        )
+    return outputs
+```
+
+Apply the same slicing to `stream()`, and fully drain or close each
+`StreamSession` before starting the next. Concatenated windows preserve
+prompt/result order, but each window is a separate session with separate
+submission and final-delivery metric boundaries. Raising `max_num_seqs`
+increases scheduler and CUDA-graph resource requirements, and
+`max_num_batched_tokens` must remain at least as large.
+
+The post-RC correctness and edge-case contracts are recorded in
+[`docs/ROBUSTNESS_FIXES.md`](docs/ROBUSTNESS_FIXES.md).
 
 ## Fork-Specific Features
 
@@ -138,9 +187,20 @@ with llm.stream(prompts, sampling_params) as stream:
 an earlier suffix because tokenizer cleanup and normalization are not always
 append-only.
 
+The detokenizer temporarily withholds a trailing Unicode replacement character
+produced by an incomplete byte fragment. If replacement output persists until
+the bounded frontier threshold, it is emitted as a correctable update so
+exactly splittable invalid-byte runs continue making progress; a later token can
+still repair that suffix. `flush()` always performs the exact full decode. A
+tokenizer output that cannot be split across any candidate boundary still
+raises at the hard safety limit.
+
 Completed caller-delivery metrics are available in
 `stream.metrics[seq_id]`. A retained iterator is not closed by `break` alone;
 the context manager or an explicit `stream.close()` performs ID-scoped cleanup.
+As a last-resort safeguard, garbage collection of an abandoned session attempts
+the same cleanup and emits `RuntimeWarning`, but applications must not rely on
+finalizer timing—especially when cyclic GC is disabled.
 
 The ownership lock makes simultaneous `generate()` and `stream()` starts fail
 atomically. It does not make the engine a generally thread-safe dispatcher.
@@ -161,6 +221,11 @@ Fresh-process repaired greedy and top-k evidence is documented under
 The default `top_p_backend="exact"` matches the audited Transformers 5.14.1
 ascending-sort boundary and tie behavior. It also preserves nano-vLLM's existing
 full-vocabulary exponential fixed-seed sampling stream.
+
+The exact filter calculates nucleus support in a private, temperature-scaled
+FP32 workspace while masking the unscaled model logits. The final sampler
+therefore applies temperature exactly once for both BF16 and FP32 model
+outputs.
 
 For workloads where all-active top-p throughput matters more than fixed-seed
 parity with the exact implementation, construct the engine with the optional

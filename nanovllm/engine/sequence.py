@@ -30,6 +30,8 @@ class Sequence:
         submission_time: float | None = None,
         engine_arrival_time: float | None = None,
     ):
+        if len(token_ids) == 0:
+            raise ValueError("prompt must contain at least one token")
         self.seq_id = next(Sequence.counter)
         self.status = SequenceStatus.WAITING
         self.token_ids = copy(token_ids)
