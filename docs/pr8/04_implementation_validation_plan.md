@@ -1,8 +1,13 @@
 # PR8 speculative decoding v2: implementation and validation plan
 
-Status: **V0 frozen at `480a3b2`; V1 sampling-law implementation is locally
-certified on `feat/spec-v2-sampling-law`**. Remote GitHub checks remain pending
-until push. No dual-model or engine execution path exists yet.
+Status: **V0 is frozen at `480a3b2`; V1 sampling-law implementation is locally
+certified through `8989e44`; V2 inert dual-model lifecycle code is implemented
+but not yet retained-certified**. V2 certification requires an atomic clean
+implementation commit followed by fresh SHA-bound A100 lifecycle and recovery
+artifacts. Every dirty-worktree or pre-commit A100 run is exploratory and cannot
+be retained, renamed, or used as release evidence. No draft proposal, scheduler
+plan, target verification, burst commit, or speculative streaming path exists
+yet.
 
 Base: `origin/fork-main` at `663753b`.
 
@@ -207,6 +212,34 @@ CUDA peak allocated bytes with `W_spec_live_peak`; validate
 `W_spec_reservation` against peak reserved bytes and post-init headroom. The plan
 must fit the reservation before allocating proposal tensors or provisional
 blocks.
+
+V2 implements a conservative configured-maximum planner before any runtime
+proposal path exists. It uses:
+
+```text
+Kmax = min(configured_k, max_num_batched_tokens - 1, max_model_len - 1)
+B = min(max_num_seqs, floor(max_num_batched_tokens / (Kmax + 1)))
+```
+
+Clipping `Kmax` never increases `B`. The plan prices retained `q[B,K,V]`,
+materialized `p[B,K+1,V]`, draft/target logits, exact top-k/top-p proxies,
+categorical/correction noise, metadata, and an aligned allocator margin. It is a
+reservation model, not a measured route certificate: V2 does not allocate those
+proposal/verification tensors and therefore intentionally reports
+`gpu_certified=false`. Activation/library workspace, graph-static workspace,
+backend-internal selection/sort workspace, and allocator fragmentation remain
+named unresolved audit components. Actual per-route allocated/reserved peak
+reconciliation is a V3/V5/V7 gate once the corresponding runtime owners exist.
+
+For V2 joint KV sizing, one logical block costs the target block bytes plus the
+draft block bytes. Graph construction reserves the profiled capture peak plus
+`max(64 MiB, one joint block)`. Runtime reserves resident graph ownership plus
+the larger target/draft warmup transient plus the modeled speculative workspace.
+Sizing subtracts the larger of the construction and runtime envelopes rather
+than their sum because the capture high-water and runtime workspace do not
+overlap. Final capture is checked against the profiled construction envelope,
+pre- and post-pretouch endpoints remain distinct, and the final audit checks
+post-init modeled runtime headroom.
 
 `route_key` includes at least the draft batch bucket, verifier ragged
 `(token_bucket, slot_tier)`, `effective_k`, eager/graph execution mode, and a
@@ -465,18 +498,26 @@ same upper bound on the fallback contribution to total variation. Any event is a
 failed V1 gate and forbids an unqualified exactness claim rather than triggering
 a post-hoc tolerance change.
 
-### V2: inert dual-runner lifecycle
+### V2: inert dual-model lifecycle
 
 Changes:
 
-- add validated draft-model configuration and `configured_k`;
-- reject TP greater than one, FlashInfer, and invalid paths/types/ranges before
-  worker creation; explicitly validate and support both eager correctness mode and
-  the graphed performance mode;
-- load, warm, size, allocate, bind, graph, and release draft resources inside the
-  current runner transaction;
-- reserve the configured maximum `W_spec_reservation` before automatic KV block sizing
-  and validate the same headroom for explicit block-count overrides;
+- add public `draft_model` and `num_speculative_tokens`; expose `configured_k`
+  only as a derived property, and require the two public values as a strict pair;
+- before CUDA/process ownership, require real safetensors, Qwen3 target and
+  draft configs, equal vocabularies, equal full fast-tokenizer identities, TP1,
+  and the exact top-p backend; explicitly support eager construction and graphed
+  construction modes;
+- make one `ModelRunner` own both models, with sequential target/draft warmup,
+  separate physical KV tensors sharing one logical block count, dedicated draft
+  fixed-decode graphs in graph mode, and transactional RNG/default restoration;
+- reserve the configured-maximum modeled speculative workspace before automatic
+  joint-KV sizing and validate the same headroom for explicit block-count
+  overrides;
+- fail closed on ambiguous safetensors aliases, duplicates, unknown names, and
+  incomplete or contradictory packed shards; release draft/target models,
+  caches, graphs, process-group ownership, context, and the global RoPE cache on
+  rollback or idempotent close;
 - keep `configured_k == 0` fully inert.
 
 Hard gates:
@@ -495,11 +536,17 @@ Hard gates:
   and leaves the process able to construct another engine;
 - current lifecycle, config, model-runner, GC, and TP transport tests remain
   green;
-- an A100 memory audit records weights, warmup peak, graph allocation, per-block
-  target/draft bytes, `W_spec_live_peak`, allocator margin,
-  `W_spec_reservation`, selected block count, and post-init headroom; incremental
-  allocated bytes reconcile with live peak and reserved/headroom bytes reconcile
-  with the reservation without double-counting non-overlapping buffers.
+- an A100 memory audit records weights, target/draft warmup transients, graph
+  ownership and capture peak, per-block target/draft bytes, modeled workspace
+  components and reservation, allocator margin, selected joint block count, and
+  post-init headroom; planner arithmetic, automatic/explicit joint-KV boundaries,
+  graph-profile/final-capture envelopes, and modeled reserved headroom reconcile
+  without double-counting non-overlapping phases;
+- the audit remains explicitly `gpu_certified=false` until later rungs allocate
+  and measure the route-specific proposal, verifier, correction, graph-static,
+  backend-library, and allocator-fragmentation owners. V2 must not claim measured
+  `W_spec_live_peak` certification merely because its conservative reservation
+  fits.
 
 ### V3: draft path, compute then discard
 
@@ -511,6 +558,9 @@ Changes:
 - run `effective_k` draft steps through the selected eager or graphed path and
   retain tokens/probabilities only as
   ephemeral cycle state;
+- either write every canonical draft probability row directly into its reserved
+  `q[B,K,V]` destination, or revise and revalidate the memory plan for every
+  additional returned-row/copy/stack lifetime before admitting the route;
 - pretouch every draft `route_key` that discard-mode routing may select,
   after restoring production dtype/dispatch state and without advancing RNG;
 - discard every proposal and execute ordinary target decode.
@@ -520,6 +570,8 @@ Hard gates:
 - speculation enabled in discard mode produces the same baseline output and
   stream events under deterministic, non-tied fixtures;
 - draft logits/tokens are nontrivial and acceptance-rate instrumentation is sane;
+- a tensor-lifetime test proves the retained-q write contract and rejects any
+  implementation whose peak includes an unpriced result row or second q stack;
 - boundary cases around block positions 255/256/257 and multi-block K pass;
 - cold versus shared-prefix versus block-reuse draft cache results agree within
   the registered numerical contract;
@@ -615,6 +667,10 @@ Hard gates:
   counted once, and transactionally clean in an end-to-end fixture that uses the
   explicit forced-rejection injection hook rather than claiming a naturally
   valid normalized `p`/`q` row reached robust-zero mass after rejection;
+- a declarative tensor-lifetime oracle, independent of the production
+  `SpeculativeMemoryPlan` fields, reproduces every route's predicted live set;
+  property sweeps perturb each lifetime/alias edge and fail if production and
+  oracle peaks still agree after an owner is omitted or double-counted;
 - measured incremental peak allocation for the maximum supported key reconciles
   with `W_spec_live_peak`, peak reservation/headroom reconciles with
   `W_spec_reservation`, and one-above-cap routing reaches baseline without a

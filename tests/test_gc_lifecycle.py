@@ -14,6 +14,7 @@ class FakeConfig:
     model: str
     tensor_parallel_size: int = 1
     top_p_backend: str = "exact"
+    speculation_enabled: bool = False
     disable_python_gc: bool = False
     kvcache_block_size: int = 256
     eos: int = -1
@@ -89,9 +90,14 @@ def test_disable_python_gc_requires_a_strict_bool(invalid):
 
 def test_gc_control_defaults_off_and_diagnostic_flag_is_explicit():
     assert Config.__dataclass_fields__["disable_python_gc"].default is False
-    assert list(Config.__dataclass_fields__)[-2:] == [
-        "top_p_backend",
+    assert [
+        field.name
+        for field in Config.__dataclass_fields__.values()
+        if field.init
+    ][-3:] == [
         "disable_python_gc",
+        "draft_model",
+        "num_speculative_tokens",
     ]
     assert build_parser().parse_args([]).disable_python_gc is False
     assert build_parser().parse_args(["--disable-python-gc"]).disable_python_gc is True

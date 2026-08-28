@@ -52,7 +52,7 @@ jobs:
           benchmarks/chunked_prefill_tail/evidence/2026-08-18-a100-contract-phase-e50e732
           benchmarks/chunked_prefill_tail/evidence/2026-08-18-a100-full-completion-ba1bde4
 
-  speculative-sampling-law:
+  speculative-contracts:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     strategy:
@@ -69,8 +69,14 @@ jobs:
 
       - name: Install standalone CPU test dependencies
         run: |
-          python -m pip install "pytest>=8,<9"
           python -m pip install "torch==2.4.1" --index-url https://download.pytorch.org/whl/cpu
+          python -m pip install \
+            "pytest>=8,<9" \
+            "transformers==4.51.3" \
+            "safetensors==0.5.3" \
+            "numpy==1.26.4" \
+            "xxhash==3.5.0" \
+            "tqdm==4.67.1"
 
       - name: Verify exact speculative sampling law
         env:
@@ -80,3 +86,22 @@ jobs:
           python -m pytest -q -p no:cacheprovider
           tests/test_speculative_sampler.py
 
+      - name: Verify speculative V2 CPU contracts
+        env:
+          CUDA_VISIBLE_DEVICES: ""
+          HF_HUB_OFFLINE: "1"
+          PYTHONDONTWRITEBYTECODE: "1"
+          PYTHONPATH: .github/ci/speculative_v2:.
+          TRANSFORMERS_OFFLINE: "1"
+        run: >-
+          python -m pytest -q -p no:cacheprovider
+          tests/test_config.py
+          tests/test_gc_lifecycle.py
+          tests/test_tokenizer_identity.py
+          tests/test_loader.py
+          tests/test_speculative_memory.py
+          tests/test_llm_engine.py
+          tests/test_model_runner.py
+          tests/test_speculative_v0_golden.py
+          tests/test_speculative_v2_lifecycle_harness.py
+          tests/test_speculative_v2_gpu_recovery_harness.py

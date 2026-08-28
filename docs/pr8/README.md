@@ -1,11 +1,14 @@
 # PR 8 design packet: speculative decoding v2
 
-Status: the V0 design packet was frozen in commit `480a3b2`. V1 sampling-law
-work is implemented and locally certified on `feat/spec-v2-sampling-law`; it is
-an opt-in sampler seam and CPU reference oracle, not an engine-integrated
-speculative decoder. Remote GitHub checks remain pending until the branch is
-pushed. The dual-runner, scheduler, verifier, commit, streaming, and performance
-rungs have not begun.
+Status: the V0 design packet was frozen in commit `480a3b2`, and V1 sampling-law
+work was implemented and locally certified through `8989e44`. V2 now implements
+an inert dual-model lifecycle inside one `ModelRunner`: typed configuration,
+target/draft identity checks, transactional load/warmup/KV/graph ownership,
+modeled speculative-workspace reservation, and rollback/teardown. V2 retained
+certification is intentionally pending the clean implementation commit and
+fresh A100 evidence tied to that exact SHA. Draft proposal execution, scheduler
+planning, target verification, burst commit, streaming/metrics integration, and
+performance routing remain V3-V7 work and have not begun.
 
 Design base: `origin/fork-main` at
 `663753b99131945c297c1fbe02341108f422dce7`.
@@ -32,6 +35,9 @@ match `fork-main`.
 5. [05_v1_sampling_law_certification.md](05_v1_sampling_law_certification.md)
    records the exact V1 commits, local environment, adversarial findings,
    commands, results, fallback bound, and remaining exclusions.
+6. [06_v2_dual_model_lifecycle.md](06_v2_dual_model_lifecycle.md) records the
+   live V2 implementation delta, capacity policy, failure transaction, test
+   protocol, evidence status, and the exact boundary to V3 and later work.
 
 The request's fourth list item was blank. This packet interprets it as the
 implementation, validation, and benchmark rollout plan because that is the
@@ -80,7 +86,9 @@ The intended sequence is:
 ```text
 origin/fork-main @ 663753b
   -> docs/speculative-decoding-v2       (this packet)
-  -> feat/speculative-decoding-v2-*     (small gated implementation branches)
+  -> feat/spec-v2-sampling-law          (V1 exact sampling-law seam)
+  -> feat/spec-v2-dual-runner           (V2 inert dual-model lifecycle)
+  -> feat/spec-v2-draft-path ...        (V3-V7 gated implementation branches)
   -> release/speculative-decoding-v2    (only after correctness + A100 gates)
 
 feat/speculative-decoding @ a632b59     (preserved prototype; never merged wholesale)

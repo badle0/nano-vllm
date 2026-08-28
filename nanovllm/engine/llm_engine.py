@@ -37,6 +37,7 @@ from nanovllm.engine.model_runner import ModelRunner
 from nanovllm.metrics import compute_metrics
 from nanovllm.layers.sampler import require_flashinfer_sampling
 from nanovllm.utils.errors import record_cleanup_failure
+from nanovllm.utils.tokenizer_identity import require_same_token_id_space
 
 
 _PYTHON_GC_LEASE_LOCK = Lock()
@@ -338,13 +339,27 @@ class LLMEngine:
         self.ps = []
         self.events = []
         self._clock = perf_counter if _clock is None else _clock
-        config_fields = {field.name for field in fields(Config)}
+        config_fields = {
+            field.name for field in fields(Config) if field.init
+        }
         config_kwargs = {k: v for k, v in kwargs.items() if k in config_fields}
         config = Config(model, **config_kwargs)
         if config.top_p_backend == "flashinfer":
             require_flashinfer_sampling()
         # Tokenizer failure must precede GPU/process-group ownership.
         self.tokenizer = AutoTokenizer.from_pretrained(config.model, use_fast=True)
+        if config.speculation_enabled:
+            draft_tokenizer = AutoTokenizer.from_pretrained(
+                config.draft_model,
+                use_fast=True,
+            )
+            self.speculative_tokenizer_fingerprint = (
+                require_same_token_id_space(
+                    self.tokenizer,
+                    draft_tokenizer,
+                    vocab_size=config.hf_config.vocab_size,
+                )
+            )
         config.eos = self.tokenizer.eos_token_id
         self._session_lock = Lock()
         self._active_session: tuple[object, str] | None = None

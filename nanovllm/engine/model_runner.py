@@ -2,6 +2,7 @@ import gc
 import pickle
 import struct
 from datetime import timedelta
+from typing import NamedTuple
 
 import torch
 import torch.distributed as dist
@@ -10,9 +11,15 @@ from multiprocessing.shared_memory import SharedMemory
 
 from nanovllm.config import Config
 from nanovllm.engine.sequence import Sequence
+from nanovllm.engine.speculative_memory import (
+    SpeculativeMemoryPlan,
+    kv_cache_block_bytes,
+    plan_speculative_workspace,
+)
 from nanovllm.engine.tp_transport import ScheduledSequence, compact_run_args
 from nanovllm.models.qwen3 import Qwen3ForCausalLM
 from nanovllm.layers.sampler import Sampler
+from nanovllm.layers.rotary_embedding import get_rope
 from nanovllm.utils.context import set_context, get_context, reset_context
 from nanovllm.utils.errors import record_cleanup_failure
 from nanovllm.utils.loader import load_model
@@ -23,10 +30,78 @@ TP_SHM_HEADER = struct.Struct("<4sI")
 TP_SHM_MIN_SIZE = 64 * 1024
 TP_SHM_MAX_SIZE = 64 * 1024 * 1024
 TP_PROCESS_GROUP_TIMEOUT = timedelta(seconds=30)
+SPECULATIVE_GRAPH_ALLOCATOR_MARGIN_BYTES = 64 * 1024 * 1024
 
 
 class TensorParallelTransportError(RuntimeError):
     pass
+
+
+class SpeculativeKVCacheCapacityError(RuntimeError):
+    """The configured dual cache plus reserved workspace cannot fit."""
+
+
+def _clear_rope_cache():
+    """Release the one-engine-per-process global rotary-module owner."""
+
+    get_rope.cache_clear()
+
+
+class KVCacheBindingError(RuntimeError):
+    """A model's attention-layer geometry does not match its HF config."""
+
+
+class SpeculativeMemoryAudit(NamedTuple):
+    """Immutable measured/modelled memory ledger for one V2 runner."""
+
+    workspace_plan: SpeculativeMemoryPlan
+    total_memory_bytes: int
+    free_before_kv_bytes: int
+    used_before_kv_bytes: int
+    memory_budget_bytes: int
+    allocated_before_kv_bytes: int
+    reserved_before_kv_bytes: int
+    peak_before_kv_bytes: int
+    warmup_transient_bytes: int
+    target_warmup_transient_bytes: int
+    draft_warmup_transient_bytes: int
+    target_weight_bytes: int
+    draft_weight_bytes: int
+    target_block_bytes: int
+    draft_block_bytes: int
+    joint_block_bytes: int
+    # Graph ownership fields are end-of-capture deltas; graph peak fields are
+    # incremental high-water deltas from the same pre-capture baseline.
+    profiled_graph_allocated_bytes: int
+    profiled_graph_reserved_bytes: int
+    profiled_graph_peak_allocated_bytes: int
+    profiled_graph_peak_reserved_bytes: int
+    profiled_graph_ownership_bytes: int
+    profiled_graph_peak_bytes: int
+    graph_allocator_margin_bytes: int
+    graph_construction_reservation_bytes: int
+    # Compatibility alias for graph_construction_reservation_bytes.
+    graph_reservation_bytes: int
+    runtime_reservation_bytes: int
+    sizing_overhead_bytes: int
+    selected_num_blocks: int
+    target_kv_bytes: int
+    draft_kv_bytes: int
+    allocated_after_kv_before_graph_bytes: int
+    reserved_after_kv_before_graph_bytes: int
+    allocated_after_graph_before_pretouch_bytes: int
+    reserved_after_graph_before_pretouch_bytes: int
+    final_graph_allocated_bytes: int
+    final_graph_reserved_bytes: int
+    final_graph_peak_allocated_bytes: int
+    final_graph_peak_reserved_bytes: int
+    post_init_allocated_bytes: int
+    post_init_reserved_bytes: int
+    post_init_free_bytes: int
+    post_init_budget_headroom_bytes: int
+    modeled_runtime_headroom_bytes: int
+    audit_required_components: tuple[str, ...]
+    gpu_certified: bool
 
 
 def tensor_parallel_shm_size(config: Config) -> int:
@@ -78,6 +153,35 @@ class ModelRunner:
         self.tp_shm_size = (
             tensor_parallel_shm_size(config) if self.world_size > 1 else 0
         )
+        self.speculation_enabled = bool(
+            getattr(config, "speculation_enabled", False)
+        )
+        if self.speculation_enabled:
+            # Every draft-owned resource starts in a cleanup-safe state before
+            # CUDA, NCCL, model construction, compilation, or graph capture can
+            # fail. The disabled path creates no draft model/cache/graph object.
+            self.draft_model = None
+            self.draft_kv_cache = None
+            self.draft_graphs = None
+            self.draft_graph_vars = None
+            self.draft_graph_pool = None
+            self.draft_graph_bs = None
+            self.speculative_memory_plan = None
+            self.speculative_memory_audit = None
+            self._speculative_memory_audit_inputs = None
+            self._profiled_graph_allocated_bytes = 0
+            self._profiled_graph_reserved_bytes = 0
+            self._profiled_graph_peak_allocated_bytes = 0
+            self._profiled_graph_peak_reserved_bytes = 0
+            self._final_graph_allocated_baseline = 0
+            self._final_graph_reserved_baseline = 0
+            self._allocated_after_graph_before_pretouch = 0
+            self._reserved_after_graph_before_pretouch = 0
+            self._final_graph_peak_allocated_bytes = 0
+            self._final_graph_peak_reserved_bytes = 0
+            self._target_warmup_transient_bytes = 0
+            self._draft_warmup_transient_bytes = 0
+            self._warmup_transient_bytes = 0
 
         default_device = torch.get_default_device()
         default_dtype = torch.get_default_dtype()
@@ -97,11 +201,46 @@ class ModelRunner:
                 self.model = Qwen3ForCausalLM(hf_config)
                 load_model(self.model, config.model)
                 self.sampler = Sampler()
+                if self.speculation_enabled:
+                    self._run_draft_phase(
+                        "draft model construction",
+                        self._construct_draft_model,
+                    )
+                    self._run_draft_phase(
+                        "draft weight loading",
+                        self._load_draft_model,
+                    )
                 self.warmup_model()
+                if self.speculation_enabled:
+                    self._target_warmup_transient_bytes = (
+                        self._profiled_transient_bytes()
+                    )
+                    self._run_draft_phase(
+                        "draft warmup",
+                        self.warmup_draft_model,
+                    )
+                    self._draft_warmup_transient_bytes = (
+                        self._profiled_transient_bytes()
+                    )
+                    self._warmup_transient_bytes = max(
+                        self._target_warmup_transient_bytes,
+                        self._draft_warmup_transient_bytes,
+                    )
+                    if not self.enforce_eager:
+                        self._run_draft_phase(
+                            "target/draft graph-memory profile",
+                            self._profile_speculative_graph_memory,
+                        )
                 self.allocate_kv_cache()
                 if not self.enforce_eager:
                     self.capture_cudagraph()
                     self.capture_varlen_graphs()
+                    if self.speculation_enabled:
+                        self._run_draft_phase(
+                            "draft CUDA-graph capture",
+                            self.capture_draft_cudagraph,
+                        )
+                        self._record_final_graph_memory_peaks()
             except BaseException as error:
                 restore_error = self._restore_torch_defaults(
                     default_device, default_dtype
@@ -122,6 +261,14 @@ class ModelRunner:
 
             if not self.enforce_eager:
                 self._pretouch_eager_prefill()
+                if self.speculation_enabled:
+                    self._run_draft_phase(
+                        "draft eager-prefill pretouch",
+                        self._pretouch_draft_eager_prefill,
+                    )
+
+            if self.speculation_enabled:
+                self._finalize_speculative_memory_audit()
 
             if self.world_size > 1:
                 if rank == 0:
@@ -156,6 +303,74 @@ class ModelRunner:
             if first_error is None:
                 first_error = error
         return first_error
+
+    @staticmethod
+    def _restore_rng_states(cpu_state, cuda_state):
+        first_error = None
+        try:
+            torch.random.set_rng_state(cpu_state)
+        except BaseException as error:
+            first_error = error
+        try:
+            torch.cuda.set_rng_state(cuda_state)
+        except BaseException as error:
+            if first_error is None:
+                first_error = error
+        return first_error
+
+    def _run_draft_phase(self, phase_name, operation):
+        """Run one fallible draft phase without perturbing caller RNG state."""
+
+        cpu_state = torch.random.get_rng_state()
+        cuda_state = torch.cuda.get_rng_state()
+        try:
+            result = operation()
+        except BaseException as error:
+            restore_error = self._restore_rng_states(cpu_state, cuda_state)
+            if restore_error is not None:
+                record_cleanup_failure(
+                    error,
+                    f"restoring RNG after {phase_name}",
+                    restore_error,
+                )
+            raise
+        restore_error = self._restore_rng_states(cpu_state, cuda_state)
+        if restore_error is not None:
+            raise restore_error
+        return result
+
+    def _construct_draft_model(self):
+        previous_dtype = torch.get_default_dtype()
+        primary_error = None
+        try:
+            torch.set_default_dtype(self.config.draft_hf_config.dtype)
+            self.draft_model = Qwen3ForCausalLM(
+                self.config.draft_hf_config
+            )
+        except BaseException as error:
+            primary_error = error
+            raise
+        finally:
+            try:
+                torch.set_default_dtype(previous_dtype)
+            except BaseException as restore_error:
+                if primary_error is None:
+                    raise
+                record_cleanup_failure(
+                    primary_error,
+                    "restoring target dtype after draft construction",
+                    restore_error,
+                )
+
+    def _load_draft_model(self):
+        load_model(self.draft_model, self.config.draft_model)
+
+    @staticmethod
+    def _profiled_transient_bytes():
+        stats = torch.cuda.memory_stats()
+        peak = stats["allocated_bytes.all.peak"]
+        current = stats["allocated_bytes.all.current"]
+        return max(peak - current, 0)
 
     def exit(self):
         error = self._close(abort=False)
@@ -201,31 +416,60 @@ class ModelRunner:
             attempt(torch.cuda.synchronize)
 
         # Graphs own references into their pool/static buffers, so release
-        # graph objects before those tensors and before the model itself.
-        for name in (
+        # graph execs explicitly before those tensors and before either model
+        # itself.  Merely deleting CUDAGraph wrappers can leave private-pool
+        # allocations active across a failed constructor in this PyTorch build.
+        for collection_name in (
+            "draft_graphs",
             "varlen_graphs",
             "graphs",
+        ):
+            collection = getattr(self, collection_name, None)
+            if isinstance(collection, dict):
+                for graph in collection.values():
+                    reset = getattr(graph, "reset", None)
+                    if callable(reset):
+                        attempt(reset)
+
+        for name in (
+            "draft_graphs",
+            "varlen_graphs",
+            "graphs",
+            "draft_graph_pool",
+            "graph_pool",
+            "draft_graph_vars",
             "varlen_vars",
             "graph_vars",
-            "graph_pool",
+            "draft_graph_bs",
         ):
             if hasattr(self, name):
                 attempt(lambda name=name: delattr(self, name))
 
-        model = getattr(self, "model", None)
-        if model is not None:
-            def clear_module_cache_views():
-                for module in model.modules():
-                    if hasattr(module, "k_cache"):
-                        module.k_cache = None
-                    if hasattr(module, "v_cache"):
-                        module.v_cache = None
+        for model_name in ("draft_model", "model"):
+            attempt(
+                lambda model_name=model_name: self._clear_model_cache_views(
+                    getattr(self, model_name, None)
+                )
+            )
 
-            attempt(clear_module_cache_views)
-        model = None
-        for name in ("kv_cache", "sampler", "model"):
+        for name in (
+            "draft_kv_cache",
+            "kv_cache",
+            "sampler",
+            "draft_model",
+            "model",
+            "speculative_memory_plan",
+            "speculative_memory_audit",
+            "_speculative_memory_audit_inputs",
+        ):
             if hasattr(self, name):
                 attempt(lambda name=name: delattr(self, name))
+
+        # get_rope() caches the most recently constructed RotaryEmbedding,
+        # including its device buffer.  One engine per process means no healthy
+        # peer can own that entry when this runner closes; retaining it would
+        # leak model CUDA state across failure/restart boundaries.
+        attempt(_clear_rope_cache)
 
         if self._owns_process_group:
             try:
@@ -375,9 +619,240 @@ class ModelRunner:
             del warmup_logits
         torch.cuda.empty_cache()
 
+    def warmup_draft_model(self):
+        """Compile/profile the inert draft prefill path without committing state."""
+
+        torch.cuda.empty_cache()
+        torch.cuda.reset_peak_memory_stats()
+        max_num_batched_tokens = self.config.max_num_batched_tokens
+        max_model_len = self.config.max_model_len
+        seq_len = min(max_num_batched_tokens, max_model_len)
+        num_seqs = min(
+            max_num_batched_tokens // seq_len,
+            self.config.max_num_seqs,
+        )
+        seqs = [Sequence([0] * seq_len) for _ in range(num_seqs)]
+        for seq in seqs:
+            seq.num_scheduled_tokens = seq_len
+        input_ids, positions = self.prepare_prefill(seqs)
+        try:
+            with torch.inference_mode():
+                hidden_states = self.draft_model(input_ids, positions)
+                self.draft_model.compute_logits(hidden_states)
+        finally:
+            reset_context()
+        del hidden_states, input_ids, positions
+        torch.cuda.empty_cache()
+
+    def _kv_cache_shape(self, hf_config, num_blocks):
+        num_kv_heads = hf_config.num_key_value_heads // self.world_size
+        head_dim = getattr(hf_config, "head_dim", None)
+        if head_dim is None:
+            head_dim = (
+                hf_config.hidden_size // hf_config.num_attention_heads
+            )
+        return (
+            2,
+            hf_config.num_hidden_layers,
+            num_blocks,
+            self.block_size,
+            num_kv_heads,
+            head_dim,
+        )
+
+    @staticmethod
+    def _clear_model_cache_views(model):
+        if model is None:
+            return
+        for module in model.modules():
+            if hasattr(module, "k_cache"):
+                module.k_cache = None
+            if hasattr(module, "v_cache"):
+                module.v_cache = None
+
+    @staticmethod
+    def _bind_kv_cache(model, kv_cache, hf_config, *, model_name):
+        cache_modules = [
+            module
+            for module in model.modules()
+            if hasattr(module, "k_cache") and hasattr(module, "v_cache")
+        ]
+        expected_layers = hf_config.num_hidden_layers
+        if len(cache_modules) != expected_layers:
+            raise KVCacheBindingError(
+                f"{model_name} exposes {len(cache_modules)} KV-cache layers, "
+                f"but its config declares {expected_layers}"
+            )
+        for layer_id, module in enumerate(cache_modules):
+            module.k_cache = kv_cache[0, layer_id]
+            module.v_cache = kv_cache[1, layer_id]
+
+    def _allocate_and_bind_dual_kv_caches(self, num_blocks):
+        """Allocate parallel caches transactionally over one logical block space."""
+
+        target_config = self.config.hf_config
+        draft_config = self.config.draft_hf_config
+        self.kv_cache = None
+        self.draft_kv_cache = None
+        try:
+            self.kv_cache = torch.empty(
+                *self._kv_cache_shape(target_config, num_blocks),
+                dtype=target_config.dtype,
+                device="cuda",
+            )
+            self._bind_kv_cache(
+                self.model,
+                self.kv_cache,
+                target_config,
+                model_name="target",
+            )
+            self.draft_kv_cache = torch.empty(
+                *self._kv_cache_shape(draft_config, num_blocks),
+                dtype=draft_config.dtype,
+                device="cuda",
+            )
+            self._bind_kv_cache(
+                self.draft_model,
+                self.draft_kv_cache,
+                draft_config,
+                model_name="draft",
+            )
+        except BaseException:
+            self._clear_model_cache_views(self.draft_model)
+            self._clear_model_cache_views(self.model)
+            self.draft_kv_cache = None
+            self.kv_cache = None
+            raise
+
+    def _release_profile_graph_owners(self):
+        """Release graph-profile owners before replacing provisional caches."""
+
+        for collection_name in (
+            "draft_graphs",
+            "varlen_graphs",
+            "graphs",
+        ):
+            collection = getattr(self, collection_name, None)
+            if isinstance(collection, dict):
+                for graph in collection.values():
+                    reset = getattr(graph, "reset", None)
+                    if callable(reset):
+                        reset()
+        for name in (
+            "draft_graphs",
+            "varlen_graphs",
+            "graphs",
+            "draft_graph_pool",
+            "graph_pool",
+            "draft_graph_vars",
+            "varlen_vars",
+            "graph_vars",
+        ):
+            if hasattr(self, name):
+                delattr(self, name)
+        self.draft_graphs = None
+        self.draft_graph_pool = None
+        self.draft_graph_vars = None
+
+    def _profile_speculative_graph_memory(self):
+        """Measure target+draft graph ownership with one provisional KV block."""
+
+        self._allocate_and_bind_dual_kv_caches(1)
+        allocated_before = torch.cuda.memory_allocated()
+        reserved_before = torch.cuda.memory_reserved()
+        torch.cuda.reset_peak_memory_stats()
+        self.capture_cudagraph()
+        self.capture_varlen_graphs()
+        self.capture_draft_cudagraph()
+        torch.cuda.synchronize()
+        stats = torch.cuda.memory_stats()
+        self._profiled_graph_allocated_bytes = max(
+            torch.cuda.memory_allocated() - allocated_before,
+            0,
+        )
+        self._profiled_graph_reserved_bytes = max(
+            torch.cuda.memory_reserved() - reserved_before,
+            0,
+        )
+        self._profiled_graph_peak_allocated_bytes = max(
+            stats["allocated_bytes.all.peak"] - allocated_before,
+            0,
+        )
+        self._profiled_graph_peak_reserved_bytes = max(
+            stats["reserved_bytes.all.peak"] - reserved_before,
+            0,
+        )
+
+        self._release_profile_graph_owners()
+        self._clear_model_cache_views(self.draft_model)
+        self._clear_model_cache_views(self.model)
+        self.draft_kv_cache = None
+        self.kv_cache = None
+        gc.collect()
+        torch.cuda.empty_cache()
+        # The profiling transaction is not a runtime transient. Reset the peak
+        # baseline so joint sizing uses the recorded target/draft warmup costs
+        # rather than double-counting the disposable first graph capture.
+        torch.cuda.reset_peak_memory_stats()
+
+    def _record_final_graph_memory_peaks(self):
+        """Record incremental graph-capture high-water deltas before pretouch."""
+
+        torch.cuda.synchronize()
+        self._allocated_after_graph_before_pretouch = (
+            torch.cuda.memory_allocated()
+        )
+        self._reserved_after_graph_before_pretouch = (
+            torch.cuda.memory_reserved()
+        )
+        stats = torch.cuda.memory_stats()
+        self._final_graph_peak_allocated_bytes = max(
+            stats["allocated_bytes.all.peak"]
+            - self._final_graph_allocated_baseline,
+            0,
+        )
+        self._final_graph_peak_reserved_bytes = max(
+            stats["reserved_bytes.all.peak"]
+            - self._final_graph_reserved_baseline,
+            0,
+        )
+
+    def _plan_speculative_memory(self):
+        config = self.config
+        return plan_speculative_workspace(
+            vocab_size=config.hf_config.vocab_size,
+            configured_k=config.configured_k,
+            max_num_seqs=config.max_num_seqs,
+            max_num_batched_tokens=config.max_num_batched_tokens,
+            max_model_len=config.max_model_len,
+            target_logits_dtype=config.hf_config.dtype,
+            draft_logits_dtype=config.draft_hf_config.dtype,
+        )
+
+    @staticmethod
+    def _model_parameter_bytes(model):
+        # ``numel * itemsize`` double-counts tied parameters and distinct views
+        # into the same allocation.  The audit is a physical-ownership ledger,
+        # so count each backing storage exactly once per device.
+        unique_storages = {}
+        for parameter in model.parameters():
+            storage = parameter.untyped_storage()
+            key = (
+                storage.device,
+                storage.data_ptr(),
+                storage.nbytes(),
+            )
+            unique_storages[key] = storage.nbytes()
+        return sum(unique_storages.values())
+
     def allocate_kv_cache(self):
         config = self.config
         hf_config = config.hf_config
+        if getattr(self, "speculation_enabled", False):
+            return self._allocate_speculative_kv_cache()
+
+        # Keep the disabled path byte-for-byte equivalent to the V1 target-only
+        # allocation and its established diagnostics.
         free, total = torch.cuda.mem_get_info()
         used = total - free
         peak = torch.cuda.memory_stats()["allocated_bytes.all.peak"]
@@ -416,6 +891,290 @@ class ModelRunner:
                 module.k_cache = self.kv_cache[0, layer_id]
                 module.v_cache = self.kv_cache[1, layer_id]
                 layer_id += 1
+
+    def _allocate_speculative_kv_cache(self):
+        config = self.config
+        target_config = config.hf_config
+        draft_config = config.draft_hf_config
+        plan = self._plan_speculative_memory()
+        self.speculative_memory_plan = plan
+
+        free, total = torch.cuda.mem_get_info()
+        used = total - free
+        stats = torch.cuda.memory_stats()
+        peak = stats["allocated_bytes.all.peak"]
+        current = stats["allocated_bytes.all.current"]
+        reserved_before_kv = torch.cuda.memory_reserved()
+        # Target and draft warmups execute sequentially in both eager and graph
+        # modes. Persistent graph ownership is measured and reserved separately.
+        transient_peak = max(
+            self._warmup_transient_bytes,
+            peak - current,
+            0,
+        )
+        target_block_bytes = kv_cache_block_bytes(
+            target_config,
+            block_size=self.block_size,
+            tensor_parallel_size=self.world_size,
+        )
+        draft_block_bytes = kv_cache_block_bytes(
+            draft_config,
+            block_size=self.block_size,
+            tensor_parallel_size=self.world_size,
+        )
+        joint_block_bytes = target_block_bytes + draft_block_bytes
+        profiled_graph_ownership = max(
+            self._profiled_graph_allocated_bytes,
+            self._profiled_graph_reserved_bytes,
+        )
+        profiled_graph_peak = max(
+            profiled_graph_ownership,
+            self._profiled_graph_peak_allocated_bytes,
+            self._profiled_graph_peak_reserved_bytes,
+        )
+        # Provisional policy until the route-specific A100 certificate replaces
+        # it: retain at least 64 MiB and at least one full joint logical block so
+        # larger model geometries cannot receive a sub-block graph cushion.
+        graph_allocator_margin = (
+            max(
+                SPECULATIVE_GRAPH_ALLOCATOR_MARGIN_BYTES,
+                joint_block_bytes,
+            )
+            if not self.enforce_eager
+            else 0
+        )
+        graph_construction_reservation = (
+            profiled_graph_peak + graph_allocator_margin
+        )
+        # Final graph capture and speculative runtime are mutually exclusive.
+        # Runtime keeps graph ownership resident while model activation and Wspec
+        # overlap; graph construction uses the measured capture high-water plus
+        # its provisional allocator margin. Price only the larger envelope.
+        runtime_reservation = (
+            profiled_graph_ownership
+            + transient_peak
+            + plan.reservation_bytes
+        )
+        sizing_overhead = max(
+            graph_construction_reservation,
+            runtime_reservation,
+        )
+        memory_budget = int(total * config.gpu_memory_utilization)
+        usable = memory_budget - used - sizing_overhead
+        auto_blocks = usable // joint_block_bytes
+        requested_blocks = config.num_kvcache_blocks
+        if auto_blocks <= 0:
+            raise SpeculativeKVCacheCapacityError(
+                "cannot allocate any joint target/draft KV-cache blocks: "
+                f"total={total}, free={free}, budget={memory_budget}, "
+                f"used={used}, current_allocated={current}, "
+                f"peak_allocated={peak}, transient_peak={transient_peak}, "
+                f"profiled_graph_ownership={profiled_graph_ownership}, "
+                f"profiled_graph_peak={profiled_graph_peak}, "
+                f"graph_allocator_margin={graph_allocator_margin}, "
+                f"graph_construction_reservation="
+                f"{graph_construction_reservation}, "
+                f"runtime_reservation={runtime_reservation}, "
+                f"sizing_overhead={sizing_overhead}, "
+                f"modeled_workspace_reservation={plan.reservation_bytes}, "
+                f"usable={usable}, target_block_bytes={target_block_bytes}, "
+                f"draft_block_bytes={draft_block_bytes}, "
+                f"joint_block_bytes={joint_block_bytes}; lower configured K or "
+                "work limits, raise gpu_memory_utilization, or free GPU memory"
+            )
+        if requested_blocks == -1:
+            config.num_kvcache_blocks = auto_blocks
+        elif requested_blocks > auto_blocks:
+            raise SpeculativeKVCacheCapacityError(
+                f"requested num_kvcache_blocks={requested_blocks} requires "
+                f"{requested_blocks * joint_block_bytes} joint KV bytes, but "
+                f"only {usable} modeled bytes ({auto_blocks} blocks) are usable "
+                f"after sizing_overhead={sizing_overhead} "
+                f"(graph_construction={graph_construction_reservation}, "
+                f"runtime={runtime_reservation}) reservation"
+            )
+
+        self._allocate_and_bind_dual_kv_caches(
+            config.num_kvcache_blocks
+        )
+        self._final_graph_allocated_baseline = (
+            torch.cuda.memory_allocated()
+        )
+        self._final_graph_reserved_baseline = torch.cuda.memory_reserved()
+        # Eager mode performs no capture, so its graph-phase endpoint is the
+        # post-KV baseline. Graph mode overwrites both values immediately after
+        # capture and before eager-prefill pretouch can retain allocator state.
+        self._allocated_after_graph_before_pretouch = (
+            self._final_graph_allocated_baseline
+        )
+        self._reserved_after_graph_before_pretouch = (
+            self._final_graph_reserved_baseline
+        )
+        if not self.enforce_eager:
+            torch.cuda.reset_peak_memory_stats()
+        self._speculative_memory_audit_inputs = dict(
+            total_memory_bytes=total,
+            free_before_kv_bytes=free,
+            used_before_kv_bytes=used,
+            memory_budget_bytes=memory_budget,
+            allocated_before_kv_bytes=current,
+            reserved_before_kv_bytes=reserved_before_kv,
+            peak_before_kv_bytes=peak,
+            warmup_transient_bytes=transient_peak,
+            target_warmup_transient_bytes=(
+                self._target_warmup_transient_bytes
+            ),
+            draft_warmup_transient_bytes=(
+                self._draft_warmup_transient_bytes
+            ),
+            target_weight_bytes=self._model_parameter_bytes(self.model),
+            draft_weight_bytes=self._model_parameter_bytes(
+                self.draft_model
+            ),
+            profiled_graph_ownership_bytes=profiled_graph_ownership,
+            profiled_graph_peak_bytes=profiled_graph_peak,
+            graph_allocator_margin_bytes=graph_allocator_margin,
+            graph_construction_reservation_bytes=(
+                graph_construction_reservation
+            ),
+            graph_reservation_bytes=graph_construction_reservation,
+            runtime_reservation_bytes=runtime_reservation,
+            sizing_overhead_bytes=sizing_overhead,
+            target_block_bytes=target_block_bytes,
+            draft_block_bytes=draft_block_bytes,
+            joint_block_bytes=joint_block_bytes,
+            selected_num_blocks=config.num_kvcache_blocks,
+            allocated_after_kv_before_graph_bytes=(
+                self._final_graph_allocated_baseline
+            ),
+            reserved_after_kv_before_graph_bytes=(
+                self._final_graph_reserved_baseline
+            ),
+        )
+
+    def _finalize_speculative_memory_audit(self):
+        """Freeze measured ownership without claiming unmeasured certification."""
+
+        inputs = self._speculative_memory_audit_inputs
+        if inputs is None or self.speculative_memory_plan is None:
+            raise RuntimeError(
+                "speculative memory audit cannot finalize before joint KV allocation"
+            )
+        # Both eager-prefill pretouches synchronize before returning, so their
+        # input/activation tensors are dead here.  Release only the allocator's
+        # reusable cache before asking the driver for physical free memory.
+        # Otherwise those dead cached segments are counted as permanent
+        # post-init ownership and the future activation/workspace reservation is
+        # subtracted again, which can falsely reject the exact auto/explicit KV
+        # boundary.  Live weights, KV tensors, and CUDA-graph private pools remain
+        # owned and therefore remain visible to the audit.
+        torch.cuda.synchronize()
+        torch.cuda.empty_cache()
+        post_free, post_total = torch.cuda.mem_get_info()
+        if post_total != inputs["total_memory_bytes"]:
+            raise RuntimeError(
+                "CUDA total memory changed during speculative runner construction"
+            )
+        post_allocated = torch.cuda.memory_allocated()
+        post_reserved = torch.cuda.memory_reserved()
+        final_graph_allocated = max(
+            self._allocated_after_graph_before_pretouch
+            - self._final_graph_allocated_baseline,
+            0,
+        )
+        final_graph_reserved = max(
+            self._reserved_after_graph_before_pretouch
+            - self._final_graph_reserved_baseline,
+            0,
+        )
+        final_graph_construction_peak = max(
+            self._final_graph_peak_allocated_bytes,
+            self._final_graph_peak_reserved_bytes,
+        )
+        if (
+            final_graph_construction_peak
+            > inputs["graph_construction_reservation_bytes"]
+        ):
+            raise SpeculativeKVCacheCapacityError(
+                "final target/draft graph construction exceeded its profiled "
+                "reservation: "
+                f"observed_peak={final_graph_construction_peak}, "
+                "profiled_peak="
+                f"{inputs['profiled_graph_peak_bytes']}, "
+                f"allocator_margin={inputs['graph_allocator_margin_bytes']}, "
+                "reservation="
+                f"{inputs['graph_construction_reservation_bytes']}; reduce "
+                "num_kvcache_blocks/work limits or raise the registered "
+                "allocator margin before certifying this route"
+            )
+        budget_headroom = (
+            inputs["memory_budget_bytes"] - (post_total - post_free)
+        )
+        plan = self.speculative_memory_plan
+        # Target and draft model activations are sequential at runtime, exactly
+        # as in sizing. Captured graph ownership is already resident in post_free.
+        runtime_transient_reservation = inputs["warmup_transient_bytes"]
+        modeled_runtime_headroom = (
+            budget_headroom
+            - runtime_transient_reservation
+            - plan.reservation_bytes
+        )
+        if modeled_runtime_headroom < 0:
+            raise SpeculativeKVCacheCapacityError(
+                "post-init target/draft runner does not retain its modeled "
+                "runtime headroom: "
+                f"budget_headroom={budget_headroom}, "
+                f"runtime_transient={runtime_transient_reservation}, "
+                f"workspace_reservation={plan.reservation_bytes}, "
+                f"shortfall={-modeled_runtime_headroom}; reduce "
+                "num_kvcache_blocks, configured K, or work limits, or raise "
+                "gpu_memory_utilization"
+            )
+
+        self.speculative_memory_audit = SpeculativeMemoryAudit(
+            workspace_plan=plan,
+            profiled_graph_allocated_bytes=(
+                self._profiled_graph_allocated_bytes
+            ),
+            profiled_graph_reserved_bytes=(
+                self._profiled_graph_reserved_bytes
+            ),
+            profiled_graph_peak_allocated_bytes=(
+                self._profiled_graph_peak_allocated_bytes
+            ),
+            profiled_graph_peak_reserved_bytes=(
+                self._profiled_graph_peak_reserved_bytes
+            ),
+            target_kv_bytes=(
+                inputs["selected_num_blocks"] * inputs["target_block_bytes"]
+            ),
+            draft_kv_bytes=(
+                inputs["selected_num_blocks"] * inputs["draft_block_bytes"]
+            ),
+            allocated_after_graph_before_pretouch_bytes=(
+                self._allocated_after_graph_before_pretouch
+            ),
+            reserved_after_graph_before_pretouch_bytes=(
+                self._reserved_after_graph_before_pretouch
+            ),
+            final_graph_allocated_bytes=final_graph_allocated,
+            final_graph_reserved_bytes=final_graph_reserved,
+            final_graph_peak_allocated_bytes=(
+                self._final_graph_peak_allocated_bytes
+            ),
+            final_graph_peak_reserved_bytes=(
+                self._final_graph_peak_reserved_bytes
+            ),
+            post_init_allocated_bytes=post_allocated,
+            post_init_reserved_bytes=post_reserved,
+            post_init_free_bytes=post_free,
+            post_init_budget_headroom_bytes=budget_headroom,
+            modeled_runtime_headroom_bytes=modeled_runtime_headroom,
+            audit_required_components=plan.audit_required_components,
+            gpu_certified=False,
+            **inputs,
+        )
+        self._speculative_memory_audit_inputs = None
 
     def prepare_block_tables(self, seqs: list[Sequence | ScheduledSequence]):
         max_len = max(len(seq.block_table) for seq in seqs)
@@ -821,6 +1580,64 @@ class ModelRunner:
         )
 
     @torch.inference_mode()
+    def capture_draft_cudagraph(self):
+        """Capture independently owned draft decode graphs for later V3 use."""
+
+        config = self.config
+        hf_config = config.draft_hf_config
+        max_bs = min(config.max_num_seqs, 512)
+        max_num_blocks = (
+            config.max_model_len + self.block_size - 1
+        ) // self.block_size
+        input_ids = torch.zeros(max_bs, dtype=torch.int64)
+        positions = torch.zeros(max_bs, dtype=torch.int64)
+        slot_mapping = torch.zeros(max_bs, dtype=torch.int32)
+        context_lens = torch.zeros(max_bs, dtype=torch.int32)
+        block_tables = torch.zeros(
+            max_bs, max_num_blocks, dtype=torch.int32
+        )
+        outputs = torch.zeros(
+            max_bs,
+            hf_config.hidden_size,
+            dtype=hf_config.dtype,
+        )
+        self.draft_graph_bs = list(self.graph_bs)
+        self.draft_graphs = {}
+        self.draft_graph_pool = None
+
+        for bs in reversed(self.draft_graph_bs):
+            graph = torch.cuda.CUDAGraph()
+            set_context(
+                False,
+                slot_mapping=slot_mapping[:bs],
+                context_lens=context_lens[:bs],
+                block_tables=block_tables[:bs],
+            )
+            try:
+                outputs[:bs] = self.draft_model(
+                    input_ids[:bs], positions[:bs]
+                )
+                with torch.cuda.graph(graph, self.draft_graph_pool):
+                    outputs[:bs] = self.draft_model(
+                        input_ids[:bs], positions[:bs]
+                    )
+                if self.draft_graph_pool is None:
+                    self.draft_graph_pool = graph.pool()
+                self.draft_graphs[bs] = graph
+                torch.cuda.synchronize()
+            finally:
+                reset_context()
+
+        self.draft_graph_vars = dict(
+            input_ids=input_ids,
+            positions=positions,
+            slot_mapping=slot_mapping,
+            context_lens=context_lens,
+            block_tables=block_tables,
+            outputs=outputs,
+        )
+
+    @torch.inference_mode()
     def capture_varlen_graphs(self):
         config = self.config
         S1 = config.max_num_seqs + 1    # F3: +1 segment slot for C3's single partial chunk
@@ -911,3 +1728,36 @@ class ModelRunner:
             self.model(input_ids, positions)
         torch.cuda.synchronize()
         reset_context()
+
+    def _pretouch_draft_eager_prefill(self):
+        """Pretouch the draft's eager prefill specialization after defaults restore."""
+
+        T = self.config.max_num_batched_tokens
+        L = min(self.config.max_model_len, T)
+        ns = (T + L - 1) // L
+        cu = torch.arange(
+            0, ns + 1, dtype=torch.int32, device="cuda"
+        ) * L
+        cu[-1] = T
+        input_ids = torch.zeros(T, dtype=torch.int64, device="cuda")
+        positions = torch.arange(
+            T, dtype=torch.int64, device="cuda"
+        ) % L
+        set_context(
+            True,
+            cu,
+            cu.clone(),
+            L,
+            L,
+            torch.full(
+                (T,), -1, dtype=torch.int32, device="cuda"
+            ),
+            None,
+            None,
+        )
+        try:
+            with torch.inference_mode():
+                self.draft_model(input_ids, positions)
+            torch.cuda.synchronize()
+        finally:
+            reset_context()

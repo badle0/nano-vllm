@@ -4,6 +4,10 @@ import torch.nn.functional as F
 import torch.distributed as dist
 
 from nanovllm.utils.context import get_context
+from nanovllm.utils.loader import (
+    require_exact_global_weight_shape,
+    require_exact_weight_shape,
+)
 
 
 class VocabParallelEmbedding(nn.Module):
@@ -26,9 +30,16 @@ class VocabParallelEmbedding(nn.Module):
 
     def weight_loader(self, param: nn.Parameter, loaded_weight: torch.Tensor):
         param_data = param.data
+        require_exact_global_weight_shape(
+            param_data,
+            loaded_weight,
+            shard_dim=0,
+            num_shards=self.tp_size,
+        )
         shard_size = param_data.size(0)
         start_idx = self.tp_rank * shard_size
         loaded_weight = loaded_weight.narrow(0, start_idx, shard_size)
+        require_exact_weight_shape(param_data, loaded_weight)
         param_data.copy_(loaded_weight)
 
     def forward(self, x: torch.Tensor):

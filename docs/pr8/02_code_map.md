@@ -10,6 +10,12 @@ compact tensor-parallel transport, the exact/FlashInfer top-p split, and ragged
 CUDA graphs. Every design conclusion below is therefore derived from the
 current source.
 
+Implementation-status note: this is the frozen `663753b` baseline map. V2 has
+since landed the inert dual-model construction/lifecycle delta described in
+[06_v2_dual_model_lifecycle.md](06_v2_dual_model_lifecycle.md). Statements below
+written in the future tense remain the historical landing map unless that V2
+delta document explicitly marks them implemented.
+
 ## 1. One current request, from construction to cleanup
 
 ### 1.1 Public construction and ownership
@@ -392,6 +398,16 @@ New abstractions may wrap the current path only if tests demonstrate this strict
 off behavior. Performance measurements must also report spec-off initialization,
 prefill, decode, streaming, and chunked-prefill deltas.
 
+V2 deliberately changes two baseline-visible failure/teardown details even when
+speculation is off. The shared safetensors loader now fails closed on unknown,
+duplicate, missing, or contradictory tensor/shard coverage instead of accepting
+ambiguous state, and close clears nano-vLLM's process-global RoPE cache so a later
+engine can be constructed safely in the same process. Accordingly, the V0 parity
+gate proves the registered greedy success-path outputs, scheduler traces, and RNG
+state; it does not claim that every malformed checkpoint raises the historical
+exception or that every sampled workload/performance point has already been
+certified.
+
 ## 4. Change matrix
 
 | File | Current responsibility | Required speculative-decoding change |
@@ -409,12 +425,22 @@ prefill, decode, streaming, and chunked-prefill deltas.
 | `nanovllm/layers/embed_head.py` | Computes distributed logits; gathers one last row per prefill sequence | Add verifier `ALL_QUERY_ROWS` or selected-row mode while preserving ordinary last-row prefill behavior |
 | `nanovllm/models/qwen3.py` | Target/draft transformer and LM-head composition | Usually no semantic change beyond exposing clear hidden-state/logit selection seams used by runner |
 | `nanovllm/layers/sampler.py` | Greedy, exact top-k/top-p, FlashInfer top-p, ordinary sampling | Extract shared warp/probability preparation; add exact acceptance/residual sampler and controlled RNG; gate unsupported FlashInfer sampled speculation |
+| `nanovllm/utils/loader.py` | Loads model safetensors into nano-vLLM parameter names | V2 hardens exact direct/alias/packed-shard coverage, rejects broadcast or oversized global/local tensor geometry, and preserves typed resource-exhaustion errors for two-model ownership |
+| `nanovllm/utils/tokenizer_identity.py` | Not present at the frozen base | V2 adds a fail-closed full fast-tokenizer/token-ID-space fingerprint checked before CUDA ownership |
+| `nanovllm/engine/speculative_memory.py` | Not present at the frozen base | V2 adds a pure configured-maximum probability/workspace and joint-KV planning model; measured route certification remains later work |
+| `.github/ci/speculative_v2/sitecustomize.py` | Not present at the frozen base | V2 CPU CI supplies a deliberately non-executable fake Qwen leaf for control-plane tests only; it never certifies real kernels or GPU behavior |
 | `nanovllm/metrics.py` | Computes queue, TTFT, ITL, E2E, and delivery metrics from sequence timestamps | Preserve per-token timing; add cycle/accepted/proposed/target-position/draft-position counters through engine result data |
 | `nanovllm/utils/streaming_detokenizer.py` | Converts individual token events into incremental text | No algorithmic change if postprocess continues emitting one ordered event per committed token |
 | `tests/test_config.py` and admission tests | Validate construction and request boundaries | Add K/draft/tokenizer/backend/TP validation, exact `P+N-1` boundaries, effective draft limit, and spec-off construction tests |
 | `tests/test_scheduler.py` | Validates decode-first scheduling, chunking, preemption, blocks | Add variable-K budgeting, block-boundary reservations, rejection stale-slot invariants, rollback, EOS/max-token burst truncation, preemption and cancel tests |
 | sampler tests | Validate top-k/top-p/greedy semantics | Add CPU reference rejection tests, support invariants, p=q accept-all, greedy limit, statistical-law tests, precision/zero-residual cases |
 | graph/runner/streaming/metrics/lifecycle tests | Validate execution parity and ownership | Add eager/graph verify parity, LM-head all-row shape, stream burst ordering, abandoned session cleanup, constructor failure injection, repeated engine construction, and spec-off parity |
+
+V2 intentionally copied the target fixed-decode graph-capture routine into a
+dedicated `capture_draft_cudagraph` path instead of parameterizing the existing
+routine. This keeps the established target graph path mechanically unchanged for
+the inert milestone. The duplication is explicit, reviewable technical debt to
+revisit when V3 adds real draft execution and its route registry.
 
 ## 5. Recommended landing sequence
 

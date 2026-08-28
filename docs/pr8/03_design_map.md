@@ -203,6 +203,15 @@ model loading, KV capacity, graph capture, scheduler decisions, outputs, metrics
 exceptions, and cleanup follow the current baseline path. No draft object is
 created and no extra random draw is consumed.
 
+V2 preserves the registered target success path, scheduler trace, output, and
+RNG contracts, but makes two deliberate shared-path hardening changes: malformed
+or ambiguous safetensors now fail closed in the common loader, and close clears
+the process-global RoPE cache to make sequential engine construction safe. Thus
+“old path” is not a promise to retain historical malformed-checkpoint exceptions
+or cache residue. The canonical V0 comparator currently certifies one fixed
+greedy workload; broader sampled and performance parity remain explicit later
+gates.
+
 ### I8 — work and output are different units
 
 Decode rows, draft positions, target verification positions, accepted proposals,
@@ -768,22 +777,27 @@ as a v2 result.
 | Performance | high acceptance does not imply speedup | paired phase timings and workload-specific roofline/crossover |
 | TP | every rank must execute the same collectives and cache updates | fail-fast v1; real TP certification later |
 
-## 8. Compatibility matrix for v1
+## 8. Compatibility matrix for the complete v1 path and current V2
 
-| Feature | Initial status | Behavior |
+The “complete path” column is the intended V3-V7 destination, not a claim about
+the current branch. V2 constructs an inert draft owner but deliberately executes
+ordinary target decoding; tests assert that generation performs zero draft
+forwards.
+
+| Feature | Complete path | Current V2 behavior |
 |---|---|---|
-| speculation disabled | supported | exact current baseline path |
-| greedy, TP1 | supported | longest target-argmax match plus target correction/bonus |
-| temperature/top-k/exact top-p, TP1 | supported after statistical gates | exact modified rejection on the normal path; counted machine-precision recovery is reported and qualifies exactness if observed |
-| FlashInfer top-p + speculation | unsupported | construction-time error or baseline-only explicit policy; never silent exact claim |
-| chunked prefill | supported by coexistence | mixed steps use baseline; pure-decode steps may speculate |
-| prefix cache | supported after cache-validity gates | target reuse plus independent draft catch-up |
-| eager mode | correctness-supported | performance not promised |
-| CUDA graphs | supported after per-bucket gates | graphed draft; measured verifier routing; no unplanned first-cycle compile/capture |
-| streaming/generate/manual step | supported | same public token order and ownership contracts |
-| cancellation/abandoned stream | supported | rollback/cleanup at cycle boundaries |
-| TP>1 | unsupported | fail before worker/GPU ownership |
-| tree/Medusa/EAGLE | out of scope | future proposer/verifier architecture |
+| speculation disabled | supported; exact registered baseline success path | supported; no draft tokenizer/config/model/cache/graph owner; shared loader and RoPE teardown hardening are disclosed above |
+| greedy, TP1 | target-argmax proposal verification, correction, and bonus | configuration/lifecycle only; ordinary target decode, zero draft forwards |
+| temperature/top-k/exact top-p, TP1 | exact modified rejection with counted finite-precision recovery | V1 sampler seam exists, but it is not engine-integrated; ordinary target decode only |
+| FlashInfer top-p + speculation | unsupported | typed construction-time rejection before GPU ownership |
+| chunked prefill | mixed steps baseline; eligible pure-decode steps may speculate | ordinary scheduler/chunked-prefill behavior only; no speculative planning |
+| prefix cache | target reuse plus independently certified draft catch-up | target cache only at runtime; draft catch-up/coverage not implemented |
+| eager mode | correctness-supported; performance not promised | dual-model load/warmup/joint-KV lifecycle construction only |
+| CUDA graphs | graphed draft plus measured verifier routing | target graphs plus dedicated inert draft fixed-decode graphs; no proposal or verifier route |
+| streaming/generate/manual step | same public token order and ownership contracts | ordinary one-token engine behavior; no burst commit/stream/metric integration |
+| cancellation/abandoned stream | rollback/cleanup at speculative cycle boundaries | existing ordinary lifecycle only; dual-model engine teardown is transactional |
+| TP>1 | unsupported initially | typed construction-time rejection before workers/GPU ownership |
+| tree/Medusa/EAGLE | out of scope | out of scope |
 
 ## 9. Decisions deliberately left measurement-dependent
 
