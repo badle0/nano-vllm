@@ -453,6 +453,18 @@ Hard gates:
 - all existing sampler tests, including FlashInfer exclusion behavior, pass;
 - speculation-off fixed-seed output is unchanged from V0.
 
+V1 fallback-rate certificate preregistration: use the four fixed Monte Carlo
+cases in `tests/test_speculative_sampler.py` (temperature, top-k, top-p, and
+combined), each with 100,000 one-token speculative cycles. The event is
+`target_fallback == True` per cycle; the deliberately injected robust-zero
+fallback fixture is excluded. Passing requires zero events in all `n = 400,000`
+cycles. For zero events, report the one-sided 95% exact binomial
+(Clopper-Pearson) upper bound
+`1 - 0.05 ** (1 / n) = 7.489302638941098e-6`; the coupling argument gives the
+same upper bound on the fallback contribution to total variation. Any event is a
+failed V1 gate and forbids an unqualified exactness claim rather than triggering
+a post-hoc tolerance change.
+
 ### V2: inert dual-runner lifecycle
 
 Changes:
