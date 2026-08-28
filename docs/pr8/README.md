@@ -1,10 +1,11 @@
 # PR 8 design packet: speculative decoding v2
 
 Status: the V0 design packet was frozen in commit `480a3b2`. V1 sampling-law
-work is implemented on `feat/spec-v2-sampling-law`; it is an opt-in sampler
-seam and CPU reference oracle, not an engine-integrated speculative decoder.
-The dual-runner, scheduler, verifier, commit, streaming, and performance rungs
-have not begun.
+work is implemented and locally certified on `feat/spec-v2-sampling-law`; it is
+an opt-in sampler seam and CPU reference oracle, not an engine-integrated
+speculative decoder. Remote GitHub checks remain pending until the branch is
+pushed. The dual-runner, scheduler, verifier, commit, streaming, and performance
+rungs have not begun.
 
 Design base: `origin/fork-main` at
 `663753b99131945c297c1fbe02341108f422dce7`.
@@ -28,6 +29,9 @@ match `fork-main`.
 4. [04_implementation_validation_plan.md](04_implementation_validation_plan.md)
    is the branch/commit ladder, test gates, A100 benchmark plan, and release
    criteria.
+5. [05_v1_sampling_law_certification.md](05_v1_sampling_law_certification.md)
+   records the exact V1 commits, local environment, adversarial findings,
+   commands, results, fallback bound, and remaining exclusions.
 
 The request's fourth list item was blank. This packet interprets it as the
 implementation, validation, and benchmark rollout plan because that is the

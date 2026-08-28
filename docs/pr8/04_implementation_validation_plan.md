@@ -1,8 +1,8 @@
 # PR8 speculative decoding v2: implementation and validation plan
 
-Status: **V0 frozen at `480a3b2`; V1 sampling-law implementation and CPU
-certification are in progress on `feat/spec-v2-sampling-law`**. No dual-model or
-engine execution path exists yet.
+Status: **V0 frozen at `480a3b2`; V1 sampling-law implementation is locally
+certified on `feat/spec-v2-sampling-law`**. Remote GitHub checks remain pending
+until push. No dual-model or engine execution path exists yet.
 
 Base: `origin/fork-main` at `663753b`.
 
