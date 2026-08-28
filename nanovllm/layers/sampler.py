@@ -80,6 +80,61 @@ def _validate_race_noise(
         )
 
 
+def _validate_probabilities_out(
+    probabilities_out: torch.Tensor | None,
+    *,
+    shape: torch.Size | tuple[int, ...],
+    device: torch.device,
+) -> torch.Tensor | None:
+    """Validate caller-owned storage for a canonical FP32 probability row.
+
+    Requiring the exact dense layout keeps the ``softmax(..., out=...)`` write
+    auditable and permits a future runner to retain ``storage[step]`` from a
+    contiguous ``[K, B, V]`` allocation without an intermediate probability
+    tensor or copy.
+    """
+
+    if probabilities_out is None:
+        return None
+    if not isinstance(probabilities_out, torch.Tensor):
+        raise TypeError("probabilities_out must be a tensor or None")
+    if tuple(probabilities_out.shape) != tuple(shape):
+        raise ValueError(
+            f"probabilities_out must have shape {tuple(shape)}"
+        )
+    if probabilities_out.dtype != torch.float32:
+        raise TypeError("probabilities_out must have dtype torch.float32")
+    if probabilities_out.device != device:
+        raise ValueError("probabilities_out must be on the logits device")
+    if not probabilities_out.is_contiguous():
+        raise ValueError("probabilities_out must be contiguous")
+    return probabilities_out
+
+
+def _reject_probabilities_out_alias(
+    probabilities_out: torch.Tensor | None,
+    other: torch.Tensor | None,
+    *,
+    other_name: str,
+) -> None:
+    """Reject shared storage, including conservative disjoint-view aliases.
+
+    ``torch._C._overlaps`` deliberately reports storage-level aliasing rather
+    than trying to prove that arbitrary strided views have disjoint byte sets.
+    The stronger rule avoids depending on private stride arithmetic and makes
+    the caller-owned output contract robust to future changes in write order.
+    """
+
+    if probabilities_out is None or other is None:
+        return
+    if probabilities_out.device == other.device and torch._C._overlaps(
+        probabilities_out, other
+    ):
+        raise ValueError(
+            f"probabilities_out must not share storage with {other_name}"
+        )
+
+
 def _sample_exponential_race(
     weights: torch.Tensor,
     noise: torch.Tensor,
@@ -218,11 +273,13 @@ class Sampler(nn.Module):
             tuple[int, torch.Tensor | None], ...
         ] = (),
         top_p_plan: tuple[torch.Tensor | None, torch.Tensor] | None = None,
+        probabilities_out: torch.Tensor | None = None,
     ) -> torch.Tensor:
         """Build the exact sampler law without mutating caller-owned logits.
 
         This is an opt-in seam for speculative decoding.  The ordinary compiled
-        ``forward`` path below intentionally remains unchanged.
+        ``forward`` path below intentionally remains unchanged.  When supplied,
+        ``probabilities_out`` is filled directly and returned by identity.
         """
 
         if not isinstance(logits, torch.Tensor) or logits.ndim != 2:
@@ -244,6 +301,17 @@ class Sampler(nn.Module):
             (temperatures < 0).any()
         ):
             raise ValueError("temperatures must be finite and non-negative")
+        probabilities_out = _validate_probabilities_out(
+            probabilities_out,
+            shape=logits.shape,
+            device=logits.device,
+        )
+        _reject_probabilities_out_alias(
+            probabilities_out, logits, other_name="logits"
+        )
+        _reject_probabilities_out_alias(
+            probabilities_out, temperatures, other_name="temperatures"
+        )
 
         validated_top_k = []
         top_k_rows_seen = torch.zeros(
@@ -262,6 +330,11 @@ class Sampler(nn.Module):
                 batch_size=batch_size,
                 device=logits.device,
                 name=f"top_k_buckets[{bucket_index}].row_indices",
+            )
+            _reject_probabilities_out_alias(
+                probabilities_out,
+                row_indices,
+                other_name=f"top_k_buckets[{bucket_index}].row_indices",
             )
             active_rows = (
                 torch.arange(batch_size, device=logits.device)
@@ -302,6 +375,16 @@ class Sampler(nn.Module):
                 or bool((probability_cutoffs >= 1).any())
             ):
                 raise ValueError("probability_cutoffs must be finite and in [0, 1)")
+            _reject_probabilities_out_alias(
+                probabilities_out,
+                row_indices,
+                other_name="top_p_plan.row_indices",
+            )
+            _reject_probabilities_out_alias(
+                probabilities_out,
+                probability_cutoffs,
+                other_name="top_p_plan.probability_cutoffs",
+            )
             validated_top_p = (row_indices, probability_cutoffs)
 
         # Both current filters mutate their argument.  Preserve their exact tie
@@ -322,7 +405,11 @@ class Sampler(nn.Module):
         scaled_logits = filtered_logits.to(
             dtype=torch.float32, copy=True
         ).div_(temperatures.clamp_min(1e-10).unsqueeze(dim=1))
-        probabilities = torch.softmax(scaled_logits, dim=-1)
+        if probabilities_out is None:
+            probabilities = torch.softmax(scaled_logits, dim=-1)
+        else:
+            torch.softmax(scaled_logits, dim=-1, out=probabilities_out)
+            probabilities = probabilities_out
 
         greedy_rows = torch.nonzero(temperatures == 0, as_tuple=False).flatten()
         if greedy_rows.numel():
@@ -348,22 +435,37 @@ class Sampler(nn.Module):
         ] = (),
         top_p_plan: tuple[torch.Tensor | None, torch.Tensor] | None = None,
         race_noise: torch.Tensor | None = None,
+        probabilities_out: torch.Tensor | None = None,
     ) -> ExactSample:
         """Draw from, and retain, the exact canonical FP32 distribution."""
+
+        # Validate injected noise before the probability write.  In particular,
+        # a caller must not use the same backing storage for the retained law
+        # and the exponential-race draw that consumes it.
+        if isinstance(logits, torch.Tensor) and logits.ndim == 2:
+            probabilities_out = _validate_probabilities_out(
+                probabilities_out,
+                shape=logits.shape,
+                device=logits.device,
+            )
+            if race_noise is not None:
+                _validate_race_noise(
+                    race_noise,
+                    shape=logits.shape,
+                    device=logits.device,
+                    name="race_noise",
+                )
+                _reject_probabilities_out_alias(
+                    probabilities_out, race_noise, other_name="race_noise"
+                )
 
         probabilities = self.prepare_exact_probabilities(
             logits,
             temperatures,
             top_k_buckets=top_k_buckets,
             top_p_plan=top_p_plan,
+            probabilities_out=probabilities_out,
         )
-        if race_noise is not None:
-            _validate_race_noise(
-                race_noise,
-                shape=probabilities.shape,
-                device=probabilities.device,
-                name="race_noise",
-            )
 
         greedy_tokens = probabilities.argmax(dim=-1)
         sampled_rows = temperatures != 0

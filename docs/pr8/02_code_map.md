@@ -14,7 +14,9 @@ Implementation-status note: this is the frozen `663753b` baseline map. V2 has
 since landed the inert dual-model construction/lifecycle delta described in
 [06_v2_dual_model_lifecycle.md](06_v2_dual_model_lifecycle.md). Statements below
 written in the future tense remain the historical landing map unless that V2
-delta document explicitly marks them implemented.
+delta document explicitly marks them implemented. The
+`feat/spec-v2-draft-path` change set now implements the V3 overlay summarized in
+§3.1. That overlay is a code map, not an A100 certification claim.
 
 ## 1. One current request, from construction to cleanup
 
@@ -408,6 +410,120 @@ state; it does not claim that every malformed checkpoint raises the historical
 exception or that every sampled workload/performance point has already been
 certified.
 
+### 3.1 Current V3 worktree overlay: implemented, not yet certified
+
+The current `feat/spec-v2-draft-path` worktree adds the following draft-only
+path without changing the authoritative one-token target commit:
+
+- `nanovllm/engine/speculative_routes.py` defines immutable
+  `draft-discard-v1` keys over execution mode, batch bucket, effective K,
+  catch-up family, and one conservative exact-sampler envelope. Each entry binds
+  that key to a fingerprinted V2 memory plan, explicit q/proposal-ID byte
+  accounting, and the constructor components required to make it ready. V3
+  bounds the ready K axis at 32 without rejecting a larger configured K, and
+  bounds graph-mode batch routes at 512; an out-of-registry live batch therefore
+  fails closed to whole-batch baseline decode. For each batch-bucket interval,
+  construction prunes K/family combinations that cannot satisfy the model-length
+  or minimum token-work constraints for any live batch that could select that
+  bucket. Every catch-up family that remains resolvable still exposes a
+  contiguous ready range beginning at K=1. Workspace readiness additionally
+  requires proposal-ID bytes to equal `B*K*sizeof(int64)` exactly and requires
+  `q_bytes + proposal_id_bytes <= modeled_draft_live_bytes <= reserved_plan_bytes`;
+  a fingerprint or accounting mismatch cannot become a ready route.
+- `ModelRunner` builds the desired registry before graph capture. After Torch's
+  production default device/dtype are restored, constructor pretouch exercises
+  eager draft-decode witnesses or actually replays every captured draft graph
+  bucket through its registered graph and draft output head. Graph mode also
+  executes a live interior batch of three when representable, exercising bucket
+  slicing rather than capture endpoints alone. Paged ragged catch-up pretouch
+  covers a one-token witness, the maximum single-row witness, a block-boundary
+  witness when eligible, and the exact maximum aggregate catch-up
+  `max_B min(M - 2B, B(L - 2))` over the admitted batch domain. Dense,
+  near-dense, and sparse exact-sampler compositions cover the sampler envelope.
+  Readiness is published atomically only after all required components are warm
+  and the observed pretouch peak remains inside the modeled envelope.
+- `ModelRunner` imports the same `MAX_CUDA_GRAPH_BATCH_SIZE == 512` constant used
+  by route construction. Ordinary target decode falls back to eager above it,
+  and target fixed-decode capture uses that same cap and the same bucket builder,
+  so an admitted graph route cannot refer to a target graph tier that capture did
+  not create.
+- `ModelRunner.resolve_draft_route_admission` is a host-only preflight. It checks
+  registry readiness, model/sampler/draft-KV ownership, graph dictionaries and
+  static buffer geometry, then resolves a contiguous K range for the live batch
+  and its exact catch-up family. A missing/unwarmed route or missing runtime
+  owner returns no admission before scheduler reservation, RNG use, q allocation,
+  or a draft kernel; `LLMEngine` then requests a whole-batch baseline plan.
+- `Scheduler.plan_draft_discard` rechecks the admitted batch and catch-up count,
+  intersects configured K with completion, position, token-budget, workspace,
+  and route caps, records the exact `DraftRouteKey`, and reserves every draft
+  write through position `committed_length + effective_k - 2`. The runner
+  independently revalidates that key and all live row/block-table facts before
+  allocating proposal workspace.
+- `Sequence.num_draft_cached_tokens` tracks draft validity separately. The
+  runner catches the draft up from committed tokens, executes K sequential
+  proposal steps, writes canonical FP32 probabilities directly into contiguous
+  K-major storage, and returns only a host diagnostic result. Proposal IDs and q
+  are discarded; the ordinary target call remains authoritative.
+- Draft constructor warmup no longer instantiates `Sequence`. Doing so consumed
+  the process-global public sequence counter and shifted every later request ID
+  only when speculation was enabled. `warmup_draft_model` now prepares the
+  ragged prefill witness from counter-free `ScheduledSequence` transport DTOs,
+  which carry the required token/cache fields without public identity or
+  scheduler side effects.
+- `BlockManager` owns at most one global temporary append lease. Reservation
+  snapshots allocator membership/order/hash state, participating block metadata,
+  row block tables, and both cache coverages; it fences unrelated allocator
+  mutation and restores the snapshot on allocation, publication, validation, or
+  proposal failure. The lease is released before target decode, so proposal-only
+  blocks cannot reach target hashing or postprocessing.
+- `LLMEngine._step` and request cancellation share an execution `RLock` so close
+  or abandoned-session cleanup cannot deallocate KV while target/draft kernels
+  are in flight. `StreamSession` also serializes iteration and explicit close.
+  Failed draft/target cycles clear the active lease or staged coverage and undo
+  a boundary block appended by ordinary decode scheduling. `Scheduler.cancel`
+  resolves real queue targets first, releases the global lease before allocator
+  mutation, and deallocates a target before removing it from its queue, avoiding
+  partial queue loss on a cleanup exception.
+- `Scheduler.stage_draft_coverage` validates the complete host result before the
+  target call. `postprocess` validates token count/type/range, row order, staged
+  coverage, and live sequence facts before its first ordinary commit mutation;
+  successful postprocess advances draft coverage only to the committed prefix
+  actually established by proposal step zero.
+- The new route enums use a `str`/`Enum` shim rather than Python 3.11-only
+  `StrEnum`. Draft failures are converted to a host-only
+  `SpeculativeDraftExecutionError` after severing the tensor-bearing traceback;
+  cleanup notes are copied only when `BaseException.add_note` is available. On
+  Python 3.10 the error type/message is preserved without PEP 678 notes, and
+  missing note support cannot replace the original draft failure.
+
+`tests/run_speculative_v3_route_compile.py` is the fresh-process A100 protocol
+for enumerating every registered eager/graph key at cold and warm catch-up states
+under `fail_on_recompile`, unique empty Inductor/Triton caches, RNG/context
+checks, and a CUDA-graph capture ledger. Dirty-worktree A100 runs with configured
+K=2 and batch cap 4 visited 4/4 eager and 12/12 graph registry keys, with two
+records per key, unchanged compiler state, stable CUDA-graph construction
+ledgers, RNG neutrality, reset attention context, and CUDA-free host results.
+Separate eager and graph cache-neutrality runs filled the reserved draft slots
+with zeros versus NaNs. In each mode, boundary positions 255/256/257 and the
+shared-prefix scenario produced equal host oracles; all nine full-vocabulary
+BF16 logits comparisons and their FP32 probability comparisons were bitwise
+identical. These are exploratory observations from a dirty worktree, not
+retained evidence. A fresh run from the eventual clean V3 SHA and the remaining
+V3 gates are still required. V2's archive and claims remain bound to `d87f168`.
+
+`tests/run_speculative_v3_output_control.py` and its companion comparator provide
+a second dirty-worktree A100 control in both eager and graph modes. Fresh
+speculation-off/on processes use sampled temperature plus combined top-k/top-p.
+They produced exact public sequence IDs, step/event order, authoritative target
+tokens, and CPU/CUDA RNG hashes at four checkpoints: after construction, after
+prefill, after the first target decode, and after the repeated target decode.
+The off side entered none of the five instrumented draft constructor phases,
+created no draft/speculative runner attributes or live resources, and executed
+zero runtime draft intervals. The on side executed two real RNG-neutral V3
+intervals: one cold route with catch-up and one warm route without catch-up.
+These output-control results are also dirty-tree observations and require replay
+from a clean SHA before retention.
+
 ## 4. Change matrix
 
 | File | Current responsibility | Required speculative-decoding change |
@@ -428,6 +544,7 @@ certified.
 | `nanovllm/utils/loader.py` | Loads model safetensors into nano-vLLM parameter names | V2 hardens exact direct/alias/packed-shard coverage, rejects broadcast or oversized global/local tensor geometry, and preserves typed resource-exhaustion errors for two-model ownership |
 | `nanovllm/utils/tokenizer_identity.py` | Not present at the frozen base | V2 adds a fail-closed full fast-tokenizer/token-ID-space fingerprint checked before CUDA ownership |
 | `nanovllm/engine/speculative_memory.py` | Not present at the frozen base | V2 adds a pure configured-maximum probability/workspace and joint-KV planning model; measured route certification remains later work |
+| `nanovllm/engine/speculative_routes.py` | Not present at the frozen base | V3 adds a finite immutable draft-only route/workspace/warm registry and host-only fail-closed admission; clean-SHA A100 route certification remains pending |
 | `.github/ci/speculative_v2/sitecustomize.py` | Not present at the frozen base | V2 CPU CI supplies a deliberately non-executable fake Qwen leaf for control-plane tests only; it never certifies real kernels or GPU behavior |
 | `nanovllm/metrics.py` | Computes queue, TTFT, ITL, E2E, and delivery metrics from sequence timestamps | Preserve per-token timing; add cycle/accepted/proposed/target-position/draft-position counters through engine result data |
 | `nanovllm/utils/streaming_detokenizer.py` | Converts individual token events into incremental text | No algorithmic change if postprocess continues emitting one ordered event per committed token |
@@ -439,19 +556,24 @@ certified.
 V2 intentionally copied the target fixed-decode graph-capture routine into a
 dedicated `capture_draft_cudagraph` path instead of parameterizing the existing
 routine. This keeps the established target graph path mechanically unchanged for
-the inert milestone. The duplication is explicit, reviewable technical debt to
-revisit when V3 adds real draft execution and its route registry.
+the inert milestone. V3 now consumes that draft-decode graph owner and adds its
+draft-only route registry/pretouch around it; consolidating target and draft
+capture remains explicit, reviewable technical debt rather than a prerequisite
+for the correctness-first discard path.
 
 ## 5. Recommended landing sequence
 
 1. Add validated config/tokenizer compatibility and inert dual-model plumbing.
 2. Add joint target/draft KV sizing, binding, draft graphs, and complete cleanup.
 3. Implement the sampler mathematics against an independent CPU oracle.
-4. Introduce typed plans/results and multi-position KV reservation without
-   changing emitted output.
-5. Run draft proposals and discard them; prove spec-off and allocator invariants.
-6. Add eager target verification and transactional greedy commits without a
-   bonus token.
+4. Introduce the minimal typed discard plan and temporary draft-write
+   reservation required to own every proposal position, without changing
+   emitted output.
+5. Run draft proposals and discard them; prove spec-off, direct-q, cache
+   coverage, and allocator invariants.
+6. Generalize the discard plan/reservation for target verification, then add
+   eager target verification and transactional greedy commits without a bonus
+   token.
 7. Certify greedy token equality, block boundaries, preemption, cancellation,
    EOS/max-token truncation, and eager/graph parity.
 8. Add exact-backend sampled rejection and statistical certification.

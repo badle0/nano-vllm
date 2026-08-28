@@ -114,6 +114,92 @@ def test_real_archive_validates_from_manifest_or_directory():
     assert from_manifest["claim_boundary"]["memory_workspace_gpu_certified"] is False
 
 
+def test_historical_runner_registry_uses_certified_blobs_not_current_worktree():
+    relative = "nanovllm/engine/speculative_memory.py"
+    expected = VALIDATOR.EXPECTED_RUNNER_HASHES[relative]
+    current = hashlib.sha256((REPO_ROOT / relative).read_bytes()).hexdigest()
+    historical = VALIDATOR._git_object_bytes(
+        REPO_ROOT,
+        "cat-file",
+        "blob",
+        f"{VALIDATOR.IMPLEMENTATION_COMMIT}:{relative}",
+        label="test historical planner",
+    )
+
+    assert current != expected
+    assert hashlib.sha256(historical).hexdigest() == expected
+
+
+def test_corrupted_certified_runner_blob_is_rejected(monkeypatch):
+    original = VALIDATOR._git_object_bytes
+
+    def corrupted(repo_root, *arguments, label):
+        if (
+            arguments[:2] == ("cat-file", "blob")
+            and arguments[-1].endswith(":nanovllm/engine/speculative_memory.py")
+        ):
+            return b"corrupted historical runner"
+        return original(repo_root, *arguments, label=label)
+
+    monkeypatch.setattr(VALIDATOR, "_git_object_bytes", corrupted)
+    with pytest.raises(
+        VALIDATOR.EvidenceValidationError,
+        match="certified runner hash mismatch",
+    ):
+        VALIDATOR.validate_archive(ARCHIVE_ROOT)
+
+
+def test_certified_implementation_tree_mismatch_is_rejected(monkeypatch):
+    original = VALIDATOR._git_object_bytes
+
+    def wrong_tree(repo_root, *arguments, label):
+        if arguments[:2] == ("rev-parse", "--verify"):
+            return ("0" * 40 + "\n").encode("ascii")
+        return original(repo_root, *arguments, label=label)
+
+    monkeypatch.setattr(VALIDATOR, "_git_object_bytes", wrong_tree)
+    with pytest.raises(
+        VALIDATOR.EvidenceValidationError,
+        match="certified implementation tree mismatch",
+    ):
+        VALIDATOR.validate_archive(ARCHIVE_ROOT)
+
+
+def test_missing_certified_history_is_a_typed_actionable_error(monkeypatch):
+    def missing(*args, **kwargs):
+        return VALIDATOR.subprocess.CompletedProcess(
+            args=args,
+            returncode=128,
+            stdout=b"",
+            stderr=b"fatal: not a valid object name",
+        )
+
+    monkeypatch.setattr(VALIDATOR.subprocess, "run", missing)
+    with pytest.raises(
+        VALIDATOR.EvidenceValidationError,
+        match="certified Git object unavailable.*fetch full history",
+    ):
+        VALIDATOR.validate_archive(ARCHIVE_ROOT)
+
+
+def test_manifest_runner_map_cannot_relabel_the_historical_source(
+    tmp_path,
+    monkeypatch,
+):
+    archive = _copy_archive(tmp_path)
+    manifest_path = archive / "manifest.json"
+    manifest = _load(manifest_path)
+    manifest["runner_files"]["nanovllm/engine/speculative_memory.py"] = "0" * 64
+    _write(manifest_path, manifest)
+    _trust_manifest_for_semantic_test(monkeypatch, archive)
+
+    with pytest.raises(
+        VALIDATOR.EvidenceValidationError,
+        match="manifest runner hash set mismatch",
+    ):
+        VALIDATOR.validate_archive(archive)
+
+
 def test_byte_mutation_without_manifest_update_is_rejected(tmp_path):
     archive = _copy_archive(tmp_path)
     artifact = archive / "raw" / "v2-eager.json"

@@ -7,9 +7,31 @@ and retained-certified on A100 by the versioned archive under
 `benchmarks/speculative_v2/evidence/2026-08-28-a100-v2-d87f168/`. The certificate
 covers typed configuration, target/draft identity, transactional
 load/warmup/KV/graph ownership, modeled speculative-workspace reservation, and
-rollback/teardown. Draft proposal execution, scheduler planning, target
-verification, burst commit, streaming/metrics integration, and performance
-routing remain V3-V7 work and have not begun.
+rollback/teardown. Its offline validator resolves the registered runner bytes
+from the immutable `d87f168` Git object, rather than the evolving current
+worktree; CI therefore checks out full history. The V2 archive, manifest, and
+raw artifacts remain byte-for-byte unchanged as V3 evolves. V3 draft catch-up,
+pure-decode planning, transactional
+proposal-write reservation, direct retained-q proposal execution, and
+compute-then-discard are implemented on `feat/spec-v2-draft-path`. The current
+V3 change set also contains the finite draft-only route/workspace/warm
+registry, a 32-token ready-route K cap, a 512-row graph-batch admission cap,
+structurally unreachable-route pruning, post-default-restoration constructor
+pretouch, host-only fail-closed route admission, and the allocator/scheduler/session
+rollback and cancellation fences required by discard execution. The route code
+and tensor-bearing-error wrapper remain Python 3.10 compatible. Dirty-worktree
+A100 exploration has passed the configured-K=2, batch-cap=4 eager and graph
+route gate and both eager and graph zero-versus-NaN draft-cache-neutrality
+comparisons. Fresh eager and graph speculation-off/on output controls also match
+public sequence IDs, authoritative target events/tokens, and all four CPU/CUDA
+RNG checkpoints under combined top-k/top-p sampling. The control exposed and the
+worktree fixed a constructor identity leak: draft warmup now uses a counter-free
+`ScheduledSequence` DTO instead of consuming a public `Sequence` ID. These runs
+are useful development observations, but V3 remains **uncertified**: they are
+not retained clean-SHA evidence, and the complete memory,
+boundary, end-to-end, regression, and archive-validation gates remain pending.
+Target verification, burst commit, speculative streaming/metrics, and
+performance routing remain V4-V7 work.
 
 Design base: `origin/fork-main` at
 `663753b99131945c297c1fbe02341108f422dce7`.

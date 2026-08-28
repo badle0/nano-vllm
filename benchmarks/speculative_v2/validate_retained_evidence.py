@@ -6,8 +6,11 @@ hashes establish byte identity; the checks below then independently validate
 the registered schemas, cross-artifact relationships, memory arithmetic, and
 the deliberately narrow V2 claim boundary.
 
-Input must be a quiescent local Git checkout.  Concurrent hostile mutation
-during validation is outside this static archive/CI threat model.
+Input must be a quiescent local Git checkout containing the certified commits.
+Runner bytes are read from the pinned historical Git object, never from the
+current worktree, so later implementation stages do not invalidate this V2
+certificate. Concurrent hostile mutation during validation is outside this
+static archive/CI threat model.
 """
 
 from __future__ import annotations
@@ -16,8 +19,10 @@ import argparse
 import hashlib
 import json
 import math
+import os
 import re
 import stat
+import subprocess
 from pathlib import Path, PurePosixPath
 from typing import Any
 
@@ -337,6 +342,93 @@ def _sha256_file(path: Path) -> str:
         for block in iter(lambda: stream.read(1024 * 1024), b""):
             digest.update(block)
     return digest.hexdigest()
+
+
+def _git_object_bytes(
+    repo_root: Path,
+    *arguments: str,
+    label: str,
+) -> bytes:
+    """Read one certified Git object without consulting replacement objects."""
+
+    environment = os.environ.copy()
+    for name in (
+        "GIT_DIR",
+        "GIT_WORK_TREE",
+        "GIT_COMMON_DIR",
+        "GIT_OBJECT_DIRECTORY",
+        "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+        "GIT_NAMESPACE",
+    ):
+        environment.pop(name, None)
+    environment["GIT_NO_REPLACE_OBJECTS"] = "1"
+    environment["GIT_OPTIONAL_LOCKS"] = "0"
+    try:
+        completed = subprocess.run(
+            (
+                "git",
+                "--no-replace-objects",
+                "-C",
+                str(repo_root),
+                *arguments,
+            ),
+            check=False,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            env=environment,
+            shell=False,
+            timeout=10,
+        )
+    except FileNotFoundError as error:
+        raise EvidenceValidationError(
+            "Git is required to validate the certified V2 source objects"
+        ) from error
+    except subprocess.TimeoutExpired as error:
+        raise EvidenceValidationError(
+            f"timed out reading certified Git object: {label}"
+        ) from error
+    if completed.returncode:
+        raise EvidenceValidationError(
+            f"certified Git object unavailable: {label}; fetch full history "
+            f"including {IMPLEMENTATION_COMMIT}"
+        )
+    return completed.stdout
+
+
+def _validate_certified_runner_blobs(
+    repo_root: Path,
+    runner_map: dict[str, str],
+) -> None:
+    """Bind registered runner paths to bytes at the immutable V2 commit."""
+
+    object_type = _git_object_bytes(
+        repo_root,
+        "cat-file",
+        "-t",
+        IMPLEMENTATION_COMMIT,
+        label=f"implementation commit {IMPLEMENTATION_COMMIT}",
+    ).strip()
+    _require(object_type == b"commit", "certified implementation object is not a commit")
+    tree = _git_object_bytes(
+        repo_root,
+        "rev-parse",
+        "--verify",
+        f"{IMPLEMENTATION_COMMIT}^{{tree}}",
+        label=f"implementation tree for {IMPLEMENTATION_COMMIT}",
+    ).decode("ascii", errors="strict").strip()
+    _require(tree == IMPLEMENTATION_TREE, "certified implementation tree mismatch")
+    for relative, digest in runner_map.items():
+        payload = _git_object_bytes(
+            repo_root,
+            "cat-file",
+            "blob",
+            f"{IMPLEMENTATION_COMMIT}:{relative}",
+            label=f"runner blob {relative} at {IMPLEMENTATION_COMMIT}",
+        )
+        _require(
+            _sha256_bytes(payload) == digest,
+            f"certified runner hash mismatch: {relative}",
+        )
 
 
 def canonical_sha256(value: Any) -> str:
@@ -1842,10 +1934,7 @@ def _validate_manifest(root: Path, manifest: dict[str, Any]) -> dict[str, Path]:
         _hex_digest(digest, f"manifest runner {path} SHA256")
     _require(runner_map == EXPECTED_RUNNER_HASHES, "manifest runner hash set mismatch")
     repo_root = Path(__file__).resolve().parents[2]
-    for relative, digest in runner_map.items():
-        path = (repo_root / relative).resolve(strict=True)
-        _require(path.is_relative_to(repo_root), f"runner path escapes repository: {relative}")
-        _require(_sha256_file(path) == digest, f"current runner hash mismatch: {relative}")
+    _validate_certified_runner_blobs(repo_root, runner_map)
     identity = _mapping(manifest.get("model_identity"), "manifest model identity")
     _require(identity.get("fixture") == "/workspace/models/Qwen3-0.6B",
              "manifest model fixture mismatch")

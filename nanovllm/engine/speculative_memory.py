@@ -57,6 +57,9 @@ class SpeculativeMemoryPlan:
     configured_k: int
     max_effective_k: int
     vocab_size: int
+    max_num_seqs: int
+    max_num_batched_tokens: int
+    max_model_len: int
     draft_rows: int
     verifier_rows: int
     target_logits_itemsize: int
@@ -375,6 +378,9 @@ def plan_speculative_workspace(
             configured_k=configured_k,
             max_effective_k=0,
             vocab_size=vocab_size,
+            max_num_seqs=max_num_seqs,
+            max_num_batched_tokens=max_num_batched_tokens,
+            max_model_len=max_model_len,
             draft_rows=0,
             verifier_rows=0,
             target_logits_itemsize=target_itemsize,
@@ -553,6 +559,9 @@ def plan_speculative_workspace(
         configured_k=configured_k,
         max_effective_k=max_effective_k,
         vocab_size=vocab_size,
+        max_num_seqs=max_num_seqs,
+        max_num_batched_tokens=max_num_batched_tokens,
+        max_model_len=max_model_len,
         draft_rows=draft_rows,
         verifier_rows=verifier_rows,
         target_logits_itemsize=target_itemsize,

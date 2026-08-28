@@ -22,7 +22,11 @@ for that exact SHA is retained under
 `benchmarks/speculative_v2/evidence/2026-08-28-a100-v2-d87f168/` and passes the
 GPU-free offline validator. V2 is therefore **retained-certified for this inert
 lifecycle claim only**; later speculative execution and performance rungs remain
-uncertified.
+uncertified. The validator binds every registered runner path to its blob at the
+full `d87f168` commit and verifies that commit's exact tree, with Git replacement
+objects disabled. It deliberately does not hash the later V3 worktree. CI fetches
+full history so the historical objects remain available; a missing certified
+object is a typed validation failure, never a fallback to current source.
 
 This document is an implementation delta to the frozen source map and design in
 documents 02 through 04. It does not modify the V1 sampling-law certificate in
@@ -649,7 +653,9 @@ All retained-certification prerequisites are now satisfied for implementation SH
 - the manifest and GPU-free validator cover exact hashes/file inventory,
   duplicate/non-finite JSON rejection, independent planner/audit arithmetic,
   model/tokenizer/source identity, A100 ownership, historical V0 parity, and
-  cross-artifact lifecycle/recovery invariants.
+  cross-artifact lifecycle/recovery invariants. Registered runner hashes are
+  checked against blobs in the immutable certified commit, so later source
+  changes cannot either invalidate or silently relabel the historical archive.
 
 The archive README and raw provenance record the complete raw hashes, producer
 argv/environment, claim boundary, and two failed-closed attempts that wrote no
@@ -674,21 +680,90 @@ V2 leaves these capabilities unimplemented:
 - tensor-parallel or FlashInfer speculative execution; and
 - any performance router, benchmark, roofline, or speedup claim.
 
-Before V3 executes proposals, its probability path must either write each
-canonical draft row directly into its preallocated `q[B,K,V]` destination or
-expand the planner for the extra result/copy lifetime. The current sampler
-returns a fresh probability tensor; a naive collect-and-stack implementation is
-not covered by V2's reservation and must not be admitted under it.
+Everything in that list is a statement about the retained V2 SHA. Later worktree
+code does not retroactively expand the V2 certificate.
+
+### 8.1 Current V3 worktree overlay (not V2 evidence)
+
+At the retained V2 SHA, before V3 executes proposals, its probability path must
+either write each canonical draft row directly into its preallocated
+`q[B,K,V]` destination or expand the planner for the extra result/copy lifetime.
+The V2 sampler returns a fresh probability tensor; a naive collect-and-stack
+implementation is not covered by V2's reservation and must not be admitted under
+it.
+
+The current V3 change set takes the direct-write option: one contiguous
+K-major allocation backs the zero-copy `q[B,K,V]` view, and each proposal step
+writes its canonical FP32 row through `softmax(..., out=...)`. That delta is not
+part of the retained V2 certificate and needs its own V3 evidence.
+
+The same worktree now also implements:
+
+- the immutable, host-only `draft-discard-v1` registry tying each eager/graph
+  batch bucket, contiguous K, catch-up family, and exact-sampler envelope to a
+  fingerprinted workspace certificate and required warm components. Its ready K
+  axis is capped at 32 without rejecting a larger configured K, and graph-mode
+  batch admission is capped at 512. `ModelRunner` shares that constant for target
+  eager fallback and fixed-decode capture, preventing route/capture cap drift;
+- structural route pruning based on each bucket's minimum selectable live batch,
+  `max_model_len - 2`, and the minimum token work for no-catch-up versus paged
+  catch-up. Combinations no live batch can execute are omitted while each
+  resolvable family's ready K range remains contiguous from one;
+- fail-closed workspace readiness that requires proposal-ID bytes to equal
+  `B*K*sizeof(int64)` and requires q plus proposal IDs together to fit within the
+  modeled draft live bytes, which in turn must fit the reserved plan bytes;
+- post-default-restoration constructor pretouch for eager draft decode or every
+  captured draft graph bucket. Graph pretouch executes real replay, bucket
+  slicing, and the draft output head rather than merely checking graph ownership.
+  Paged ragged pretouch reaches the exact aggregate bound
+  `max_B min(M - 2B, B(L - 2))`, and dense/near-dense/sparse exact sampling is
+  exercised, with RNG/context cleanup and atomic readiness publication;
+- counter-free draft warmup DTOs. An earlier constructor witness instantiated a
+  public `Sequence`, consumed the process-global ID counter only when speculation
+  was enabled, and shifted later user-visible request IDs. The current worktree
+  uses `ScheduledSequence` directly and leaves public IDs target-request-only;
+- fail-closed runtime route resolution before temporary KV reservation, RNG,
+  proposal workspace, or draft kernels, followed by independent scheduler and
+  runner revalidation of the selected key;
+- a globally unique allocator-fencing temporary append lease with exact snapshot
+  restoration, pre-target release, staged draft-coverage commit, and ordinary
+  decode boundary-append rollback on failed cycles;
+- engine/session locks and cancellation ordering that prevent deallocation
+  during in-flight GPU work and prevent an allocator failure from erasing
+  unrelated scheduler queue members; and
+- Python 3.10-compatible string route enums and draft-error wrapping: optional
+  PEP 678 cleanup notes are copied only when `add_note` exists, so missing note
+  support cannot mask the original host-only draft execution error.
+
+Those are implementation statements about the current dirty worktree only. The
+fresh-process eager/graph protocol in
+`tests/run_speculative_v3_route_compile.py` is present. Dirty-worktree A100
+exploration with configured K=2 and batch cap 4 visited all 4 eager and 12 graph
+registry keys twice, with unchanged compiler state and graph-capture ledger,
+RNG/context cleanup, and host-only results. Separate eager and graph
+zero-versus-NaN draft-cache comparisons produced equal host oracles at boundary
+positions 255/256/257 and for shared-prefix reuse; in each mode all nine
+full-vocabulary BF16 logits and FP32 probability comparisons were bitwise
+identical. These observations have not produced a retained clean-SHA A100
+certificate and do not expand V2 evidence. Fresh eager and graph output-control
+pairs additionally matched speculation-off/on public IDs, authoritative target
+events/tokens, and all four CPU/CUDA RNG checkpoints under sampled combined
+top-k/top-p. Off called none of five draft constructor phases, exposed no
+draft/speculative runner attributes or live resources, and ran zero draft
+intervals; on ran two real RNG-neutral V3 intervals, cold then warm. The final V3
+source must be rerun from a clean SHA; runtime memory, complete
+block/prefix/preemption behavior, end-to-end parity, full regression, and archive
+validation remain pending.
 
 The planned continuation is:
 
 | Rung | Scope after V2 |
 |---|---|
-| V3 | Track draft-cache coverage, catch up committed prefixes, execute real draft proposals, and discard them while ordinary target decode remains authoritative. |
-| V4 | Add typed scheduler plans, per-cycle effective K, deterministic baseline fallback, and transactional multi-slot reservations. |
+| V3 | Track draft-cache coverage; add a private pure-decode discard plan with safe common K and temporary draft-write reservation; catch up committed prefixes; execute real draft proposals; and discard them while ordinary target decode remains authoritative. |
+| V4 | Generalize the V3 plan and reservation for target verification, deterministic baseline fallback, verifier writes, commit, and trailing trim. |
 | V5 | Add all-query target verification, exact rejection/bonus sampling, actual speculative-workspace allocation, and atomic burst commit. |
 | V6 | Certify streaming, metrics, cancellation, abandoned-session finalization, and failure behavior for committed bursts. |
-| V7 | Define the route/workspace/warm registry, certify cold and repeated compile behavior, measure runtime memory peaks, build the performance router, and publish the A100 roofline/crossover archive. |
+| V7 | Extend and optimize the route/workspace/warm registry beyond V3's draft-only subset, measure routed runtime peaks and crossover behavior, build the performance router, and publish the final A100 roofline/crossover archive. |
 
 V2's draft warmup, draft cache allocation, and draft decode graph capture are
 prerequisites for V3; they are not substitutes for V3 execution. Likewise,

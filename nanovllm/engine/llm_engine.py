@@ -7,7 +7,7 @@ import weakref
 from collections import deque
 from collections.abc import Iterator
 from dataclasses import fields
-from threading import Event, Lock
+from threading import Event, Lock, RLock
 from time import perf_counter
 from typing import NamedTuple
 
@@ -33,6 +33,7 @@ from nanovllm.config import Config
 from nanovllm.sampling_params import SamplingParams
 from nanovllm.engine.sequence import Sequence, StreamOutput
 from nanovllm.engine.scheduler import Scheduler
+from nanovllm.engine.speculative_routes import DraftRouteKey
 from nanovllm.engine.model_runner import ModelRunner
 from nanovllm.metrics import compute_metrics
 from nanovllm.layers.sampler import require_flashinfer_sampling
@@ -98,6 +99,10 @@ class StepOutput(NamedTuple):
     num_decode_tokens: int     # decode rows this step (0 for a pure-prefill step)
 
 
+class SpeculativeDiscardResultError(RuntimeError):
+    """A V3 draft result does not match its immutable scheduler plan."""
+
+
 class StreamSession(Iterator[StreamOutput]):
     """One request-scoped, synchronously backpressured stream session."""
 
@@ -117,6 +122,10 @@ class StreamSession(Iterator[StreamOutput]):
         self.metrics: dict[int, dict] = {}
         self._closed = False
         self._finalizer = None
+        # Iteration and explicit close may be called from different threads.
+        # Keep session-owned collections stable across one delivered event;
+        # RLock is required because the iterator closes itself on completion.
+        self._iteration_lock = RLock()
 
         params = engine._normalize_batch(prompts, sampling_params)
         sequences = ()
@@ -156,7 +165,7 @@ class StreamSession(Iterator[StreamOutput]):
                     error, "StreamSession finalizer rollback", cleanup_error
                 )
             try:
-                engine.scheduler.cancel(seq.seq_id for seq in sequences)
+                engine._cancel_requests(seq.seq_id for seq in sequences)
             except BaseException as cleanup_error:
                 record_cleanup_failure(
                     error, "StreamSession admission rollback", cleanup_error
@@ -172,6 +181,15 @@ class StreamSession(Iterator[StreamOutput]):
 
         if not self.seq_ids:
             self.close()
+
+    @staticmethod
+    def _cancel_engine_requests(engine: "LLMEngine", seq_ids):
+        cancel = getattr(engine, "_cancel_requests", None)
+        if callable(cancel):
+            return cancel(seq_ids)
+        # Compatibility for narrow lifecycle doubles that predate the engine
+        # execution mutex. Production LLMEngine always takes the locked path.
+        return engine.scheduler.cancel(seq_ids)
 
     @staticmethod
     def _warn_abandoned(count: int) -> None:
@@ -191,7 +209,7 @@ class StreamSession(Iterator[StreamOutput]):
     def _finalize_abandoned(engine: "LLMEngine", lease: object, seq_ids):
         first_error = None
         try:
-            engine.scheduler.cancel(seq_ids)
+            StreamSession._cancel_engine_requests(engine, seq_ids)
         except BaseException as error:
             first_error = error
         try:
@@ -215,6 +233,10 @@ class StreamSession(Iterator[StreamOutput]):
         return self
 
     def __next__(self) -> StreamOutput:
+        with self._iteration_lock:
+            return self._next_locked()
+
+    def _next_locked(self) -> StreamOutput:
         if self._closed:
             raise StopIteration
 
@@ -269,6 +291,10 @@ class StreamSession(Iterator[StreamOutput]):
             raise
 
     def close(self):
+        with self._iteration_lock:
+            return self._close_locked()
+
+    def _close_locked(self):
         if self._closed:
             return
         self._closed = True
@@ -285,7 +311,7 @@ class StreamSession(Iterator[StreamOutput]):
         self._remaining.clear()
         self._sequences.clear()
         try:
-            engine.scheduler.cancel(self.seq_ids)
+            engine._cancel_requests(self.seq_ids)
         except BaseException as error:
             if first_error is None:
                 first_error = error
@@ -333,6 +359,10 @@ class LLMEngine:
         self._exit_started = False
         self._exit_lock = Lock()
         self._exit_complete = Event()
+        # One engine owns one mutable scheduler and one pair of CUDA contexts.
+        # Cancellation must never deallocate KV slots while a target or draft
+        # kernel can still write them.
+        self._execution_lock = RLock()
         self._atexit_callback = None
         self._atexit_registered = False
         self.model_runner = None
@@ -596,6 +626,17 @@ class LLMEngine:
                     f"cannot {operation}: an active {active_kind} session owns the engine"
                 )
 
+    def _cancel_requests(self, seq_ids):
+        """Cancel requests only after any in-flight engine cycle completes."""
+
+        requested = tuple(seq_ids)
+        execution_lock = getattr(self, "_execution_lock", None)
+        if execution_lock is None:
+            # Compatibility for deliberately minimal engine doubles.
+            return self.scheduler.cancel(requested)
+        with execution_lock:
+            return self.scheduler.cancel(requested)
+
     def _admit_request(
         self,
         prompt: str | list[int],
@@ -702,7 +743,7 @@ class LLMEngine:
                 )
         except BaseException as error:
             try:
-                self.scheduler.cancel(seq.seq_id for seq in admitted)
+                self._cancel_requests(seq.seq_id for seq in admitted)
             except BaseException as cleanup_error:
                 record_cleanup_failure(
                     error, "batch admission rollback", cleanup_error
@@ -723,13 +764,324 @@ class LLMEngine:
             submission_time=submission_time,
         ).seq_id
 
+    def _draft_workspace_route_cap(self, batch_size: int) -> int:
+        """Return the largest K covered by V2's fixed workspace reservation."""
+
+        runner = self.model_runner
+        if not bool(getattr(runner, "speculation_enabled", False)):
+            return 0
+        memory_plan = getattr(runner, "speculative_memory_plan", None)
+        if memory_plan is None:
+            raise RuntimeError(
+                "speculation is enabled without a speculative memory plan"
+            )
+        planned_batch = getattr(memory_plan, "batch_size", None)
+        planned_k = getattr(memory_plan, "max_effective_k", None)
+        if type(planned_batch) is not int or planned_batch < 0:
+            raise RuntimeError("speculative memory plan has an invalid batch cap")
+        if type(planned_k) is not int or planned_k < 0:
+            raise RuntimeError("speculative memory plan has an invalid K cap")
+        return planned_k if 0 < batch_size <= planned_batch else 0
+
+    def _resolve_draft_route_admission(self, seqs):
+        """Finish V3 route readiness lookup before scheduler reservation."""
+
+        runner = self.model_runner
+        if not bool(getattr(runner, "speculation_enabled", False)):
+            return None
+        resolver = getattr(runner, "resolve_draft_route_admission", None)
+        if not callable(resolver):
+            raise RuntimeError(
+                "speculation is enabled without a draft route registry resolver"
+            )
+        return resolver(seqs)
+
+    @staticmethod
+    def _validate_draft_discard_result(plan, result, seqs, vocab_size: int):
+        """Validate host-only draft diagnostics before target state can mutate."""
+
+        if type(vocab_size) is not int or vocab_size < 1:
+            raise SpeculativeDiscardResultError(
+                "draft result validation requires a positive integer vocabulary"
+            )
+        effective_k = getattr(plan, "effective_k", None)
+        rows = getattr(plan, "rows", None)
+        if type(effective_k) is not int or effective_k < 1:
+            raise SpeculativeDiscardResultError(
+                "executed draft plan must have a positive effective_k"
+            )
+        if not isinstance(rows, tuple) or len(rows) != len(seqs):
+            raise SpeculativeDiscardResultError(
+                "draft plan rows do not match the live decode batch"
+            )
+        result_effective_k = getattr(result, "effective_k", None)
+        if type(result_effective_k) is not int or result_effective_k != effective_k:
+            raise SpeculativeDiscardResultError(
+                "draft result effective_k does not match its plan"
+            )
+        route_key = getattr(plan, "route_key", None)
+        result_route_key = getattr(result, "route_key", None)
+        if not isinstance(route_key, DraftRouteKey) or result_route_key != route_key:
+            raise SpeculativeDiscardResultError(
+                "draft result route key does not match its registered plan"
+            )
+        result_rows = getattr(result, "rows", None)
+        if not isinstance(result_rows, tuple) or len(result_rows) != len(rows):
+            raise SpeculativeDiscardResultError(
+                "draft result rows do not match its plan"
+            )
+        draft_positions = getattr(result, "draft_positions", None)
+        if (
+            type(draft_positions) is not int
+            or draft_positions != len(rows) * effective_k
+        ):
+            raise SpeculativeDiscardResultError(
+                "draft result reports an invalid position count"
+            )
+        graph_steps = getattr(result, "graph_decode_steps", None)
+        eager_steps = getattr(result, "eager_decode_steps", None)
+        if (
+            type(graph_steps) is not int
+            or type(eager_steps) is not int
+            or graph_steps < 0
+            or eager_steps < 0
+            or graph_steps + eager_steps != effective_k
+        ):
+            raise SpeculativeDiscardResultError(
+                "draft result reports invalid eager/graph step counts"
+            )
+        expected_catchup = sum(
+            row.committed_tokens - 1 - row.draft_cached_tokens
+            for row in rows
+        )
+        planned_catchup = getattr(plan, "draft_catchup_tokens", None)
+        if type(planned_catchup) is not int or planned_catchup != expected_catchup:
+            raise SpeculativeDiscardResultError(
+                "draft plan reports invalid catch-up work"
+            )
+        expected_step_counts = (len(rows),) * effective_k
+        if getattr(plan, "draft_step_token_counts", None) != expected_step_counts:
+            raise SpeculativeDiscardResultError(
+                "draft plan reports invalid proposal-step counts"
+            )
+        target_query_tokens = getattr(plan, "target_query_tokens", None)
+        total_scheduled_tokens = getattr(plan, "total_scheduled_tokens", None)
+        expected_total = expected_catchup + len(rows) * (effective_k + 1)
+        if (
+            type(target_query_tokens) is not int
+            or target_query_tokens != len(rows)
+            or type(total_scheduled_tokens) is not int
+            or total_scheduled_tokens != expected_total
+        ):
+            raise SpeculativeDiscardResultError(
+                "draft plan reports invalid total work"
+            )
+        catchup_positions = getattr(result, "catchup_positions", None)
+        if (
+            type(catchup_positions) is not int
+            or catchup_positions != expected_catchup
+        ):
+            raise SpeculativeDiscardResultError(
+                "draft result reports invalid catch-up work"
+            )
+        expected_q_shape = (
+            len(rows),
+            effective_k,
+            vocab_size,
+        )
+        q_shape = getattr(result, "q_shape", None)
+        if (
+            not isinstance(q_shape, tuple)
+            or any(type(dimension) is not int for dimension in q_shape)
+            or q_shape != expected_q_shape
+        ):
+            raise SpeculativeDiscardResultError(
+                "draft result reports an invalid retained-q shape"
+            )
+        # q is a zero-copy [B,K,V] view over one contiguous [K,B,V] allocation.
+        expected_q_stride = (vocab_size, len(rows) * vocab_size, 1)
+        q_stride = getattr(result, "q_stride", None)
+        if (
+            not isinstance(q_stride, tuple)
+            or any(type(stride) is not int for stride in q_stride)
+            or q_stride != expected_q_stride
+        ):
+            raise SpeculativeDiscardResultError(
+                "draft result reports an invalid retained-q stride"
+            )
+        if getattr(result, "q_dtype", None) != "torch.float32":
+            raise SpeculativeDiscardResultError(
+                "draft result did not retain canonical FP32 probabilities"
+            )
+        if (
+            getattr(result, "q_storage_contiguous", None) is not True
+            or getattr(result, "q_view_zero_copy", None) is not True
+        ):
+            raise SpeculativeDiscardResultError(
+                "draft result violates the direct retained-q storage contract"
+            )
+
+        coverage_by_seq_id = {}
+        for index, (plan_row, result_row, seq) in enumerate(
+            zip(rows, result_rows, seqs, strict=True)
+        ):
+            plan_seq_id = getattr(plan_row, "seq_id", None)
+            result_seq_id = getattr(result_row, "seq_id", None)
+            if (
+                type(plan_seq_id) is not int
+                or type(result_seq_id) is not int
+                or type(getattr(seq, "seq_id", None)) is not int
+                or plan_seq_id != seq.seq_id
+                or result_seq_id != plan_seq_id
+            ):
+                raise SpeculativeDiscardResultError(
+                    f"draft result row {index} has a stale sequence ID"
+                )
+            planned_coverage = getattr(plan_row, "committed_tokens", None)
+            result_coverage = getattr(result_row, "coverage_after_commit", None)
+            if (
+                type(planned_coverage) is not int
+                or type(result_coverage) is not int
+                or result_coverage != planned_coverage
+            ):
+                raise SpeculativeDiscardResultError(
+                    f"draft result row {index} has invalid cache coverage"
+                )
+            proposed = result_row.proposed_token_ids
+            proposal_count = getattr(result_row, "proposal_count", None)
+            if (
+                type(proposal_count) is not int
+                or proposal_count != effective_k
+                or not isinstance(proposed, tuple)
+                or len(proposed) != effective_k
+                or any(
+                    type(token_id) is not int
+                    or token_id < 0
+                    or token_id >= vocab_size
+                    for token_id in proposed
+                )
+            ):
+                raise SpeculativeDiscardResultError(
+                    f"draft result row {index} has invalid proposal tokens"
+                )
+            if plan_seq_id in coverage_by_seq_id:
+                raise SpeculativeDiscardResultError(
+                    "draft result contains duplicate sequence IDs"
+                )
+            coverage_by_seq_id[plan_seq_id] = planned_coverage
+        return coverage_by_seq_id
+
+    def _rollback_failed_draft_state(self, plan, error) -> None:
+        """Release V3-only scheduler state while preserving ``error``."""
+
+        cleanup_steps = (
+            (
+                "V3 draft reservation rollback",
+                lambda: self.scheduler.rollback_draft_discard(plan),
+            ),
+            (
+                "V3 draft coverage handoff rollback",
+                lambda: self.scheduler.abort_draft_coverage(plan),
+            ),
+        )
+        for label, cleanup in cleanup_steps:
+            try:
+                cleanup()
+            except BaseException as cleanup_error:
+                record_cleanup_failure(error, label, cleanup_error)
+
+    def _execute_draft_discard(self, seqs, is_prefill):
+        """Run one transactional V3 shadow cycle and return commit metadata."""
+
+        runner = self.model_runner
+        if is_prefill or not bool(getattr(runner, "speculation_enabled", False)):
+            return None
+        route_admission = self._resolve_draft_route_admission(seqs)
+        if route_admission is None:
+            plan = self.scheduler.plan_draft_discard(
+                seqs,
+                workspace_route_cap=0,
+            )
+        else:
+            plan = self.scheduler.plan_draft_discard(
+                seqs,
+                route_admission=route_admission,
+            )
+        if not plan.uses_draft:
+            return None
+
+        try:
+            result = runner.call("run_speculative_discard", plan, seqs)
+            vocab_size = self._admission_limits.vocab_size
+            if vocab_size is None:
+                raise RuntimeError(
+                    "speculative execution requires a known vocabulary"
+                )
+            coverage = self._validate_draft_discard_result(
+                plan,
+                result,
+                seqs,
+                vocab_size,
+            )
+            # Temporary proposal blocks must not be visible to target decode,
+            # target prefix hashing, or ordinary postprocessing.
+            self.scheduler.handoff_draft_discard(plan)
+            # Validate every coverage field before target execution.  Successful
+            # postprocess consumes this staging record as part of its sole public
+            # token-commit operation; there is no fallible post-commit callback.
+            self.scheduler.stage_draft_coverage(plan, seqs, coverage)
+        except BaseException as error:
+            self._rollback_failed_draft_state(plan, error)
+            raise
+        return plan, coverage
+
     def _step(self) -> StepOutput:
+        execution_lock = getattr(self, "_execution_lock", None)
+        if execution_lock is None:
+            # Compatibility for deliberately minimal engine doubles.
+            return self._step_unlocked()
+        with execution_lock:
+            return self._step_unlocked()
+
+    def _step_unlocked(self) -> StepOutput:
         seqs, is_prefill = self.scheduler.schedule()
         # must precede postprocess: it zeroes num_scheduled_tokens
         num_prefill_tokens = sum(seq.num_scheduled_tokens for seq in seqs if seq.is_prefill)
         num_decode_tokens = sum(1 for seq in seqs if not seq.is_prefill)
-        token_ids = self.model_runner.call("run", seqs, is_prefill)
-        events = self.scheduler.postprocess(seqs, token_ids)
+        runner = self.model_runner
+        schedule_rollback = None
+        if (
+            not is_prefill
+            and bool(getattr(runner, "speculation_enabled", False))
+        ):
+            # Capture this before route-cap calculation/planning: either may
+            # fail before a DraftDiscardPlan exists, while schedule() has
+            # already allocated the next ordinary target block.
+            schedule_rollback = self.scheduler.capture_decode_schedule_rollback(
+                seqs,
+                is_prefill=is_prefill,
+            )
+        draft_cycle = None
+        try:
+            draft_cycle = self._execute_draft_discard(seqs, is_prefill)
+            token_ids = self.model_runner.call("run", seqs, is_prefill)
+            events = self.scheduler.postprocess(seqs, token_ids)
+        except BaseException as error:
+            if draft_cycle is not None:
+                plan, _ = draft_cycle
+                self._rollback_failed_draft_state(plan, error)
+            if schedule_rollback is not None:
+                try:
+                    self.scheduler.rollback_failed_decode_schedule(
+                        schedule_rollback
+                    )
+                except BaseException as cleanup_error:
+                    record_cleanup_failure(
+                        error,
+                        "V3 ordinary decode schedule rollback",
+                        cleanup_error,
+                    )
+            raise
         finished = [seq for seq in seqs if seq.is_finished]
         return StepOutput(
             events,
@@ -864,7 +1216,7 @@ class LLMEngine:
                 except BaseException as error:
                     cleanup_error = error
             try:
-                self.scheduler.cancel(seq.seq_id for seq in sequences)
+                self._cancel_requests(seq.seq_id for seq in sequences)
             except BaseException as error:
                 if cleanup_error is None:
                     cleanup_error = error

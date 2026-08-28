@@ -6,8 +6,15 @@ retained-certified on A100**. The SHA-bound lifecycle and recovery archive is
 stored under
 `benchmarks/speculative_v2/evidence/2026-08-28-a100-v2-d87f168/`. Dirty-worktree
 and pre-commit A100 runs remain exploratory and cannot be retained, renamed, or
-used as release evidence. No draft proposal, scheduler plan, target verification,
-burst commit, or speculative streaming path exists yet.
+used as release evidence. V3's draft proposal/discard implementation is currently
+an uncertified change set on `feat/spec-v2-draft-path`. It now
+includes its draft-only route registry, constructor pretouch, fail-closed runtime
+admission, bounded/pruned route construction, and transaction/cancellation
+fences. Dirty-worktree A100 route-gate, eager/graph cache-neutrality, and
+speculation-off/on output-control runs have produced positive exploratory
+results, but no clean-SHA V3 A100 archive exists. This status is not a completion
+claim. Target verification, burst commit, and speculative streaming do not exist
+yet.
 
 Base: `origin/fork-main` at `663753b`.
 
@@ -347,11 +354,61 @@ Each key records the actual nano-vLLM graph families rather than only a prose
 - acceptance `[B,K]`, corrective residual `[B,V]`, and bonus `[B,V]` paths;
 - each supported eager/graph mode and `(B,K)` bucket family.
 
+The current V3 implementation realizes the draft-only subset as the
+versioned `draft-discard-v1` registry. Its key is
+`(execution_mode, batch_bucket, effective_k, catchup_family,
+exact_sampler_envelope)` and its workspace certificate is fingerprinted to the
+V2 `SpeculativeMemoryPlan`. Eager mode uses the planned capacity bucket. Graph
+mode caps the routable batch domain at 512 and uses buckets 1, 2, 4, 8, multiples
+of 16, and the exact capped endpoint; a larger live graph batch is a route miss
+and takes whole-batch baseline decode. The registry exposes at most
+`min(plan.max_effective_k, 32)` K values. A configured K above 32 remains a valid
+configuration, but V3 cannot admit an effective K above the ready-route cap.
+`ModelRunner` imports this same 512 graph cap for ordinary target-decode eager
+fallback and fixed-decode capture, and derives target graph tiers with the same
+bucket builder as draft routing.
+
+Route generation is structural rather than a full Cartesian product. A bucket
+is selected only by live batches in `(previous_bucket, batch_bucket]`, so its
+minimum possible live batch is used to prune any K above `max_model_len - 2` or
+whose minimum cycle work
+`B_min*(K+1) + int(catchup_family != none)` exceeds
+`max_num_batched_tokens`. No-catch-up and paged-eager-dynamic families therefore
+exist only where some live batch could execute them; each family that is
+resolvable still exposes contiguous K beginning at one. Verifier, acceptance,
+residual, and bonus keys in the list above remain V5 work, not V3-ready routes.
+For a key to enter `workspace_certified_keys`, its proposal-ID accounting must be
+exactly `B*K*sizeof(int64)`, and
+`q_bytes + proposal_id_bytes <= modeled_draft_live_bytes <= reserved_plan_bytes`.
+Thus readiness fails closed on an ID-size mismatch or on combined q/ID ownership
+that exceeds the modeled draft phase; checking q alone is insufficient.
+
 Pretouch runs after production dtype, default-device, and dispatch state have
-been restored. It saves and restores CPU and CUDA RNG state and participates in
-transactional construction/rollback. A route outside this declared matrix must
-take an explicitly pre-touched eager path or deterministically fall back to
+been restored. Eager mode executes representative live batch witnesses. Graph
+mode replays every captured batch bucket through the registered graph and draft
+output head, plus a live interior batch of three when representable to exercise
+bucket slicing. Catch-up witnesses include the exact aggregate maximum
+
+```text
+max_{1 <= B <= batch_cap} min(
+    max_num_batched_tokens - 2*B,
+    B*(max_model_len - 2),
+)
+```
+
+clipped at zero. This is an aggregate paged-ragged bound: `2*B` is the minimum
+K=1 proposal-plus-authoritative-target work, and each row can be missing at most
+`max_model_len - 2` committed-prefix positions. The implementation evaluates the
+integer neighbors of `max_num_batched_tokens / max_model_len` and both endpoints,
+which is exact because the first term decreases with B while the second
+increases. Pretouch saves and restores CPU and CUDA RNG state and participates
+in transactional construction/rollback. A route outside this declared matrix
+must take an explicitly pre-touched eager path or deterministically fall back to
 ordinary decode; it may not cause opportunistic production-time compilation.
+Draft warmup must also be externally identity-neutral: constructor witnesses use
+counter-free `ScheduledSequence` DTOs, never public `Sequence` objects whose
+process-global counter would shift the first user-visible request ID only on the
+speculation-enabled side.
 
 In each isolated certification subprocess, use a unique, initially empty
 `TORCHINDUCTOR_CACHE_DIR`. The compile-completeness gate disables remote compiler
@@ -405,8 +462,8 @@ Recommended branch ladder from `origin/fork-main@663753b`:
 | V0 | `docs/speculative-decoding-v2` | Frozen plan and PR7 provenance only |
 | V1 | `feat/spec-v2-sampling-law` | CPU oracle plus current exact-sampler distribution seam |
 | V2 | `feat/spec-v2-dual-runner` | Inert typed config and transactional draft lifecycle/KV sizing |
-| V3 | `feat/spec-v2-draft-path` | Draft catch-up and compute-then-discard |
-| V4 | `feat/spec-v2-scheduler-plan` | Effective-K planning and transactional reservation |
+| V3 | `feat/spec-v2-draft-path` | Draft catch-up, a minimal discard plan/reservation, and compute-then-discard |
+| V4 | `feat/spec-v2-scheduler-plan` | Generalized verification planning and transactional reservation |
 | V5 | `feat/spec-v2-verify-commit` | Target verification, rejection sampling, burst commit |
 | V6 | `feat/spec-v2-stream-lifecycle` | Streaming, metrics, cancel/finalizer, failure certification |
 | V7 | `feat/spec-v2-performance` | Verification routing, roofline and benchmark certification |
@@ -550,26 +607,107 @@ Hard gates:
 
 ### V3: draft path, compute then discard
 
-Changes:
+Implemented in the current V3 change set:
 
 - track draft-cache coverage independently;
+- introduce the minimum immutable discard plan needed to derive a safe common
+  `effective_k` for a pure-decode batch;
+- reserve only the extra draft-write blocks through proposal input position
+  `committed_length + effective_k - 2`, as an all-or-nothing scheduler-owned
+  transaction, and release them before ordinary target decode; this private V3
+  transaction is generalized for target verification and commit in V4;
 - catch up the draft cache for cold, prefix-hit, mixed-history, and preempted
   sequences;
+- charge every catch-up position plus `B*K` proposal positions and the ordinary
+  `B` target rows before admitting the discard route. V3 performs full catch-up
+  or whole-batch baseline fallback; it does not silently launch an unbounded
+  ragged catch-up. A row whose full catch-up cannot fit may remain baseline-only
+  until a separately designed chunked catch-up policy is introduced;
 - run `effective_k` draft steps through the selected eager or graphed path and
   retain tokens/probabilities only as
   ephemeral cycle state;
-- either write every canonical draft probability row directly into its reserved
-  `q[B,K,V]` destination, or revise and revalidate the memory plan for every
-  additional returned-row/copy/stack lifetime before admitting the route;
-- pretouch every draft `route_key` that discard-mode routing may select,
-  after restoring production dtype/dispatch state and without advancing RNG;
+- write every canonical draft probability row directly into one reserved
+  contiguous K-major allocation whose `q[B,K,V]` projection is zero-copy; no
+  fresh per-step probability result or second q stack is admitted;
+- define `draft-discard-v1`, the finite draft-only route/workspace/warm registry,
+  with fingerprinted memory certificates and contiguous K coverage for each
+  resolvable family. Bound the ready K axis at 32 and the graph batch axis at
+  512, without rejecting configured K above 32, and prune bucket/K/family
+  combinations that are unreachable under the model-length and minimum-work
+  constraints. Require exact `B*K*sizeof(int64)` proposal-ID bytes and fit q plus
+  proposal IDs together inside the modeled draft live bytes before declaring a
+  key workspace-ready. V5 extends the registry with verifier and acceptance
+  routes, and V7 certifies the complete performance router;
+- resolve readiness and live runtime owners on the host before reservation. A
+  registry miss, incomplete warmed set, missing graph/static buffer, invalid
+  draft coverage, or unsupported live batch falls back for the whole selected
+  batch before temporary KV, RNG, q, or draft-kernel work;
+- pretouch every component required by a draft `route_key` after restoring
+  production dtype/default-device state: eager decode witnesses or actual replay
+  of all captured graph buckets through graph slicing and the draft output head,
+  an interior graph-bucket witness, paged catch-up witnesses through the exact
+  aggregate K=1 eligibility bound, and the conservative dense/near-dense/sparse
+  exact-sampler envelope. Constructor publication is all-or-nothing and the
+  surrounding draft phase restores CPU/CUDA RNG and attention context;
+- serialize `_step` and cancellation with one engine execution lock, and
+  serialize `StreamSession.__next__` and explicit close with one session lock;
+- make the temporary block lease globally unique and allocator-fencing; snapshot
+  allocator order/membership/hash metadata, participant block metadata, block
+  tables, and both cache coverages; restore them after reservation/proposal
+  failure, and undo any ordinary decode boundary append after a failed cycle;
+- release the proposal lease before target execution, validate and stage draft
+  coverage before the target call, and validate target token/row/coverage facts
+  before ordinary postprocess mutates committed state;
+- make cancellation pre-resolve queue members, release an active global lease
+  before any target deallocation, and remove each target from its queue only
+  after deallocation succeeds;
+- retain Python 3.10 compatibility by implementing string-valued route enums
+  without `StrEnum` and guarding PEP 678 `add_note` use. Tensor-bearing draft
+  failures are still converted to a host-only error with their type/message on
+  Python 3.10; only optional cleanup-note attachment is omitted;
+- construct draft prefill warmup from counter-free `ScheduledSequence` DTOs. The
+  earlier public-`Sequence` witness advanced the global sequence-ID allocator
+  during speculation-enabled construction and broke off/on identity parity;
 - discard every proposal and execute ordinary target decode.
+
+Validation status at the current worktree:
+
+- CPU control-plane, allocator fault-injection, route-registry, engine-ordering,
+  direct-q, and runner tests exist, together with a fresh-process A100 route
+  compile harness;
+- available dirty-worktree A100 route artifacts at configured K=2 and batch cap
+  4 visited 4/4 eager keys in 8 records and 12/12 graph keys in 24 records. They
+  observed empty compiler deltas, unchanged aggregate compiler state, stable
+  post-init CUDA-graph ledgers (0/0 eager and 20/20 graph contexts/objects), RNG
+  neutrality, reset attention context, and CUDA-free host results. Recorded
+  pretouch allocation peaks were 41,995,264 bytes eager and 41,970,688 bytes
+  graph;
+- paired dirty-worktree eager and graph cache-neutrality runs filled every
+  reserved draft slot with zeros versus NaNs. In each mode the block-boundary
+  positions 255/256/257 and shared-prefix scenario had equal host oracles, and
+  all nine full-vocabulary `[1,151936]` BF16 logits tensors and their FP32
+  probability rows were bitwise equal (maximum absolute and relative difference
+  zero);
+- fresh dirty-worktree eager and graph output-control pairs used sampled
+  `temperature=0.8`, `top_k=8`, and `top_p=0.9`. Speculation off/on matched exact
+  public sequence IDs, authoritative target events and tokens, and CPU/CUDA RNG
+  hashes at all four checkpoints (post-init, post-prefill, first target decode,
+  and repeated target decode). Off entered zero of the five instrumented draft
+  constructor phases, owned no draft/speculative runner attributes or resources,
+  and executed zero runtime draft intervals; on executed two real RNG-neutral V3
+  intervals, first cold with catch-up and then warm without catch-up; and
+- these exploratory runs came from a dirty worktree, so none can be promoted
+  into a SHA-bound certificate. Fresh eager and graph replay from the final clean SHA,
+  full regression, block/prefix/preemption coverage, memory reconciliation, and
+  retained manifest validation remain required before V3 may be called
+  certified.
 
 Hard gates:
 
 - speculation enabled in discard mode produces the same baseline output and
   stream events under deterministic, non-tied fixtures;
-- draft logits/tokens are nontrivial and acceptance-rate instrumentation is sane;
+- draft logits/tokens are nontrivial and proposal-count/draft-position
+  diagnostics are sane; V3 must not label any statistic an acceptance rate;
 - a tensor-lifetime test proves the retained-q write contract and rejects any
   implementation whose peak includes an unpriced result row or second q stack;
 - boundary cases around block positions 255/256/257 and multi-block K pass;
@@ -586,19 +724,47 @@ Hard gates:
   lifecycle tests pass with speculation off and relevant tests with discard mode
   on.
 
+The A100 compile-completeness gate uses
+`tests/run_speculative_v3_route_compile.py` in separate eager and graph processes
+with process-unique initially empty `TORCHINDUCTOR_CACHE_DIR` and
+`TRITON_CACHE_DIR`. It must visit every exact registered key in at least two
+repetitions; for each `(mode,batch_bucket,K)` tuple it exercises both the cold
+paged-catch-up and zero-catch-up families. `fail_on_recompile` guards each draft
+interval, across which compiler counters/manifests, guard failures, graph-break
+reasons, RNG hashes, attention-context state, and host-only result ownership must
+remain unchanged. The CUDA-graph construction ledger must remain unchanged for
+the complete post-initialization run. The dirty-tree results summarized above
+passed the route protocol for their then-current source and limited K=2,
+batch-cap=4 matrix. They are not a substitute for rerunning the final source from
+a clean commit and retaining a validated archive; no retained V3 A100 artifact
+exists yet.
+
+The output-control gate uses `tests/run_speculative_v3_output_control.py` in four
+fresh processes—off/on for eager and off/on for graph—and compares each mode with
+`tests/compare_speculative_v3_output_control.py`. Its five-phase constructor
+ledger covers draft construction, draft warmup, draft graph capture, draft eager
+prefill pretouch, and draft route pretouch. Exact sequence IDs are part of the
+authoritative events and per-sequence token map; exact RNG comparison includes
+both CPU and CUDA state at every registered checkpoint. The current dirty-tree
+passes validate the protocol during development, but the final clean V3 SHA must
+repeat it before the results can enter retained evidence.
+
 ### V4: scheduler plan and reservations
 
 Changes:
 
-- introduce an explicit speculative step plan;
-- calculate batch-wide `effective_k` from completion and model-position limits;
+- generalize V3's private discard plan into the explicit speculative step plan
+  consumed by target verification and commit;
+- retain and extend V3's batch-wide `effective_k` derivation from completion,
+  model-position, token-budget, workspace, and writable-position limits;
 - reserve completion and target-work headroom for the full-acceptance bonus;
 - enforce the configured verification-token budget;
 - compute and record `W_spec_live_peak` and `W_spec_reservation` for the exact
   machine-readable `route_key`, and reject the
   speculative plan before tensor/block allocation when reserved headroom is
   insufficient;
-- reserve and trim additional blocks transactionally;
+- generalize V3's temporary draft-write reservation to cover verifier writes,
+  accepted/corrective commit, and refcount-safe trailing trim;
 - define deterministic whole-selected-batch baseline fallback; explicitly defer
   speculative subgrouping and microbatching to a measured V7-or-later extension.
 

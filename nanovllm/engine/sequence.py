@@ -39,6 +39,12 @@ class Sequence:
         self.num_tokens = len(self.token_ids)
         self.num_prompt_tokens = len(token_ids)
         self.num_cached_tokens = 0
+        # Target and draft models have separate KV tensors even though they use
+        # one scheduler-owned block-ID table.  A target prefix-cache hit is not
+        # evidence that the draft tensor contains the same prefix, so draft
+        # coverage always starts cold and is reset whenever block identity is
+        # released or replaced.
+        self.num_draft_cached_tokens = 0
         self.num_scheduled_tokens = 0
         self.is_prefill = True
         self.block_table = []

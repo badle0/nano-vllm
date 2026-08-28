@@ -220,11 +220,11 @@ class Config:
         )
         if min(
             self.configured_k,
-            self.max_model_len - 1,
-            self.max_num_batched_tokens - 1,
+            self.max_model_len - 2,
+            self.max_num_batched_tokens - 2,
         ) < 1:
             raise ValueError(
                 "speculative decoding has no globally usable proposal slot; "
                 "max_model_len and max_num_batched_tokens must both be at "
-                "least 2 after target/draft position-limit clamping"
+                "least 3 after target/draft position-limit clamping"
             )

@@ -15,6 +15,19 @@ from nanovllm.engine.speculative_memory import (
     SpeculativeMemoryPlan,
     kv_cache_block_bytes,
     plan_speculative_workspace,
+    speculative_route_fits_plan,
+)
+from nanovllm.engine.speculative_routes import (
+    DraftCatchupFamily,
+    DraftExecutionMode,
+    DraftRouteAdmission,
+    DraftRouteKey,
+    DraftRouteRegistry,
+    DraftWarmComponentKey,
+    MAX_CUDA_GRAPH_BATCH_SIZE,
+    build_draft_route_registry,
+    draft_graph_batch_buckets,
+    max_eligible_draft_catchup,
 )
 from nanovllm.engine.tp_transport import ScheduledSequence, compact_run_args
 from nanovllm.models.qwen3 import Qwen3ForCausalLM
@@ -39,6 +52,96 @@ class TensorParallelTransportError(RuntimeError):
 
 class SpeculativeKVCacheCapacityError(RuntimeError):
     """The configured dual cache plus reserved workspace cannot fit."""
+
+
+class SpeculativeDraftPlanError(RuntimeError):
+    """A V3 discard plan no longer describes safe live runner state."""
+
+
+class SpeculativeDraftExecutionError(RuntimeError):
+    """Host-only boundary for a failed tensor-bearing V3 draft phase."""
+
+
+class DraftCycleRow(NamedTuple):
+    """Immutable runner-owned snapshot of one discard-plan row.
+
+    The scheduler owns the physical reservation and the live ``Sequence``.  The
+    runner deliberately copies only the values needed by draft execution so no
+    model or sampler call can mutate scheduler/public state through this view.
+    """
+
+    seq_id: int
+    token_ids: tuple[int, ...]
+    committed_len: int
+    target_cached_tokens: int
+    draft_cached_tokens: int
+    block_table: tuple[int, ...]
+    temperature: float
+    top_k: int
+    top_p: float
+
+    def __len__(self) -> int:
+        return self.committed_len
+
+    def __getitem__(self, key):
+        return self.token_ids[key]
+
+    @property
+    def last_token(self) -> int:
+        return self.token_ids[-1]
+
+
+class DraftCatchupView(NamedTuple):
+    """Cycle-local ragged-prefill DTO over an unprocessed committed suffix."""
+
+    scheduled_token_ids: tuple[int, ...]
+    is_prefill: bool
+    num_cached_tokens: int
+    num_scheduled_tokens: int
+    num_tokens: int
+    last_token: int
+    block_table: tuple[int, ...]
+
+    def __len__(self) -> int:
+        return self.num_tokens
+
+
+class DraftProposalExecution(NamedTuple):
+    """Tensor-bearing V3 test seam; production consumes it within one cycle."""
+
+    rows: tuple[DraftCycleRow, ...]
+    proposal_token_ids: torch.Tensor
+    q_storage_kbv: torch.Tensor
+    q_probabilities: torch.Tensor
+    catchup_positions: int
+    graph_decode_steps: int
+    eager_decode_steps: int
+
+
+class DraftDiscardRowResult(NamedTuple):
+    """Small host-only result for one compute-then-discard row."""
+
+    seq_id: int
+    coverage_after_commit: int
+    proposed_token_ids: tuple[int, ...]
+    proposal_count: int
+
+
+class DraftDiscardResult(NamedTuple):
+    """Host-only diagnostics returned by the production V3 discard path."""
+
+    rows: tuple[DraftDiscardRowResult, ...]
+    route_key: DraftRouteKey
+    effective_k: int
+    catchup_positions: int
+    draft_positions: int
+    graph_decode_steps: int
+    eager_decode_steps: int
+    q_shape: tuple[int, int, int]
+    q_stride: tuple[int, int, int]
+    q_dtype: str
+    q_storage_contiguous: bool
+    q_view_zero_copy: bool
 
 
 def _clear_rope_cache():
@@ -168,6 +271,7 @@ class ModelRunner:
             self.draft_graph_bs = None
             self.speculative_memory_plan = None
             self.speculative_memory_audit = None
+            self.draft_route_registry = None
             self._speculative_memory_audit_inputs = None
             self._profiled_graph_allocated_bytes = 0
             self._profiled_graph_reserved_bytes = 0
@@ -182,6 +286,7 @@ class ModelRunner:
             self._target_warmup_transient_bytes = 0
             self._draft_warmup_transient_bytes = 0
             self._warmup_transient_bytes = 0
+            self._draft_route_pretouch_peak_bytes = 0
 
         default_device = torch.get_default_device()
         default_dtype = torch.get_default_dtype()
@@ -226,6 +331,7 @@ class ModelRunner:
                         self._target_warmup_transient_bytes,
                         self._draft_warmup_transient_bytes,
                     )
+                    self._initialize_speculative_route_registry()
                     if not self.enforce_eager:
                         self._run_draft_phase(
                             "target/draft graph-memory profile",
@@ -268,6 +374,10 @@ class ModelRunner:
                     )
 
             if self.speculation_enabled:
+                self._run_draft_phase(
+                    "V3 draft route pretouch",
+                    self._pretouch_draft_routes,
+                )
                 self._finalize_speculative_memory_audit()
 
             if self.world_size > 1:
@@ -460,6 +570,7 @@ class ModelRunner:
             "model",
             "speculative_memory_plan",
             "speculative_memory_audit",
+            "draft_route_registry",
             "_speculative_memory_audit_inputs",
         ):
             if hasattr(self, name):
@@ -631,9 +742,22 @@ class ModelRunner:
             max_num_batched_tokens // seq_len,
             self.config.max_num_seqs,
         )
-        seqs = [Sequence([0] * seq_len) for _ in range(num_seqs)]
-        for seq in seqs:
-            seq.num_scheduled_tokens = seq_len
+        # Constructor pretouch must not consume a public Sequence ID.  The
+        # compact worker DTO already carries exactly the fields needed by the
+        # ragged prefill path and has no process-global allocator side effect.
+        warmup_tokens = (0,) * seq_len
+        seqs = [
+            ScheduledSequence(
+                scheduled_token_ids=warmup_tokens,
+                is_prefill=True,
+                num_cached_tokens=0,
+                num_scheduled_tokens=seq_len,
+                num_tokens=seq_len,
+                last_token=0,
+                block_table=(),
+            )
+            for _ in range(num_seqs)
+        ]
         input_ids, positions = self.prepare_prefill(seqs)
         try:
             with torch.inference_mode():
@@ -829,6 +953,16 @@ class ModelRunner:
             draft_logits_dtype=config.draft_hf_config.dtype,
         )
 
+    def _initialize_speculative_route_registry(self):
+        """Build the host-only plan/route ledger before any route capture."""
+
+        plan = self._plan_speculative_memory()
+        self.speculative_memory_plan = plan
+        self.draft_route_registry = build_draft_route_registry(
+            plan,
+            enforce_eager=self.enforce_eager,
+        )
+
     @staticmethod
     def _model_parameter_bytes(model):
         # ``numel * itemsize`` double-counts tied parameters and distinct views
@@ -896,8 +1030,16 @@ class ModelRunner:
         config = self.config
         target_config = config.hf_config
         draft_config = config.draft_hf_config
-        plan = self._plan_speculative_memory()
-        self.speculative_memory_plan = plan
+        plan = self.speculative_memory_plan
+        if not isinstance(plan, SpeculativeMemoryPlan) or not isinstance(
+            getattr(self, "draft_route_registry", None), DraftRouteRegistry
+        ):
+            # ``allocate_kv_cache`` is also a focused test/embedding seam.  The
+            # full constructor initializes earlier so graph profiling and final
+            # capture share one immutable registry; direct callers may safely
+            # request the same host-only initialization lazily.
+            self._initialize_speculative_route_registry()
+            plan = self.speculative_memory_plan
 
         free, total = torch.cuda.mem_get_info()
         used = total - free
@@ -1366,6 +1508,825 @@ class ModelRunner:
                 top_p_plan = (row_indices, probability_cutoffs)
         return temperatures, top_k_buckets, top_p_plan, False
 
+    @staticmethod
+    def _require_plan_int(name: str, value: int, *, minimum: int = 0) -> int:
+        if type(value) is not int:
+            raise SpeculativeDraftPlanError(f"{name} must be an integer")
+        if value < minimum:
+            raise SpeculativeDraftPlanError(
+                f"{name} must be at least {minimum}, got {value}"
+            )
+        return value
+
+    @staticmethod
+    def _plan_committed_len(row) -> int:
+        value = getattr(row, "committed_tokens", None)
+        if value is None:
+            value = getattr(row, "committed_len", None)
+        return ModelRunner._require_plan_int(
+            "row.committed_tokens", value, minimum=1
+        )
+
+    def _validate_draft_discard_plan(
+        self,
+        plan,
+        seqs: list[Sequence],
+    ) -> tuple[tuple[DraftCycleRow, ...], int, DraftRouteKey]:
+        """Fail closed on stale plan snapshots before CUDA work or RNG use."""
+
+        if not self.speculation_enabled:
+            raise SpeculativeDraftPlanError(
+                "draft discard execution requires speculation to be enabled"
+            )
+        if getattr(plan, "fallback_reason", None) is not None:
+            raise SpeculativeDraftPlanError(
+                "a fallback discard plan cannot execute the draft model"
+            )
+        effective_k = self._require_plan_int(
+            "plan.effective_k",
+            getattr(plan, "effective_k", None),
+            minimum=1,
+        )
+        configured_k = self._require_plan_int(
+            "plan.configured_k",
+            getattr(plan, "configured_k", None),
+            minimum=1,
+        )
+        if configured_k != self.config.configured_k:
+            raise SpeculativeDraftPlanError(
+                "discard plan configured_k does not match the runner"
+            )
+        route_cap = self._require_plan_int(
+            "plan.workspace_route_cap",
+            getattr(plan, "workspace_route_cap", None),
+            minimum=1,
+        )
+        if effective_k > min(configured_k, route_cap):
+            raise SpeculativeDraftPlanError(
+                "discard plan effective_k exceeds its configured/workspace cap"
+            )
+
+        plan_rows = getattr(plan, "rows", None)
+        if not isinstance(plan_rows, tuple) or not plan_rows:
+            raise SpeculativeDraftPlanError(
+                "discard plan rows must be a non-empty tuple"
+            )
+        if not isinstance(seqs, list) or len(seqs) != len(plan_rows):
+            raise SpeculativeDraftPlanError(
+                "live sequence batch must match the discard-plan row count"
+            )
+        batch_size = len(plan_rows)
+        if not speculative_route_fits_plan(
+            self.speculative_memory_plan,
+            batch_size=batch_size,
+            effective_k=effective_k,
+        ):
+            raise SpeculativeDraftPlanError(
+                "discard route exceeds the runner's reserved workspace plan"
+            )
+        if route_cap > self.speculative_memory_plan.max_effective_k:
+            raise SpeculativeDraftPlanError(
+                "scheduler workspace cap exceeds the runner's reserved plan"
+            )
+        draft_catchup_tokens = self._require_plan_int(
+            "plan.draft_catchup_tokens",
+            getattr(plan, "draft_catchup_tokens", None),
+        )
+        route_key = getattr(plan, "route_key", None)
+        registry = getattr(self, "draft_route_registry", None)
+        if not isinstance(route_key, DraftRouteKey) or not isinstance(
+            registry, DraftRouteRegistry
+        ):
+            raise SpeculativeDraftPlanError(
+                "discard plan does not carry a registered route key"
+            )
+        if not registry.validate_runtime_key(
+            route_key,
+            batch_size=batch_size,
+            effective_k=effective_k,
+            catchup_tokens=draft_catchup_tokens,
+        ):
+            raise SpeculativeDraftPlanError(
+                "discard plan route is unregistered, uncertified, or unwarmed"
+            )
+        expected_mode = (
+            DraftExecutionMode.EAGER_DYNAMIC
+            if self.enforce_eager
+            else DraftExecutionMode.CUDA_GRAPH
+        )
+        if route_key.execution_mode is not expected_mode:
+            raise SpeculativeDraftPlanError(
+                "discard plan execution mode does not match the runner"
+            )
+        total_scheduled_tokens = self._require_plan_int(
+            "plan.total_scheduled_tokens",
+            getattr(plan, "total_scheduled_tokens", None),
+            minimum=1,
+        )
+        expected_total = draft_catchup_tokens + batch_size * (effective_k + 1)
+        if total_scheduled_tokens != expected_total:
+            raise SpeculativeDraftPlanError(
+                "total_scheduled_tokens does not match catch-up plus discard work"
+            )
+        if total_scheduled_tokens > self.config.max_num_batched_tokens:
+            raise SpeculativeDraftPlanError(
+                "discard plan exceeds max_num_batched_tokens"
+            )
+
+        draft_counts = getattr(plan, "draft_step_token_counts", None)
+        if (
+            not isinstance(draft_counts, tuple)
+            or any(type(count) is not int for count in draft_counts)
+            or draft_counts != (batch_size,) * effective_k
+        ):
+            raise SpeculativeDraftPlanError(
+                "draft_step_token_counts must contain one full-batch count per step"
+            )
+        target_query_tokens = self._require_plan_int(
+            "plan.target_query_tokens",
+            getattr(plan, "target_query_tokens", None),
+            minimum=1,
+        )
+        if target_query_tokens != batch_size:
+            raise SpeculativeDraftPlanError(
+                "target_query_tokens does not match the ordinary target batch"
+            )
+
+        draft_cache = getattr(self, "draft_kv_cache", None)
+        if not isinstance(draft_cache, torch.Tensor) or draft_cache.ndim < 3:
+            raise SpeculativeDraftPlanError(
+                "draft KV cache is unavailable or has invalid geometry"
+            )
+        physical_blocks = draft_cache.size(2)
+        if physical_blocks < 1:
+            raise SpeculativeDraftPlanError("draft KV cache contains no blocks")
+
+        by_id = {}
+        for seq in seqs:
+            seq_id = getattr(seq, "seq_id", None)
+            if type(seq_id) is not int or seq_id in by_id:
+                raise SpeculativeDraftPlanError(
+                    "live sequences must have unique integer seq_id values"
+                )
+            by_id[seq_id] = seq
+        if len(by_id) != batch_size:
+            raise SpeculativeDraftPlanError(
+                "live sequence IDs do not match the discard batch"
+            )
+
+        views = []
+        seen_ids = set()
+        vocab_size = self.config.draft_hf_config.vocab_size
+        for index, row in enumerate(plan_rows):
+            seq_id = self._require_plan_int(
+                f"rows[{index}].seq_id",
+                getattr(row, "seq_id", None),
+            )
+            if seq_id in seen_ids or seq_id not in by_id:
+                raise SpeculativeDraftPlanError(
+                    "discard rows must name each live sequence exactly once"
+                )
+            seen_ids.add(seq_id)
+            seq = seqs[index]
+            if seq_id != seq.seq_id:
+                raise SpeculativeDraftPlanError(
+                    "discard-plan row order must match the live decode batch"
+                )
+            committed_len = self._plan_committed_len(row)
+            if committed_len != len(seq) or committed_len != seq.num_tokens:
+                raise SpeculativeDraftPlanError(
+                    f"discard row {seq_id} has a stale committed-token snapshot"
+                )
+            if seq.is_prefill or seq.num_scheduled_tokens != 1:
+                raise SpeculativeDraftPlanError(
+                    f"discard row {seq_id} is not a one-token decode row"
+                )
+
+            target_cached = self._require_plan_int(
+                f"rows[{index}].target_cached_tokens",
+                getattr(row, "target_cached_tokens", None),
+            )
+            if (
+                target_cached != seq.num_cached_tokens
+                or target_cached != committed_len - 1
+            ):
+                raise SpeculativeDraftPlanError(
+                    f"discard row {seq_id} has stale target-cache coverage"
+                )
+            draft_cached = self._require_plan_int(
+                f"rows[{index}].draft_cached_tokens",
+                getattr(row, "draft_cached_tokens", None),
+            )
+            if draft_cached != getattr(seq, "num_draft_cached_tokens", None):
+                raise SpeculativeDraftPlanError(
+                    f"discard row {seq_id} has stale draft-cache coverage"
+                )
+            if draft_cached > committed_len - 1:
+                raise SpeculativeDraftPlanError(
+                    f"discard row {seq_id} draft coverage passes the decode boundary"
+                )
+
+            remaining = self._require_plan_int(
+                f"rows[{index}].remaining_completion_tokens",
+                getattr(row, "remaining_completion_tokens", None),
+                minimum=1,
+            )
+            live_remaining = seq.max_tokens - seq.num_completion_tokens
+            if remaining != live_remaining or remaining < effective_k + 1:
+                raise SpeculativeDraftPlanError(
+                    f"discard row {seq_id} lacks completion-token headroom"
+                )
+            position_headroom = self._require_plan_int(
+                f"rows[{index}].model_position_headroom",
+                getattr(row, "model_position_headroom", None),
+                minimum=1,
+            )
+            if (
+                position_headroom != self.config.max_model_len - committed_len
+                or position_headroom < effective_k
+            ):
+                raise SpeculativeDraftPlanError(
+                    f"discard row {seq_id} has stale model-position headroom"
+                )
+            highest_position = committed_len + effective_k - 2
+            if getattr(row, "highest_proposal_input_position", None) != highest_position:
+                raise SpeculativeDraftPlanError(
+                    f"discard row {seq_id} has an invalid highest proposal input"
+                )
+            if highest_position >= self.config.max_model_len:
+                raise SpeculativeDraftPlanError(
+                    f"discard row {seq_id} exceeds the model position limit"
+                )
+
+            block_table = getattr(row, "block_table", None)
+            if not isinstance(block_table, tuple) or block_table != tuple(
+                seq.block_table
+            ):
+                raise SpeculativeDraftPlanError(
+                    f"discard row {seq_id} has a stale block-table snapshot"
+                )
+            required_blocks = highest_position // self.block_size + 1
+            if len(block_table) < required_blocks:
+                raise SpeculativeDraftPlanError(
+                    f"discard row {seq_id} lacks reserved proposal blocks"
+                )
+            if any(
+                type(block_id) is not int
+                or block_id < 0
+                or block_id >= physical_blocks
+                for block_id in block_table
+            ):
+                raise SpeculativeDraftPlanError(
+                    f"discard row {seq_id} contains an invalid physical block ID"
+                )
+
+            token_ids = tuple(seq.token_ids)
+            if (
+                len(token_ids) != committed_len
+                or any(
+                    type(token_id) is not int
+                    or token_id < 0
+                    or token_id >= vocab_size
+                    for token_id in token_ids
+                )
+            ):
+                raise SpeculativeDraftPlanError(
+                    f"discard row {seq_id} has invalid committed token IDs"
+                )
+            views.append(
+                DraftCycleRow(
+                    seq_id=seq_id,
+                    token_ids=token_ids,
+                    committed_len=committed_len,
+                    target_cached_tokens=target_cached,
+                    draft_cached_tokens=draft_cached,
+                    block_table=block_table,
+                    temperature=seq.temperature,
+                    top_k=seq.top_k,
+                    top_p=seq.top_p,
+                )
+            )
+        live_catchup_tokens = sum(
+            row.committed_len - 1 - row.draft_cached_tokens for row in views
+        )
+        if live_catchup_tokens != draft_catchup_tokens:
+            raise SpeculativeDraftPlanError(
+                "draft_catchup_tokens does not match live draft-cache coverage"
+            )
+        return tuple(views), effective_k, route_key
+
+    @staticmethod
+    def _draft_device_tensor(values, *, dtype, device):
+        if device.type == "cuda":
+            return torch.tensor(values, dtype=dtype, pin_memory=True).to(
+                device=device,
+                non_blocking=True,
+            )
+        return torch.tensor(values, dtype=dtype, device=device)
+
+    def _prepare_draft_block_tables(
+        self,
+        rows: tuple[DraftCycleRow | DraftCatchupView, ...],
+        *,
+        device: torch.device,
+    ) -> torch.Tensor:
+        max_len = max(len(row.block_table) for row in rows)
+        values = [
+            row.block_table + (-1,) * (max_len - len(row.block_table))
+            for row in rows
+        ]
+        return self._draft_device_tensor(
+            values,
+            dtype=torch.int32,
+            device=device,
+        )
+
+    def _prepare_draft_catchup(
+        self,
+        rows: tuple[DraftCycleRow, ...],
+    ) -> tuple[torch.Tensor, torch.Tensor, int]:
+        catchup = tuple(
+            DraftCatchupView(
+                scheduled_token_ids=row.token_ids[
+                    row.draft_cached_tokens : row.committed_len - 1
+                ],
+                is_prefill=True,
+                num_cached_tokens=row.draft_cached_tokens,
+                num_scheduled_tokens=(
+                    row.committed_len - 1 - row.draft_cached_tokens
+                ),
+                num_tokens=row.committed_len - 1,
+                last_token=row.token_ids[row.committed_len - 2],
+                block_table=row.block_table,
+            )
+            for row in rows
+            if row.draft_cached_tokens < row.committed_len - 1
+        )
+        if not catchup:
+            device = self.draft_kv_cache.device
+            empty = torch.empty(0, dtype=torch.int64, device=device)
+            return empty, empty, 0
+
+        device = self.draft_kv_cache.device
+        input_ids = []
+        positions = []
+        cu_q = [0]
+        cu_k = [0]
+        slot_mapping = []
+        max_q = 0
+        max_k = 0
+        for row in catchup:
+            start = row.num_cached_tokens
+            end = row.num_tokens
+            input_ids.extend(row.scheduled_token_ids)
+            positions.extend(range(start, end))
+            query_len = end - start
+            cu_q.append(cu_q[-1] + query_len)
+            cu_k.append(cu_k[-1] + end)
+            max_q = max(max_q, query_len)
+            max_k = max(max_k, end)
+            for position in range(start, end):
+                block_id = row.block_table[position // self.block_size]
+                slot_mapping.append(
+                    block_id * self.block_size + position % self.block_size
+                )
+        input_ids_tensor = self._draft_device_tensor(
+            input_ids, dtype=torch.int64, device=device
+        )
+        positions_tensor = self._draft_device_tensor(
+            positions, dtype=torch.int64, device=device
+        )
+        set_context(
+            True,
+            cu_seqlens_q=self._draft_device_tensor(
+                cu_q, dtype=torch.int32, device=device
+            ),
+            cu_seqlens_k=self._draft_device_tensor(
+                cu_k, dtype=torch.int32, device=device
+            ),
+            max_seqlen_q=max_q,
+            max_seqlen_k=max_k,
+            slot_mapping=self._draft_device_tensor(
+                slot_mapping, dtype=torch.int32, device=device
+            ),
+            block_tables=self._prepare_draft_block_tables(
+                catchup, device=device
+            ),
+        )
+        return input_ids_tensor, positions_tensor, len(input_ids)
+
+    @torch.inference_mode()
+    def _run_draft_catchup(
+        self,
+        rows: tuple[DraftCycleRow, ...],
+    ) -> int:
+        """Populate only missing committed-prefix draft KV via eager ragged work."""
+
+        try:
+            input_ids, positions, count = self._prepare_draft_catchup(rows)
+            if count:
+                # Catch-up is deliberately eager in V3. Its logits are not a
+                # proposal law and retaining them would create an unpriced owner.
+                self.draft_model(input_ids, positions)
+            return count
+        finally:
+            reset_context()
+
+    def _prepare_draft_decode(
+        self,
+        rows: tuple[DraftCycleRow, ...],
+        input_token_ids: torch.Tensor,
+        step: int,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        device = self.draft_kv_cache.device
+        positions = tuple(row.committed_len - 1 + step for row in rows)
+        slots = tuple(
+            row.block_table[position // self.block_size] * self.block_size
+            + position % self.block_size
+            for row, position in zip(rows, positions, strict=True)
+        )
+        positions_tensor = self._draft_device_tensor(
+            positions, dtype=torch.int64, device=device
+        )
+        set_context(
+            False,
+            slot_mapping=self._draft_device_tensor(
+                slots, dtype=torch.int32, device=device
+            ),
+            context_lens=self._draft_device_tensor(
+                tuple(position + 1 for position in positions),
+                dtype=torch.int32,
+                device=device,
+            ),
+            block_tables=self._prepare_draft_block_tables(rows, device=device),
+        )
+        return input_token_ids, positions_tensor
+
+    def _draft_graph_key(
+        self,
+        batch_size: int,
+        context,
+        route_key: DraftRouteKey,
+    ) -> int | None:
+        if route_key.execution_mode is DraftExecutionMode.EAGER_DYNAMIC:
+            if not self.enforce_eager:
+                raise SpeculativeDraftPlanError(
+                    "an eager draft route is not registered for graph mode"
+                )
+            return None
+        if route_key.execution_mode is not DraftExecutionMode.CUDA_GRAPH \
+                or self.enforce_eager:
+            raise SpeculativeDraftPlanError(
+                "draft route execution mode does not match graph availability"
+            )
+        graph_bs = getattr(self, "draft_graph_bs", ())
+        graphs = getattr(self, "draft_graphs", None)
+        variables = getattr(self, "draft_graph_vars", None)
+        if not graph_bs or not isinstance(graphs, dict) or variables is None:
+            raise SpeculativeDraftPlanError(
+                "registered draft graph resources are unavailable"
+            )
+        key = route_key.batch_bucket
+        if (
+            key not in graph_bs
+            or key not in graphs
+            or not 0 < batch_size <= key
+        ):
+            raise SpeculativeDraftPlanError(
+                "registered draft graph bucket is unavailable"
+            )
+        block_tables = context.block_tables
+        if (
+            context.slot_mapping is None
+            or context.context_lens is None
+            or block_tables is None
+            or block_tables.ndim != 2
+            or block_tables.size(0) != batch_size
+            or block_tables.size(1) > variables["block_tables"].size(1)
+        ):
+            raise SpeculativeDraftPlanError(
+                "live draft decode metadata does not fit its registered graph"
+            )
+        return key
+
+    @torch.inference_mode()
+    def _run_draft_decode_model(
+        self,
+        input_ids: torch.Tensor,
+        positions: torch.Tensor,
+        route_key: DraftRouteKey,
+    ) -> tuple[torch.Tensor, bool]:
+        batch_size = input_ids.size(0)
+        context = get_context()
+        graph_key = self._draft_graph_key(batch_size, context, route_key)
+        if graph_key is None:
+            hidden_states = self.draft_model(input_ids, positions)
+            return self.draft_model.compute_logits(hidden_states), False
+
+        variables = self.draft_graph_vars
+        variables["input_ids"][:batch_size] = input_ids
+        variables["positions"][:batch_size] = positions
+        variables["slot_mapping"].fill_(-1)
+        variables["slot_mapping"][:batch_size] = context.slot_mapping
+        variables["context_lens"].zero_()
+        variables["context_lens"][:batch_size] = context.context_lens
+        variables["block_tables"].fill_(-1)
+        variables["block_tables"][
+            :batch_size, : context.block_tables.size(1)
+        ] = context.block_tables
+        self.draft_graphs[graph_key].replay()
+        logits = self.draft_model.compute_logits(
+            variables["outputs"][:batch_size]
+        )
+        return logits, True
+
+    def _prepare_draft_sample_metadata(
+        self,
+        rows: tuple[DraftCycleRow, ...],
+    ):
+        temperatures, host_top_k, host_top_p, _ = self._prepare_sample_metadata(
+            rows, self.config.draft_hf_config.vocab_size
+        )
+        device = self.draft_kv_cache.device
+        temperatures = self._draft_device_tensor(
+            temperatures, dtype=torch.float32, device=device
+        )
+        top_k_buckets = tuple(
+            (
+                top_k,
+                None
+                if active_rows is None
+                else self._draft_device_tensor(
+                    active_rows, dtype=torch.int64, device=device
+                ),
+            )
+            for top_k, active_rows in host_top_k
+        )
+        top_p_plan = None
+        if host_top_p is not None:
+            active_rows, top_ps = host_top_p
+            top_p_plan = (
+                None
+                if active_rows is None
+                else self._draft_device_tensor(
+                    active_rows, dtype=torch.int64, device=device
+                ),
+                self._draft_device_tensor(
+                    tuple(1.0 - top_p for top_p in top_ps),
+                    dtype=torch.float32,
+                    device=device,
+                ),
+            )
+        return temperatures, top_k_buckets, top_p_plan
+
+    def _run_draft_proposal_step(
+        self,
+        rows: tuple[DraftCycleRow, ...],
+        input_token_ids: torch.Tensor,
+        step: int,
+        temperatures: torch.Tensor,
+        top_k_buckets,
+        top_p_plan,
+        probabilities_out: torch.Tensor,
+        route_key: DraftRouteKey,
+    ) -> tuple[torch.Tensor, bool]:
+        try:
+            input_ids, positions = self._prepare_draft_decode(
+                rows, input_token_ids, step
+            )
+            logits, used_graph = self._run_draft_decode_model(
+                input_ids, positions, route_key
+            )
+        finally:
+            # Attention context must never survive a forward failure or become
+            # visible to the sampler/next draft step.
+            reset_context()
+        sample = self.sampler.sample_exact_with_probabilities(
+            logits,
+            temperatures,
+            top_k_buckets=top_k_buckets,
+            top_p_plan=top_p_plan,
+            probabilities_out=probabilities_out,
+        )
+        if (
+            sample.probabilities.shape != probabilities_out.shape
+            or sample.probabilities.dtype != torch.float32
+            or sample.probabilities.device != probabilities_out.device
+            or sample.probabilities.data_ptr() != probabilities_out.data_ptr()
+            or sample.probabilities.stride() != probabilities_out.stride()
+        ):
+            raise SpeculativeDraftPlanError(
+                "sampler did not retain probabilities in the reserved q row"
+            )
+        token_ids = getattr(sample, "token_ids", None)
+        vocab_size = self.config.draft_hf_config.vocab_size
+        if (
+            not isinstance(token_ids, torch.Tensor)
+            or token_ids.shape != (len(rows),)
+            or token_ids.dtype != torch.int64
+            or token_ids.device != probabilities_out.device
+            or bool(torch.any(token_ids < 0).item())
+            or bool(torch.any(token_ids >= vocab_size).item())
+        ):
+            raise SpeculativeDraftPlanError(
+                "draft sampler returned invalid token IDs"
+            )
+        return token_ids, used_graph
+
+    def _execute_draft_proposals_validated(
+        self,
+        rows: tuple[DraftCycleRow, ...],
+        effective_k: int,
+        route_key: DraftRouteKey,
+    ) -> DraftProposalExecution:
+        """Tensor-bearing proposal seam; callers must keep it cycle-local."""
+
+        batch_size = len(rows)
+        vocab_size = self.config.draft_hf_config.vocab_size
+        device = self.draft_kv_cache.device
+        q_storage = torch.empty(
+            (effective_k, batch_size, vocab_size),
+            dtype=torch.float32,
+            device=device,
+        )
+        if not q_storage.is_contiguous():
+            raise SpeculativeDraftPlanError("K-major q storage must be contiguous")
+        proposal_ids = torch.empty(
+            (batch_size, effective_k),
+            dtype=torch.int64,
+            device=device,
+        )
+        temperatures, top_k_buckets, top_p_plan = (
+            self._prepare_draft_sample_metadata(rows)
+        )
+        catchup_positions = self._run_draft_catchup(rows)
+        input_token_ids = self._draft_device_tensor(
+            tuple(row.last_token for row in rows),
+            dtype=torch.int64,
+            device=device,
+        )
+        graph_steps = 0
+        eager_steps = 0
+        try:
+            for step in range(effective_k):
+                q_step = q_storage[step]
+                if not q_step.is_contiguous():
+                    raise SpeculativeDraftPlanError(
+                        "each reserved K-major q destination must be contiguous"
+                    )
+                sampled_ids, used_graph = self._run_draft_proposal_step(
+                    rows,
+                    input_token_ids,
+                    step,
+                    temperatures,
+                    top_k_buckets,
+                    top_p_plan,
+                    q_step,
+                    route_key,
+                )
+                if sampled_ids.shape != (batch_size,):
+                    raise SpeculativeDraftPlanError(
+                        "draft sampler returned an invalid token shape"
+                    )
+                proposal_ids[:, step].copy_(sampled_ids)
+                input_token_ids = sampled_ids
+                graph_steps += int(used_graph)
+                eager_steps += int(not used_graph)
+            q_bkv = q_storage.permute(1, 0, 2)
+            if q_bkv.untyped_storage().data_ptr() != q_storage.untyped_storage().data_ptr():
+                raise SpeculativeDraftPlanError(
+                    "B-major q diagnostics must be a zero-copy view"
+                )
+            return DraftProposalExecution(
+                rows=rows,
+                proposal_token_ids=proposal_ids,
+                q_storage_kbv=q_storage,
+                q_probabilities=q_bkv,
+                catchup_positions=catchup_positions,
+                graph_decode_steps=graph_steps,
+                eager_decode_steps=eager_steps,
+            )
+        finally:
+            reset_context()
+
+    def _execute_draft_proposals(
+        self,
+        plan,
+        seqs: list[Sequence],
+    ) -> DraftProposalExecution:
+        """Lower-level tensor seam for V3 tests; production uses the host wrapper."""
+
+        try:
+            rows, effective_k, route_key = self._validate_draft_discard_plan(
+                plan, seqs
+            )
+            return self._execute_draft_proposals_validated(
+                rows, effective_k, route_key
+            )
+        finally:
+            reset_context()
+
+    @staticmethod
+    def _host_draft_discard_result(
+        execution: DraftProposalExecution,
+        effective_k: int,
+        route_key: DraftRouteKey,
+    ) -> DraftDiscardResult:
+        proposal_rows = execution.proposal_token_ids.tolist()
+        rows = tuple(
+            DraftDiscardRowResult(
+                seq_id=row.seq_id,
+                # Proposal-position KV is deliberately discarded. Step zero did
+                # process the prior committed tail, so committed coverage is C.
+                coverage_after_commit=row.committed_len,
+                proposed_token_ids=tuple(token_ids),
+                proposal_count=effective_k,
+            )
+            for row, token_ids in zip(
+                execution.rows, proposal_rows, strict=True
+            )
+        )
+        q = execution.q_probabilities
+        q_storage = execution.q_storage_kbv
+        return DraftDiscardResult(
+            rows=rows,
+            route_key=route_key,
+            effective_k=effective_k,
+            catchup_positions=execution.catchup_positions,
+            draft_positions=len(rows) * effective_k,
+            graph_decode_steps=execution.graph_decode_steps,
+            eager_decode_steps=execution.eager_decode_steps,
+            q_shape=tuple(q.shape),
+            q_stride=tuple(q.stride()),
+            q_dtype=str(q.dtype),
+            q_storage_contiguous=q_storage.is_contiguous(),
+            q_view_zero_copy=(
+                q.untyped_storage().data_ptr()
+                == q_storage.untyped_storage().data_ptr()
+            ),
+        )
+
+    def run_speculative_discard(
+        self,
+        plan,
+        seqs: list[Sequence],
+    ) -> DraftDiscardResult:
+        """Compute real draft proposals, discard them, and preserve target RNG.
+
+        Plan/state validation deliberately occurs before the RNG snapshot seam,
+        any proposal workspace allocation, and every draft kernel. The returned
+        object contains no CUDA tensor, so proposal laws cannot escape the cycle.
+        """
+
+        # Never validate against a context left by unrelated or failed caller
+        # code. Plan errors are host-only and retain their precise public type.
+        reset_context()
+        rows, effective_k, route_key = self._validate_draft_discard_plan(
+            plan, seqs
+        )
+
+        def execute_and_discard():
+            try:
+                execution = self._execute_draft_proposals_validated(
+                    rows, effective_k, route_key
+                )
+                return self._host_draft_discard_result(
+                    execution, effective_k, route_key
+                )
+            finally:
+                reset_context()
+
+        failure = None
+        try:
+            result = self._run_draft_phase(
+                "V3 draft compute-then-discard",
+                execute_and_discard,
+            )
+        except Exception as error:
+            # Never propagate a tensor-bearing traceback to the engine.  A
+            # retained caller exception would otherwise retain q/logits and a
+            # substantial CUDA allocation indefinitely.  Preserve only stable
+            # host diagnostics and any cleanup notes, then sever the traceback.
+            failure = (
+                type(error).__name__,
+                str(error),
+                tuple(getattr(error, "__notes__", ())),
+            )
+            error.__traceback__ = None
+        finally:
+            reset_context()
+        if failure is not None:
+            error_type, message, notes = failure
+            wrapped = SpeculativeDraftExecutionError(
+                f"V3 draft execution failed ({error_type}): {message}"
+            )
+            add_note = getattr(wrapped, "add_note", None)
+            if callable(add_note):
+                for note in notes:
+                    add_note(note)
+            raise wrapped from None
+        return result
+
     def _select_varlen_graph_key(self, num_tokens: int, num_seqs: int):
         """Return the smallest captured graph that can hold a ragged step.
 
@@ -1466,7 +2427,10 @@ class ModelRunner:
     @torch.inference_mode()
     def run_model(self, input_ids: torch.Tensor, positions: torch.Tensor, is_prefill: bool):
         if not is_prefill:
-            if self.enforce_eager or input_ids.size(0) > 512:
+            if (
+                self.enforce_eager
+                or input_ids.size(0) > MAX_CUDA_GRAPH_BATCH_SIZE
+            ):
                 return self.model.compute_logits(self.model(input_ids, positions))
             bs = input_ids.size(0)
             context = get_context()
@@ -1508,45 +2472,50 @@ class ModelRunner:
         seqs: list[Sequence | ScheduledSequence],
         is_prefill: bool,
     ) -> list[int]:
-        input_ids, positions = self.prepare_prefill(seqs) if is_prefill else self.prepare_decode(seqs)
-        temperatures, top_k_buckets, top_p_plan, all_greedy = (
-            self.prepare_sample(seqs)
-            if self.rank == 0
-            else (None, (), None, False)
-        )
-        logits = self.run_model(input_ids, positions, is_prefill)
-        if self.rank == 0:
-            if all_greedy:
-                tokens = self.sampler.greedy(logits)
-            else:
-                for top_k, row_indices in top_k_buckets:
-                    logits = self.sampler.filter_top_k(logits, row_indices, top_k)
-                if (
-                    top_p_plan is not None
-                    and self.config.top_p_backend == "flashinfer"
-                ):
-                    _, top_ps = top_p_plan
-                    tokens = self.sampler.sample_top_p_flashinfer(
-                        logits, temperatures, top_ps
-                    )
+        try:
+            input_ids, positions = self.prepare_prefill(seqs) if is_prefill else self.prepare_decode(seqs)
+            temperatures, top_k_buckets, top_p_plan, all_greedy = (
+                self.prepare_sample(seqs)
+                if self.rank == 0
+                else (None, (), None, False)
+            )
+            logits = self.run_model(input_ids, positions, is_prefill)
+            if self.rank == 0:
+                if all_greedy:
+                    tokens = self.sampler.greedy(logits)
                 else:
-                    if top_p_plan is not None:
-                        row_indices, probability_cutoffs = top_p_plan
-                        logits = self.sampler.filter_top_p(
-                            logits, temperatures, row_indices, probability_cutoffs
+                    for top_k, row_indices in top_k_buckets:
+                        logits = self.sampler.filter_top_k(logits, row_indices, top_k)
+                    if (
+                        top_p_plan is not None
+                        and self.config.top_p_backend == "flashinfer"
+                    ):
+                        _, top_ps = top_p_plan
+                        tokens = self.sampler.sample_top_p_flashinfer(
+                            logits, temperatures, top_ps
                         )
-                    tokens = self.sampler(logits, temperatures)
-            token_ids = tokens.tolist()
-        else:
-            token_ids = None
-        reset_context()
-        return token_ids
+                    else:
+                        if top_p_plan is not None:
+                            row_indices, probability_cutoffs = top_p_plan
+                            logits = self.sampler.filter_top_p(
+                                logits, temperatures, row_indices, probability_cutoffs
+                            )
+                        tokens = self.sampler(logits, temperatures)
+                token_ids = tokens.tolist()
+            else:
+                token_ids = None
+            return token_ids
+        finally:
+            reset_context()
 
     @torch.inference_mode()
     def capture_cudagraph(self):
         config = self.config
         hf_config = config.hf_config
-        max_bs = min(self.config.max_num_seqs, 512)
+        max_bs = min(
+            self.config.max_num_seqs,
+            MAX_CUDA_GRAPH_BATCH_SIZE,
+        )
         max_num_blocks = (config.max_model_len + self.block_size - 1) // self.block_size
         input_ids = torch.zeros(max_bs, dtype=torch.int64)
         positions = torch.zeros(max_bs, dtype=torch.int64)
@@ -1554,7 +2523,10 @@ class ModelRunner:
         context_lens = torch.zeros(max_bs, dtype=torch.int32)
         block_tables = torch.zeros(max_bs, max_num_blocks, dtype=torch.int32)
         outputs = torch.zeros(max_bs, hf_config.hidden_size)
-        self.graph_bs = [1, 2, 4, 8] + list(range(16, max_bs + 1, 16))
+        # Include a nonmultiple endpoint (for example max_num_seqs=17).  Draft
+        # admission uses the same bucket policy, so a successful draft cycle can
+        # never hand an otherwise valid batch to an absent target graph.
+        self.graph_bs = list(draft_graph_batch_buckets(max_bs))
         self.graphs = {}
         self.graph_pool = None
 
@@ -1585,7 +2557,15 @@ class ModelRunner:
 
         config = self.config
         hf_config = config.draft_hf_config
-        max_bs = min(config.max_num_seqs, 512)
+        registry = getattr(self, "draft_route_registry", None)
+        if not isinstance(registry, DraftRouteRegistry):
+            raise RuntimeError(
+                "draft route registry must exist before draft graph capture"
+            )
+        graph_buckets = registry.graph_buckets
+        if not graph_buckets:
+            raise RuntimeError("draft graph route registry contains no batch buckets")
+        max_bs = graph_buckets[-1]
         max_num_blocks = (
             config.max_model_len + self.block_size - 1
         ) // self.block_size
@@ -1601,7 +2581,7 @@ class ModelRunner:
             hf_config.hidden_size,
             dtype=hf_config.dtype,
         )
-        self.draft_graph_bs = list(self.graph_bs)
+        self.draft_graph_bs = list(graph_buckets)
         self.draft_graphs = {}
         self.draft_graph_pool = None
 
@@ -1761,3 +2741,496 @@ class ModelRunner:
             torch.cuda.synchronize()
         finally:
             reset_context()
+
+    def resolve_draft_route_admission(
+        self,
+        seqs: list[Sequence] | tuple[Sequence, ...],
+    ) -> DraftRouteAdmission | None:
+        """Resolve all ready K values before scheduler reservation or CUDA work."""
+
+        registry = getattr(self, "draft_route_registry", None)
+        if not isinstance(registry, DraftRouteRegistry):
+            return None
+        if not self._draft_route_runtime_resources_ready(registry):
+            return None
+        selected = tuple(seqs)
+        if not selected:
+            return None
+        catchup_tokens = 0
+        for seq in selected:
+            committed_tokens = len(seq)
+            coverage = getattr(seq, "num_draft_cached_tokens", None)
+            if (
+                type(coverage) is not int
+                or committed_tokens < 1
+                or coverage < 0
+                or coverage > committed_tokens - 1
+            ):
+                return None
+            catchup_tokens += committed_tokens - 1 - coverage
+        return registry.resolve(
+            batch_size=len(selected),
+            catchup_tokens=catchup_tokens,
+        )
+
+    def _draft_route_runtime_resources_ready(
+        self,
+        registry: DraftRouteRegistry,
+    ) -> bool:
+        """Host-only preflight for every persistent resource named by a route."""
+
+        if (
+            registry.ready_keys != registry.router_admitted_keys
+            or getattr(self, "draft_model", None) is None
+            or getattr(self, "sampler", None) is None
+            or not isinstance(getattr(self, "draft_kv_cache", None), torch.Tensor)
+        ):
+            return False
+        if self.enforce_eager:
+            return all(
+                key.execution_mode is DraftExecutionMode.EAGER_DYNAMIC
+                for key in registry.router_admitted_keys
+            )
+
+        buckets = registry.graph_buckets
+        graphs = getattr(self, "draft_graphs", None)
+        graph_bs = getattr(self, "draft_graph_bs", None)
+        variables = getattr(self, "draft_graph_vars", None)
+        required_variables = {
+            "input_ids",
+            "positions",
+            "slot_mapping",
+            "context_lens",
+            "block_tables",
+            "outputs",
+        }
+        if (
+            tuple(graph_bs or ()) != buckets
+            or not isinstance(graphs, dict)
+            or tuple(sorted(graphs)) != buckets
+            or not isinstance(variables, dict)
+            or not required_variables.issubset(variables)
+            or any(
+                not isinstance(variables[name], torch.Tensor)
+                for name in required_variables
+            )
+        ):
+            return False
+        max_bucket = buckets[-1]
+        max_blocks = (
+            self.config.max_model_len + self.block_size - 1
+        ) // self.block_size
+        return bool(
+            variables["input_ids"].size(0) >= max_bucket
+            and variables["positions"].size(0) >= max_bucket
+            and variables["slot_mapping"].size(0) >= max_bucket
+            and variables["context_lens"].size(0) >= max_bucket
+            and variables["block_tables"].ndim == 2
+            and variables["block_tables"].size(0) >= max_bucket
+            and variables["block_tables"].size(1) >= max_blocks
+            and variables["outputs"].size(0) >= max_bucket
+        )
+
+    def _pretouch_draft_decode_witness(self, batch_size: int) -> None:
+        device = self.draft_kv_cache.device
+        physical_blocks = self.draft_kv_cache.size(2)
+        max_blocks = (
+            self.config.max_model_len + self.block_size - 1
+        ) // self.block_size
+        input_ids = torch.zeros(batch_size, dtype=torch.int64, device=device)
+        positions = torch.zeros(batch_size, dtype=torch.int64, device=device)
+        slot_mapping = torch.arange(
+            batch_size, dtype=torch.int32, device=device
+        ).remainder_(physical_blocks * self.block_size)
+        context_lens = torch.ones(
+            batch_size, dtype=torch.int32, device=device
+        )
+        physical_table = torch.arange(
+            max_blocks, dtype=torch.int32, device=device
+        ).remainder_(physical_blocks)
+        block_tables = physical_table.unsqueeze(0).expand(
+            batch_size, -1
+        ).contiguous()
+        set_context(
+            False,
+            slot_mapping=slot_mapping,
+            context_lens=context_lens,
+            block_tables=block_tables,
+        )
+        try:
+            with torch.inference_mode():
+                hidden_states = self.draft_model(input_ids, positions)
+                self.draft_model.compute_logits(hidden_states)
+        finally:
+            reset_context()
+
+    @torch.inference_mode()
+    def _pretouch_draft_graph_decode_witness(
+        self,
+        batch_size: int,
+        route_key: DraftRouteKey,
+    ) -> None:
+        """Replay one registered draft graph and execute its live output head."""
+
+        device = self.draft_kv_cache.device
+        physical_blocks = self.draft_kv_cache.size(2)
+        max_blocks = (
+            self.config.max_model_len + self.block_size - 1
+        ) // self.block_size
+        input_ids = torch.zeros(batch_size, dtype=torch.int64, device=device)
+        positions = torch.zeros(batch_size, dtype=torch.int64, device=device)
+        slot_mapping = torch.arange(
+            batch_size, dtype=torch.int32, device=device
+        ).remainder_(physical_blocks * self.block_size)
+        context_lens = torch.ones(
+            batch_size, dtype=torch.int32, device=device
+        )
+        physical_table = torch.arange(
+            max_blocks, dtype=torch.int32, device=device
+        ).remainder_(physical_blocks)
+        block_tables = physical_table.unsqueeze(0).expand(
+            batch_size, -1
+        ).contiguous()
+        set_context(
+            False,
+            slot_mapping=slot_mapping,
+            context_lens=context_lens,
+            block_tables=block_tables,
+        )
+        try:
+            logits, used_graph = self._run_draft_decode_model(
+                input_ids,
+                positions,
+                route_key,
+            )
+            if not used_graph or logits.shape != (
+                batch_size,
+                self.config.draft_hf_config.vocab_size,
+            ):
+                raise RuntimeError(
+                    "draft graph pretouch did not execute its registered route"
+                )
+        finally:
+            reset_context()
+
+    @torch.inference_mode()
+    def _pretouch_draft_catchup_witness(
+        self,
+        *,
+        total_tokens: int,
+        num_seqs: int,
+        high_context: bool,
+    ) -> None:
+        """Execute one paged ragged witness without publishing logical coverage."""
+
+        if total_tokens < num_seqs or num_seqs < 1:
+            raise ValueError("catch-up witness requires at least one token per row")
+        device = self.draft_kv_cache.device
+        physical_blocks = self.draft_kv_cache.size(2)
+        max_blocks = (
+            self.config.max_model_len + self.block_size - 1
+        ) // self.block_size
+        base, remainder = divmod(total_tokens, num_seqs)
+        query_lengths = tuple(
+            base + int(row < remainder) for row in range(num_seqs)
+        )
+        starts = tuple(
+            (
+                max(self.config.max_model_len - query_len - 1, 0)
+                if high_context and (num_seqs == 1 or row % 2)
+                else 0
+            )
+            for row, query_len in enumerate(query_lengths)
+        )
+        cu_q = [0]
+        cu_k = [0]
+        positions = []
+        slot_mapping = []
+        physical_table = tuple(
+            logical_block % physical_blocks
+            for logical_block in range(max_blocks)
+        )
+        for start, query_len in zip(starts, query_lengths, strict=True):
+            end = start + query_len
+            if end > self.config.max_model_len:
+                raise RuntimeError("catch-up witness exceeds max_model_len")
+            cu_q.append(cu_q[-1] + query_len)
+            cu_k.append(cu_k[-1] + end)
+            positions.extend(range(start, end))
+            slot_mapping.extend(
+                physical_table[position // self.block_size] * self.block_size
+                + position % self.block_size
+                for position in range(start, end)
+            )
+        input_ids = torch.zeros(
+            total_tokens, dtype=torch.int64, device=device
+        )
+        positions_tensor = torch.tensor(
+            positions, dtype=torch.int64, device=device
+        )
+        set_context(
+            True,
+            cu_seqlens_q=torch.tensor(cu_q, dtype=torch.int32, device=device),
+            cu_seqlens_k=torch.tensor(cu_k, dtype=torch.int32, device=device),
+            max_seqlen_q=max(query_lengths),
+            max_seqlen_k=max(
+                start + query_len
+                for start, query_len in zip(starts, query_lengths, strict=True)
+            ),
+            slot_mapping=torch.tensor(
+                slot_mapping, dtype=torch.int32, device=device
+            ),
+            block_tables=torch.tensor(
+                (physical_table,) * num_seqs,
+                dtype=torch.int32,
+                device=device,
+            ),
+        )
+        try:
+            self.draft_model(input_ids, positions_tensor)
+        finally:
+            reset_context()
+
+    def _pretouch_exact_sampler_envelope(self, batch_size: int) -> None:
+        """Exercise the dense worst-case exact sampler and sparse metadata seam."""
+
+        device = self.draft_kv_cache.device
+        vocab_size = self.config.draft_hf_config.vocab_size
+        logits = torch.zeros(
+            batch_size,
+            vocab_size,
+            dtype=self.config.draft_hf_config.dtype,
+            device=device,
+        )
+        temperatures = torch.ones(
+            batch_size, dtype=torch.float32, device=device
+        )
+        if batch_size > 1:
+            temperatures[0] = 0.0
+        probabilities = torch.empty(
+            batch_size, vocab_size, dtype=torch.float32, device=device
+        )
+        top_k_buckets = ()
+        if vocab_size > 1:
+            # The runtime accepts every effective top-k in [1, V-1].  Exercise
+            # the maximum returned values/indices payload before publishing the
+            # single all-compositions sampler envelope as ready.
+            top_k_buckets = ((vocab_size - 1, None),)
+        probability_cutoffs = torch.full(
+            (batch_size,), 0.1, dtype=torch.float32, device=device
+        )
+        self.sampler.sample_exact_with_probabilities(
+            logits,
+            temperatures,
+            top_k_buckets=top_k_buckets,
+            top_p_plan=(None, probability_cutoffs),
+            probabilities_out=probabilities,
+        )
+
+        if batch_size > 1 and vocab_size > 2:
+            # Worst legal heterogeneous filter shape: all but one row active.
+            # Passing explicit row indices exercises the B-1 gather/copy that
+            # the dense homogeneous call above deliberately avoids.
+            near_dense_rows = torch.arange(
+                0, batch_size - 1, dtype=torch.int64, device=device
+            )
+            near_dense_temperatures = temperatures.clone().fill_(1.0)
+            near_dense_cutoffs = torch.full(
+                (near_dense_rows.numel(),),
+                0.1,
+                dtype=torch.float32,
+                device=device,
+            )
+            self.sampler.sample_exact_with_probabilities(
+                logits,
+                near_dense_temperatures,
+                top_k_buckets=((vocab_size - 1, near_dense_rows),),
+                top_p_plan=(near_dense_rows, near_dense_cutoffs),
+                race_noise=torch.ones(
+                    batch_size,
+                    vocab_size,
+                    dtype=torch.float32,
+                    device=device,
+                ),
+                probabilities_out=torch.empty(
+                    batch_size,
+                    vocab_size,
+                    dtype=torch.float32,
+                    device=device,
+                ),
+            )
+
+            # Sparse row indices and multiple sequential top-k buckets add no
+            # larger live tensor than the dense call, but they are a distinct
+            # metadata/control route and must be exercised once.
+            sparse_batch = min(batch_size, 4)
+            sparse_logits = logits[:sparse_batch]
+            sparse_temperatures = temperatures[:sparse_batch].clone()
+            sparse_temperatures.fill_(1.0)
+            split = max(sparse_batch // 2, 1)
+            first_rows = torch.arange(
+                0, split, dtype=torch.int64, device=device
+            )
+            second_rows = torch.arange(
+                split, sparse_batch, dtype=torch.int64, device=device
+            )
+            sparse_top_k = [(1, first_rows)]
+            if second_rows.numel():
+                sparse_top_k.append(
+                    (min(2, vocab_size - 1), second_rows)
+                )
+            top_p_rows = torch.arange(
+                0, sparse_batch, 2, dtype=torch.int64, device=device
+            )
+            self.sampler.sample_exact_with_probabilities(
+                sparse_logits,
+                sparse_temperatures,
+                top_k_buckets=tuple(sparse_top_k),
+                top_p_plan=(
+                    top_p_rows,
+                    torch.full(
+                        (top_p_rows.numel(),),
+                        0.1,
+                        dtype=torch.float32,
+                        device=device,
+                    ),
+                ),
+                race_noise=torch.ones(
+                    sparse_batch,
+                    vocab_size,
+                    dtype=torch.float32,
+                    device=device,
+                ),
+                probabilities_out=torch.empty(
+                    sparse_batch,
+                    vocab_size,
+                    dtype=torch.float32,
+                    device=device,
+                ),
+            )
+
+    def _pretouch_draft_routes(self) -> None:
+        """Warm every declared V3 component, then atomically publish readiness."""
+
+        registry = getattr(self, "draft_route_registry", None)
+        plan = getattr(self, "speculative_memory_plan", None)
+        if not isinstance(registry, DraftRouteRegistry) or not isinstance(
+            plan, SpeculativeMemoryPlan
+        ):
+            raise RuntimeError("draft route pretouch requires its memory registry")
+        if not registry.entries:
+            raise RuntimeError("speculative route registry is unexpectedly empty")
+
+        baseline = torch.cuda.memory_allocated()
+        torch.cuda.reset_peak_memory_stats()
+        warmed: set[DraftWarmComponentKey] = set()
+        try:
+            batch_cap = max(
+                entry.key.batch_bucket for entry in registry.entries
+            )
+            if self.enforce_eager:
+                witnesses = sorted({1, min(2, batch_cap), batch_cap})
+                for batch_size in witnesses:
+                    self._pretouch_draft_decode_witness(batch_size)
+                warmed.add(
+                    DraftWarmComponentKey(
+                        "draft_decode_eager_dynamic", batch_cap
+                    )
+                )
+            else:
+                actual_graph_buckets = tuple(sorted(self.draft_graphs))
+                if actual_graph_buckets != registry.graph_buckets:
+                    raise RuntimeError(
+                        "captured draft graph buckets do not match the route registry"
+                    )
+                graph_witnesses = set(actual_graph_buckets)
+                if batch_cap >= 3:
+                    # One live interior shape proves bucket slicing/output-head
+                    # integration rather than only exact capture endpoints.
+                    graph_witnesses.add(3)
+                for live_batch_size in sorted(graph_witnesses):
+                    batch_bucket = min(
+                        bucket
+                        for bucket in actual_graph_buckets
+                        if bucket >= live_batch_size
+                    )
+                    route_key = next(
+                        entry.key
+                        for entry in registry.entries
+                        if entry.key.batch_bucket == batch_bucket
+                        and entry.key.effective_k == 1
+                        and entry.key.catchup_family
+                        is DraftCatchupFamily.NONE
+                    )
+                    self._pretouch_draft_graph_decode_witness(
+                        live_batch_size,
+                        route_key,
+                    )
+                warmed.update(
+                    DraftWarmComponentKey("draft_decode_graph", batch_bucket)
+                    for batch_bucket in actual_graph_buckets
+                )
+
+            catchup_component = DraftWarmComponentKey(
+                "draft_catchup_paged_dynamic", batch_cap
+            )
+            if catchup_component in registry.desired_warm_components:
+                max_catchup, max_catchup_batch = max_eligible_draft_catchup(
+                    max_num_batched_tokens=self.config.max_num_batched_tokens,
+                    max_model_len=self.config.max_model_len,
+                    batch_cap=batch_cap,
+                )
+                if max_catchup < 1 or max_catchup_batch < 1:
+                    raise RuntimeError(
+                        "registered catch-up routes have no legal runtime witness"
+                    )
+                max_single_row = min(
+                    self.config.max_num_batched_tokens - 2,
+                    self.config.max_model_len - 2,
+                )
+                catchup_witnesses = {
+                    (1, 1, False),
+                    (max_single_row, 1, True),
+                    (max_catchup, max_catchup_batch, True),
+                }
+                if max_catchup >= 257:
+                    catchup_witnesses.add(
+                        (257, min(batch_cap, 257), True)
+                    )
+                for total_tokens, num_seqs, high_context in sorted(
+                    catchup_witnesses
+                ):
+                    self._pretouch_draft_catchup_witness(
+                        total_tokens=total_tokens,
+                        num_seqs=num_seqs,
+                        high_context=high_context,
+                    )
+                warmed.add(catchup_component)
+
+            self._pretouch_exact_sampler_envelope(batch_cap)
+            warmed.add(
+                DraftWarmComponentKey("exact_sampler_envelope", batch_cap)
+            )
+            torch.cuda.synchronize()
+        finally:
+            reset_context()
+
+        peak = torch.cuda.memory_stats()["allocated_bytes.all.peak"]
+        self._draft_route_pretouch_peak_bytes = max(peak - baseline, 0)
+        allowed_peak = (
+            self._warmup_transient_bytes + plan.reservation_bytes
+        )
+        if self._draft_route_pretouch_peak_bytes > allowed_peak:
+            raise SpeculativeKVCacheCapacityError(
+                "V3 route pretouch exceeded the modeled runtime envelope: "
+                f"observed={self._draft_route_pretouch_peak_bytes}, "
+                f"allowed={allowed_peak}"
+            )
+
+        ready_registry = registry.with_warmed_components(warmed)
+        if ready_registry.ready_keys != ready_registry.router_admitted_keys:
+            missing = ready_registry.router_admitted_keys - ready_registry.ready_keys
+            raise RuntimeError(
+                f"draft route pretouch left {len(missing)} route(s) unready"
+            )
+        self.draft_route_registry = ready_registry

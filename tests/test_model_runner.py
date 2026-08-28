@@ -247,10 +247,12 @@ def test_draft_model_construction_uses_and_restores_explicit_dtype(
         "draft_construct",
         "draft_load",
         "draft_warmup",
+        "route_registry",
         "graph_profile",
         "joint_allocate",
         "draft_graph",
         "draft_pretouch",
+        "route_pretouch",
         "memory_finalize",
     ),
 )
@@ -347,6 +349,12 @@ def test_each_draft_constructor_phase_rolls_back_one_runner_transaction(
         if failure_phase == "graph_profile":
             raise InjectedError("graph_profile")
 
+    def initialize_routes(self):
+        if failure_phase == "route_registry":
+            raise InjectedError("route_registry")
+        self.speculative_memory_plan = object()
+        self.draft_route_registry = object()
+
     def allocate(self):
         self.kv_cache = object()
         self.draft_kv_cache = object()
@@ -377,7 +385,20 @@ def test_each_draft_constructor_phase_rolls_back_one_runner_transaction(
         if failure_phase == "draft_pretouch":
             raise InjectedError("draft_pretouch")
 
+    def pretouch_routes(self):
+        assert dtype == torch.float32
+        assert hasattr(self, "kv_cache")
+        assert hasattr(self, "draft_kv_cache")
+        assert self.speculative_memory_audit is None
+        if failure_phase == "route_pretouch":
+            raise InjectedError("route_pretouch")
+
     monkeypatch.setattr(ModelRunner, "warmup_draft_model", draft_warmup)
+    monkeypatch.setattr(
+        ModelRunner,
+        "_initialize_speculative_route_registry",
+        initialize_routes,
+    )
     monkeypatch.setattr(
         ModelRunner,
         "_profile_speculative_graph_memory",
@@ -397,6 +418,11 @@ def test_each_draft_constructor_phase_rolls_back_one_runner_transaction(
         ModelRunner,
         "_pretouch_draft_eager_prefill",
         pretouch_draft,
+    )
+    monkeypatch.setattr(
+        ModelRunner,
+        "_pretouch_draft_routes",
+        pretouch_routes,
     )
     monkeypatch.setattr(
         ModelRunner,
@@ -447,6 +473,47 @@ def test_draft_warmup_resets_context_when_model_execution_fails(monkeypatch):
         runner.warmup_draft_model()
 
     assert resets == [True]
+
+
+def test_draft_warmup_does_not_consume_a_public_sequence_id(monkeypatch):
+    class Draft:
+        def __call__(self, input_ids, positions):
+            return "hidden"
+
+        def compute_logits(self, hidden_states):
+            assert hidden_states == "hidden"
+
+    runner = object.__new__(ModelRunner)
+    runner.config = SimpleNamespace(
+        max_num_batched_tokens=4,
+        max_model_len=4,
+        max_num_seqs=1,
+    )
+    runner.draft_model = Draft()
+    captured = []
+
+    def prepare_prefill(seqs):
+        captured.extend(seqs)
+        return object(), object()
+
+    runner.prepare_prefill = prepare_prefill
+    monkeypatch.setattr(torch.cuda, "empty_cache", lambda: None)
+    monkeypatch.setattr(torch.cuda, "reset_peak_memory_stats", lambda: None)
+    monkeypatch.setattr(runner_module, "reset_context", lambda: None)
+    monkeypatch.setattr(
+        runner_module,
+        "Sequence",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            AssertionError("draft warmup allocated a public Sequence")
+        ),
+    )
+
+    runner.warmup_draft_model()
+
+    assert len(captured) == 1
+    assert isinstance(captured[0], runner_module.ScheduledSequence)
+    assert captured[0].scheduled_token_ids == (0, 0, 0, 0)
+    assert captured[0].num_scheduled_tokens == 4
 
 
 def test_draft_pretouch_resets_context_when_model_execution_fails(monkeypatch):
@@ -642,6 +709,7 @@ def _spec_allocation_runner(num_blocks=-1, *, enforce_eager=True):
         num_kvcache_blocks=num_blocks,
     )
     runner.speculative_memory_plan = None
+    runner.draft_route_registry = None
     runner.speculative_memory_audit = None
     runner._speculative_memory_audit_inputs = None
     runner._target_warmup_transient_bytes = 100

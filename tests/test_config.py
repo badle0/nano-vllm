@@ -396,16 +396,18 @@ def test_oversized_configured_k_is_an_accepted_clipped_maximum(
     assert config.configured_k == 100
     assert min(
         config.configured_k,
-        config.max_model_len - 1,
-        config.max_num_batched_tokens - 1,
-    ) == 2
+        config.max_model_len - 2,
+        config.max_num_batched_tokens - 2,
+    ) == 1
 
 
 @pytest.mark.parametrize(
     "limits",
     [
         {"max_model_len": 1},
+        {"max_model_len": 2},
         {"max_num_batched_tokens": 1, "max_num_seqs": 1},
+        {"max_num_batched_tokens": 2, "max_num_seqs": 1},
     ],
 )
 def test_speculative_config_rejects_globally_zero_effective_k(
@@ -460,7 +462,7 @@ try:
         {str(target)!r},
         draft_model={str(draft)!r},
         num_speculative_tokens=100,
-        max_num_batched_tokens=1,
+        max_num_batched_tokens=2,
         max_num_seqs=1,
     )
 except ValueError:
