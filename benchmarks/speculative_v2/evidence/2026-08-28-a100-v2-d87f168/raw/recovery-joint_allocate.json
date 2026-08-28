@@ -1,0 +1,808 @@
+{
+  "caught_error": {
+    "message": "injected after real V2 phase: joint_allocate",
+    "type": "__main__.InjectedSpeculativePhaseError"
+  },
+  "certification_mode": "retained",
+  "configured_k": 2,
+  "cuda_memory": {
+    "after_failure_allocated_bytes": 8519680,
+    "after_failure_reserved_bytes": 20971520,
+    "after_recovery_exit_allocated_bytes": 8519680,
+    "after_recovery_exit_reserved_bytes": 20971520,
+    "baseline_allocated_bytes": 0,
+    "baseline_reserved_bytes": 0,
+    "post_execution_global_allocated_ceiling_bytes": 33554432,
+    "post_execution_global_reserved_ceiling_bytes": 67108864
+  },
+  "evidence_schema": "nano-vllm-speculative-v2-gpu-recovery-v1",
+  "explicit_num_kvcache_blocks": 4,
+  "injection_ledger": {
+    "calls": 1,
+    "injections": 1
+  },
+  "injection_semantics": "raised after the selected real phase completed successfully",
+  "mode": "eager",
+  "model_artifacts": {
+    "draft": {
+      "after": {
+        "argument": "/workspace/models/Qwen3-0.6B",
+        "metadata_files": {
+          "config.json": {
+            "sha256": "660db3b73d788119c04535e48cf9be5f55bc3100841a718637ae695b442f27dd",
+            "size_bytes": 726
+          },
+          "generation_config.json": {
+            "sha256": "2325da0f15bb848e018c5ae071b7943332e9f871d6b60e2ed22ca97d4cb993d2",
+            "size_bytes": 239
+          },
+          "merges.txt": {
+            "sha256": "8831e4f1a044471340f7c0a83d7bd71306a5b867e95fd870f74d0c5308a904d5",
+            "size_bytes": 1671853
+          },
+          "tokenizer.json": {
+            "sha256": "aeb13307a71acd8fe81861d94ad54ab689df773318809eed3cbe794b4492dae4",
+            "size_bytes": 11422654
+          },
+          "tokenizer_config.json": {
+            "sha256": "d5d09f07b48c3086c508b30d1c9114bd1189145b74e982a265350c923acd8101",
+            "size_bytes": 9732
+          },
+          "vocab.json": {
+            "sha256": "ca10d7e9fb3ed18575dd1e277a2579c16d108e32f27439684afa0e10b1440910",
+            "size_bytes": 2776833
+          }
+        },
+        "resolved_path": "/workspace/models/Qwen3-0.6B",
+        "total_weight_bytes": 1503300328,
+        "weight_files": [
+          {
+            "name": "model.safetensors",
+            "sha256": "f47f71177f32bcd101b7573ec9171e6a57f4f4d31148d38e382306f42996874b",
+            "size_bytes": 1503300328
+          }
+        ]
+      },
+      "before": {
+        "argument": "/workspace/models/Qwen3-0.6B",
+        "metadata_files": {
+          "config.json": {
+            "sha256": "660db3b73d788119c04535e48cf9be5f55bc3100841a718637ae695b442f27dd",
+            "size_bytes": 726
+          },
+          "generation_config.json": {
+            "sha256": "2325da0f15bb848e018c5ae071b7943332e9f871d6b60e2ed22ca97d4cb993d2",
+            "size_bytes": 239
+          },
+          "merges.txt": {
+            "sha256": "8831e4f1a044471340f7c0a83d7bd71306a5b867e95fd870f74d0c5308a904d5",
+            "size_bytes": 1671853
+          },
+          "tokenizer.json": {
+            "sha256": "aeb13307a71acd8fe81861d94ad54ab689df773318809eed3cbe794b4492dae4",
+            "size_bytes": 11422654
+          },
+          "tokenizer_config.json": {
+            "sha256": "d5d09f07b48c3086c508b30d1c9114bd1189145b74e982a265350c923acd8101",
+            "size_bytes": 9732
+          },
+          "vocab.json": {
+            "sha256": "ca10d7e9fb3ed18575dd1e277a2579c16d108e32f27439684afa0e10b1440910",
+            "size_bytes": 2776833
+          }
+        },
+        "resolved_path": "/workspace/models/Qwen3-0.6B",
+        "total_weight_bytes": 1503300328,
+        "weight_files": [
+          {
+            "name": "model.safetensors",
+            "sha256": "f47f71177f32bcd101b7573ec9171e6a57f4f4d31148d38e382306f42996874b",
+            "size_bytes": 1503300328
+          }
+        ]
+      },
+      "unchanged_during_run": true
+    },
+    "same_resolved_model": true,
+    "target": {
+      "after": {
+        "argument": "/workspace/models/Qwen3-0.6B",
+        "metadata_files": {
+          "config.json": {
+            "sha256": "660db3b73d788119c04535e48cf9be5f55bc3100841a718637ae695b442f27dd",
+            "size_bytes": 726
+          },
+          "generation_config.json": {
+            "sha256": "2325da0f15bb848e018c5ae071b7943332e9f871d6b60e2ed22ca97d4cb993d2",
+            "size_bytes": 239
+          },
+          "merges.txt": {
+            "sha256": "8831e4f1a044471340f7c0a83d7bd71306a5b867e95fd870f74d0c5308a904d5",
+            "size_bytes": 1671853
+          },
+          "tokenizer.json": {
+            "sha256": "aeb13307a71acd8fe81861d94ad54ab689df773318809eed3cbe794b4492dae4",
+            "size_bytes": 11422654
+          },
+          "tokenizer_config.json": {
+            "sha256": "d5d09f07b48c3086c508b30d1c9114bd1189145b74e982a265350c923acd8101",
+            "size_bytes": 9732
+          },
+          "vocab.json": {
+            "sha256": "ca10d7e9fb3ed18575dd1e277a2579c16d108e32f27439684afa0e10b1440910",
+            "size_bytes": 2776833
+          }
+        },
+        "resolved_path": "/workspace/models/Qwen3-0.6B",
+        "total_weight_bytes": 1503300328,
+        "weight_files": [
+          {
+            "name": "model.safetensors",
+            "sha256": "f47f71177f32bcd101b7573ec9171e6a57f4f4d31148d38e382306f42996874b",
+            "size_bytes": 1503300328
+          }
+        ]
+      },
+      "before": {
+        "argument": "/workspace/models/Qwen3-0.6B",
+        "metadata_files": {
+          "config.json": {
+            "sha256": "660db3b73d788119c04535e48cf9be5f55bc3100841a718637ae695b442f27dd",
+            "size_bytes": 726
+          },
+          "generation_config.json": {
+            "sha256": "2325da0f15bb848e018c5ae071b7943332e9f871d6b60e2ed22ca97d4cb993d2",
+            "size_bytes": 239
+          },
+          "merges.txt": {
+            "sha256": "8831e4f1a044471340f7c0a83d7bd71306a5b867e95fd870f74d0c5308a904d5",
+            "size_bytes": 1671853
+          },
+          "tokenizer.json": {
+            "sha256": "aeb13307a71acd8fe81861d94ad54ab689df773318809eed3cbe794b4492dae4",
+            "size_bytes": 11422654
+          },
+          "tokenizer_config.json": {
+            "sha256": "d5d09f07b48c3086c508b30d1c9114bd1189145b74e982a265350c923acd8101",
+            "size_bytes": 9732
+          },
+          "vocab.json": {
+            "sha256": "ca10d7e9fb3ed18575dd1e277a2579c16d108e32f27439684afa0e10b1440910",
+            "size_bytes": 2776833
+          }
+        },
+        "resolved_path": "/workspace/models/Qwen3-0.6B",
+        "total_weight_bytes": 1503300328,
+        "weight_files": [
+          {
+            "name": "model.safetensors",
+            "sha256": "f47f71177f32bcd101b7573ec9171e6a57f4f4d31148d38e382306f42996874b",
+            "size_bytes": 1503300328
+          }
+        ]
+      },
+      "unchanged_during_run": true
+    }
+  },
+  "phase": "joint_allocate",
+  "process_group_destroyed_after_failure": true,
+  "provenance": {
+    "command_argv": [
+      "/venv/main/bin/python",
+      "tests/run_speculative_v2_gpu_recovery.py",
+      "--phase",
+      "joint_allocate",
+      "--model",
+      "/workspace/models/Qwen3-0.6B",
+      "--draft-model",
+      "/workspace/models/Qwen3-0.6B",
+      "--num-kvcache-blocks",
+      "4",
+      "--expected-commit",
+      "d87f168b804778fbb5888a662dc8a0defccfd660",
+      "--retained",
+      "--output",
+      "/workspace/spec-v2-evidence/recovery-joint_allocate.json"
+    ],
+    "command_shell": "/venv/main/bin/python tests/run_speculative_v2_gpu_recovery.py --phase joint_allocate --model /workspace/models/Qwen3-0.6B --draft-model /workspace/models/Qwen3-0.6B --num-kvcache-blocks 4 --expected-commit d87f168b804778fbb5888a662dc8a0defccfd660 --retained --output /workspace/spec-v2-evidence/recovery-joint_allocate.json",
+    "cwd": "/workspace/nano-vllm-spec-v2",
+    "environment": {
+      "CONDA_DEFAULT_ENV": null,
+      "CUBLAS_WORKSPACE_CONFIG": null,
+      "CUDA_LAUNCH_BLOCKING": null,
+      "CUDA_MODULE_LOADING": null,
+      "CUDA_VISIBLE_DEVICES": null,
+      "HF_HOME": "/workspace/.hf_home",
+      "LD_LIBRARY_PATH": null,
+      "MKL_NUM_THREADS": null,
+      "NCCL_DEBUG": null,
+      "NCCL_P2P_DISABLE": null,
+      "OMP_NUM_THREADS": null,
+      "PYTHONHASHSEED": null,
+      "PYTHONPATH": ".",
+      "PYTORCH_CUDA_ALLOC_CONF": null,
+      "TOKENIZERS_PARALLELISM": null,
+      "TORCHINDUCTOR_AUTOGRAD_CACHE": null,
+      "TORCHINDUCTOR_CACHE_DIR": "/tmp/spec_v2_recovery_joint_allocate_retained_retry1_cache_d87f168",
+      "TORCHINDUCTOR_FX_GRAPH_REMOTE_CACHE": null,
+      "TORCH_COMPILE_DISABLE": null,
+      "TORCH_CUDA_ARCH_LIST": null,
+      "TORCH_LOGS": null,
+      "TRITON_CACHE_DIR": "/tmp/spec_v2_recovery_joint_allocate_retained_retry1_cache_d87f168/triton/0",
+      "VIRTUAL_ENV": null
+    },
+    "finished_at_utc": "2026-08-28T13:15:17.621801+00:00",
+    "gpu": {
+      "after": {
+        "compute_apps": [
+          {
+            "gpu_uuid": "GPU-773e0633-edb0-6c38-1d2b-d232f9109126",
+            "pid": 188794,
+            "pid_raw": "188794",
+            "process_name": "[Not Found]",
+            "used_memory_mib": 528,
+            "used_memory_raw": "528"
+          }
+        ],
+        "compute_apps_raw_lines": [
+          "GPU-773e0633-edb0-6c38-1d2b-d232f9109126, 188794, [Not Found], 528"
+        ],
+        "compute_apps_returncode": 0,
+        "compute_apps_stderr": "",
+        "compute_capability": [
+          8,
+          0
+        ],
+        "foreign_compute_apps": [],
+        "index": 0,
+        "multiprocessor_count": 108,
+        "name": "NVIDIA A100-SXM4-40GB",
+        "nvidia_smi_parsed_rows": [
+          {
+            "driver_version": "570.133.20",
+            "gpu_uuid": "GPU-773e0633-edb0-6c38-1d2b-d232f9109126",
+            "name": "NVIDIA A100-SXM4-40GB",
+            "total_memory_mib": "40960"
+          }
+        ],
+        "nvidia_smi_query_id": "GPU-773e0633-edb0-6c38-1d2b-d232f9109126",
+        "nvidia_smi_raw_lines": [
+          "NVIDIA A100-SXM4-40GB, GPU-773e0633-edb0-6c38-1d2b-d232f9109126, 570.133.20, 40960"
+        ],
+        "nvidia_smi_returncode": 0,
+        "nvidia_smi_stderr": "",
+        "own_gpu_process_ids": [
+          188794
+        ],
+        "own_process_namespace_ids": [
+          188794,
+          241663
+        ],
+        "phase": "after",
+        "total_memory_bytes": 42406903808,
+        "uuid": "773e0633-edb0-6c38-1d2b-d232f9109126"
+      },
+      "before": {
+        "compute_apps": [
+          {
+            "gpu_uuid": "GPU-773e0633-edb0-6c38-1d2b-d232f9109126",
+            "pid": 188794,
+            "pid_raw": "188794",
+            "process_name": "[Not Found]",
+            "used_memory_mib": 414,
+            "used_memory_raw": "414"
+          }
+        ],
+        "compute_apps_raw_lines": [
+          "GPU-773e0633-edb0-6c38-1d2b-d232f9109126, 188794, [Not Found], 414"
+        ],
+        "compute_apps_returncode": 0,
+        "compute_apps_stderr": "",
+        "compute_capability": [
+          8,
+          0
+        ],
+        "foreign_compute_apps": [],
+        "index": 0,
+        "multiprocessor_count": 108,
+        "name": "NVIDIA A100-SXM4-40GB",
+        "nvidia_smi_parsed_rows": [
+          {
+            "driver_version": "570.133.20",
+            "gpu_uuid": "GPU-773e0633-edb0-6c38-1d2b-d232f9109126",
+            "name": "NVIDIA A100-SXM4-40GB",
+            "total_memory_mib": "40960"
+          }
+        ],
+        "nvidia_smi_query_id": "GPU-773e0633-edb0-6c38-1d2b-d232f9109126",
+        "nvidia_smi_raw_lines": [
+          "NVIDIA A100-SXM4-40GB, GPU-773e0633-edb0-6c38-1d2b-d232f9109126, 570.133.20, 40960"
+        ],
+        "nvidia_smi_returncode": 0,
+        "nvidia_smi_stderr": "",
+        "own_gpu_process_ids": [
+          188794
+        ],
+        "own_process_namespace_ids": [
+          188794,
+          241663
+        ],
+        "phase": "before",
+        "self_context_establishment": {
+          "allocator_challenge": {
+            "allocated_delta_bytes": 408944640,
+            "baseline_allocated_bytes": 0,
+            "baseline_reserved_bytes": 0,
+            "baseline_snapshot": {
+              "compute_apps": [
+                {
+                  "gpu_uuid": "GPU-773e0633-edb0-6c38-1d2b-d232f9109126",
+                  "pid": 188794,
+                  "pid_raw": "188794",
+                  "process_name": "[Not Found]",
+                  "used_memory_mib": 414,
+                  "used_memory_raw": "414"
+                }
+              ],
+              "compute_apps_raw_lines": [
+                "GPU-773e0633-edb0-6c38-1d2b-d232f9109126, 188794, [Not Found], 414"
+              ],
+              "compute_apps_returncode": 0,
+              "compute_apps_stderr": "",
+              "compute_capability": [
+                8,
+                0
+              ],
+              "foreign_compute_apps": [],
+              "index": 0,
+              "multiprocessor_count": 108,
+              "name": "NVIDIA A100-SXM4-40GB",
+              "nvidia_smi_parsed_rows": [
+                {
+                  "driver_version": "570.133.20",
+                  "gpu_uuid": "GPU-773e0633-edb0-6c38-1d2b-d232f9109126",
+                  "name": "NVIDIA A100-SXM4-40GB",
+                  "total_memory_mib": "40960"
+                }
+              ],
+              "nvidia_smi_query_id": "GPU-773e0633-edb0-6c38-1d2b-d232f9109126",
+              "nvidia_smi_raw_lines": [
+                "NVIDIA A100-SXM4-40GB, GPU-773e0633-edb0-6c38-1d2b-d232f9109126, 570.133.20, 40960"
+              ],
+              "nvidia_smi_returncode": 0,
+              "nvidia_smi_stderr": "",
+              "own_gpu_process_ids": [
+                188794
+              ],
+              "own_process_namespace_ids": [
+                188794,
+                241663
+              ],
+              "phase": "pid_binding_baseline",
+              "total_memory_bytes": 42406903808,
+              "uuid": "773e0633-edb0-6c38-1d2b-d232f9109126"
+            },
+            "candidate_nvidia_smi_delta_mib": 390,
+            "candidate_pid": 188794,
+            "challenged_snapshot": {
+              "compute_apps": [
+                {
+                  "gpu_uuid": "GPU-773e0633-edb0-6c38-1d2b-d232f9109126",
+                  "pid": 188794,
+                  "pid_raw": "188794",
+                  "process_name": "[Not Found]",
+                  "used_memory_mib": 804,
+                  "used_memory_raw": "804"
+                }
+              ],
+              "compute_apps_raw_lines": [
+                "GPU-773e0633-edb0-6c38-1d2b-d232f9109126, 188794, [Not Found], 804"
+              ],
+              "compute_apps_returncode": 0,
+              "compute_apps_stderr": "",
+              "compute_capability": [
+                8,
+                0
+              ],
+              "foreign_compute_apps": [],
+              "index": 0,
+              "multiprocessor_count": 108,
+              "name": "NVIDIA A100-SXM4-40GB",
+              "nvidia_smi_parsed_rows": [
+                {
+                  "driver_version": "570.133.20",
+                  "gpu_uuid": "GPU-773e0633-edb0-6c38-1d2b-d232f9109126",
+                  "name": "NVIDIA A100-SXM4-40GB",
+                  "total_memory_mib": "40960"
+                }
+              ],
+              "nvidia_smi_query_id": "GPU-773e0633-edb0-6c38-1d2b-d232f9109126",
+              "nvidia_smi_raw_lines": [
+                "NVIDIA A100-SXM4-40GB, GPU-773e0633-edb0-6c38-1d2b-d232f9109126, 570.133.20, 40960"
+              ],
+              "nvidia_smi_returncode": 0,
+              "nvidia_smi_stderr": "",
+              "own_gpu_process_ids": [
+                188794
+              ],
+              "own_process_namespace_ids": [
+                188794,
+                241663
+              ],
+              "phase": "pid_binding_challenged",
+              "total_memory_bytes": 42406903808,
+              "uuid": "773e0633-edb0-6c38-1d2b-d232f9109126"
+            },
+            "released_allocated_bytes": 0,
+            "released_reserved_bytes": 0,
+            "released_snapshot": {
+              "compute_apps": [
+                {
+                  "gpu_uuid": "GPU-773e0633-edb0-6c38-1d2b-d232f9109126",
+                  "pid": 188794,
+                  "pid_raw": "188794",
+                  "process_name": "[Not Found]",
+                  "used_memory_mib": 414,
+                  "used_memory_raw": "414"
+                }
+              ],
+              "compute_apps_raw_lines": [
+                "GPU-773e0633-edb0-6c38-1d2b-d232f9109126, 188794, [Not Found], 414"
+              ],
+              "compute_apps_returncode": 0,
+              "compute_apps_stderr": "",
+              "compute_capability": [
+                8,
+                0
+              ],
+              "foreign_compute_apps": [],
+              "index": 0,
+              "multiprocessor_count": 108,
+              "name": "NVIDIA A100-SXM4-40GB",
+              "nvidia_smi_parsed_rows": [
+                {
+                  "driver_version": "570.133.20",
+                  "gpu_uuid": "GPU-773e0633-edb0-6c38-1d2b-d232f9109126",
+                  "name": "NVIDIA A100-SXM4-40GB",
+                  "total_memory_mib": "40960"
+                }
+              ],
+              "nvidia_smi_query_id": "GPU-773e0633-edb0-6c38-1d2b-d232f9109126",
+              "nvidia_smi_raw_lines": [
+                "NVIDIA A100-SXM4-40GB, GPU-773e0633-edb0-6c38-1d2b-d232f9109126, 570.133.20, 40960"
+              ],
+              "nvidia_smi_returncode": 0,
+              "nvidia_smi_stderr": "",
+              "own_gpu_process_ids": [
+                188794
+              ],
+              "own_process_namespace_ids": [
+                188794,
+                241663
+              ],
+              "phase": "pid_binding_released",
+              "total_memory_bytes": 42406903808,
+              "uuid": "773e0633-edb0-6c38-1d2b-d232f9109126"
+            },
+            "requested_bytes": 407896064,
+            "reserved_delta_bytes": 408944640,
+            "reserved_delta_mib": 390.0,
+            "rounding_tolerance_mib": 1
+          },
+          "bound_host_namespace_pid": 188794,
+          "post_sentinel_compute_apps": [
+            {
+              "gpu_uuid": "GPU-773e0633-edb0-6c38-1d2b-d232f9109126",
+              "pid": 188794,
+              "pid_raw": "188794",
+              "process_name": "[Not Found]",
+              "used_memory_mib": 416,
+              "used_memory_raw": "416"
+            }
+          ],
+          "pre_context_compute_apps": [],
+          "visible_pid_namespace_aliases": [
+            241663
+          ]
+        },
+        "total_memory_bytes": 42406903808,
+        "uuid": "773e0633-edb0-6c38-1d2b-d232f9109126"
+      },
+      "foreign_compute_consumers_absent_at_endpoints": true,
+      "isolation_scope": "before/after endpoint checks; no claim that a transient mid-run consumer could not appear",
+      "retained_requirements": {
+        "compute_capability": [
+          8,
+          0
+        ],
+        "enforced": true,
+        "foreign_consumers_at_endpoints": 0,
+        "minimum_total_memory_bytes": 41875931136,
+        "name": "NVIDIA A100-SXM4-40GB"
+      },
+      "same_selected_device": true
+    },
+    "platform": {
+      "node": "e6e3d66b5461",
+      "platform": "Linux-5.15.0-1079-nvidia-x86_64-with-glibc2.39",
+      "uname": [
+        "Linux",
+        "e6e3d66b5461",
+        "5.15.0-1079-nvidia",
+        "#80-Ubuntu SMP Wed May 21 16:36:18 UTC 2025",
+        "x86_64",
+        "x86_64"
+      ]
+    },
+    "python": {
+      "executable": "/venv/main/bin/python",
+      "implementation": "CPython",
+      "optimize": 0,
+      "version": "3.12.13 | packaged by conda-forge | (main, Mar  5 2026, 16:50:00) [GCC 14.3.0]"
+    },
+    "schema": "nano-vllm-speculative-v2-lifecycle-v2",
+    "software": {
+      "cudnn": 91002,
+      "nccl": [
+        2,
+        27,
+        5
+      ],
+      "torch": "2.10.0+cu128",
+      "torch_cuda_build": "12.8",
+      "transformers": "5.14.1"
+    },
+    "source": {
+      "git_after": {
+        "branch": "feat/spec-v2-dual-runner",
+        "detached": false,
+        "dirty": false,
+        "head": "d87f168b804778fbb5888a662dc8a0defccfd660",
+        "repository": "/workspace/nano-vllm-spec-v2",
+        "source_tree_sha256": "9d6fca30d553ccb6ee6e37b3d6eb755c20e1a0d27e0055eddaca63ac9bd74797",
+        "status_porcelain_v1": [],
+        "tree": "4e98646e71c4550f58df291cf8efbbab71d9e2cb"
+      },
+      "git_before": {
+        "branch": "feat/spec-v2-dual-runner",
+        "detached": false,
+        "dirty": false,
+        "head": "d87f168b804778fbb5888a662dc8a0defccfd660",
+        "repository": "/workspace/nano-vllm-spec-v2",
+        "source_tree_sha256": "9d6fca30d553ccb6ee6e37b3d6eb755c20e1a0d27e0055eddaca63ac9bd74797",
+        "status_porcelain_v1": [],
+        "tree": "4e98646e71c4550f58df291cf8efbbab71d9e2cb"
+      },
+      "nanovllm_import_origin": "/workspace/nano-vllm-spec-v2/nanovllm/__init__.py",
+      "unchanged_during_run": true
+    },
+    "started_at_utc": "2026-08-28T13:14:49.886709+00:00"
+  },
+  "recovery": {
+    "independent_memory_reconciliation": {
+      "automatic_num_blocks": 305,
+      "final_graph_allocated_increment_bytes": 0,
+      "final_graph_reserved_increment_bytes": 0,
+      "graph_allocator_margin_bytes": 0,
+      "graph_construction_reservation_bytes": 0,
+      "kv_accounted_bytes": 234881024,
+      "kv_allocated_increment_bytes": 234881024,
+      "modeled_runtime_headroom_bytes": 17722755972,
+      "post_init_allocated_increment_bytes": 0,
+      "post_init_reserved_increment_bytes": 0,
+      "profiled_graph_ownership_bytes": 0,
+      "profiled_graph_peak_bytes": 0,
+      "runtime_reservation_bytes": 168440956,
+      "sizing_overhead_bytes": 168440956,
+      "sizing_usable_bytes": 17957636996,
+      "total_accounted_increment_bytes": 234881024,
+      "total_allocated_increment_bytes": 234881024
+    },
+    "memory_audit": {
+      "allocated_after_graph_before_pretouch_bytes": 2648600576,
+      "allocated_after_kv_before_graph_bytes": 2648600576,
+      "allocated_before_kv_bytes": 2413719552,
+      "audit_required_components": [
+        "model activation and attention-library workspace",
+        "CUDA graph-pool and route-specific static buffers",
+        "top-k/top-p backend-internal selection/sort workspace beyond the documented payload proxy",
+        "measured CUDA allocator fragmentation beyond the fixed margin"
+      ],
+      "draft_block_bytes": 29360128,
+      "draft_kv_bytes": 117440512,
+      "draft_warmup_transient_bytes": 14689280,
+      "draft_weight_bytes": 1192099840,
+      "final_graph_allocated_bytes": 0,
+      "final_graph_peak_allocated_bytes": 0,
+      "final_graph_peak_reserved_bytes": 0,
+      "final_graph_reserved_bytes": 0,
+      "free_before_kv_bytes": 39329529856,
+      "gpu_certified": false,
+      "graph_allocator_margin_bytes": 0,
+      "graph_construction_reservation_bytes": 0,
+      "graph_reservation_bytes": 0,
+      "joint_block_bytes": 58720256,
+      "memory_budget_bytes": 21203451904,
+      "modeled_runtime_headroom_bytes": 17722755972,
+      "peak_before_kv_bytes": 2428408832,
+      "post_init_allocated_bytes": 2648600576,
+      "post_init_budget_headroom_bytes": 17891196928,
+      "post_init_free_bytes": 39094648832,
+      "post_init_reserved_bytes": 2770337792,
+      "profiled_graph_allocated_bytes": 0,
+      "profiled_graph_ownership_bytes": 0,
+      "profiled_graph_peak_allocated_bytes": 0,
+      "profiled_graph_peak_bytes": 0,
+      "profiled_graph_peak_reserved_bytes": 0,
+      "profiled_graph_reserved_bytes": 0,
+      "reserved_after_graph_before_pretouch_bytes": 2770337792,
+      "reserved_after_kv_before_graph_bytes": 2770337792,
+      "reserved_before_kv_bytes": 2535456768,
+      "runtime_reservation_bytes": 168440956,
+      "selected_num_blocks": 4,
+      "sizing_overhead_bytes": 168440956,
+      "target_block_bytes": 29360128,
+      "target_kv_bytes": 117440512,
+      "target_warmup_transient_bytes": 16246784,
+      "target_weight_bytes": 1192099840,
+      "total_memory_bytes": 42406903808,
+      "used_before_kv_bytes": 3077373952,
+      "warmup_transient_bytes": 16246784,
+      "workspace_plan": {
+        "allocator_margin_bytes": 67108864,
+        "audit_required_components": [
+          "model activation and attention-library workspace",
+          "CUDA graph-pool and route-specific static buffers",
+          "top-k/top-p backend-internal selection/sort workspace beyond the documented payload proxy",
+          "measured CUDA allocator fragmentation beyond the fixed margin"
+        ],
+        "backend_library_workspace_bytes": null,
+        "batch_size": 4,
+        "bonus_phase_bytes": 29172860,
+        "bonus_sampling_workspace_bytes": 17016832,
+        "configured_k": 2,
+        "draft_filter_phase_bytes": 31603836,
+        "draft_logits_bytes": 1215488,
+        "draft_logits_itemsize": 2,
+        "draft_phase_bytes": 31603836,
+        "draft_probability_bytes": 4861952,
+        "draft_race_phase_bytes": 23095420,
+        "draft_rows": 4,
+        "draft_sampling_workspace_bytes": 17016832,
+        "draft_softmax_phase_bytes": 9725052,
+        "draft_top_k_workspace_bytes": 7292936,
+        "draft_top_p_workspace_bytes": 24309760,
+        "draft_transform_bytes": 3646464,
+        "graph_static_workspace_bytes": null,
+        "max_effective_k": 2,
+        "metadata_bytes": 1148,
+        "modeled_live_peak_bytes": 85085308,
+        "probability_floor_bytes": 12154880,
+        "rejection_correction_workspace_bytes": 41326592,
+        "rejection_phase_bytes": 53482620,
+        "reservation_bytes": 152194172,
+        "target_logits_itemsize": 2,
+        "target_probability_bytes": 7292928,
+        "verifier_filter_phase_bytes": 85085308,
+        "verifier_logits_bytes": 3646464,
+        "verifier_phase_bytes": 85085308,
+        "verifier_rows": 12,
+        "verifier_softmax_phase_bytes": 26741884,
+        "verifier_top_k_workspace_bytes": 21878808,
+        "verifier_top_p_workspace_bytes": 72929280,
+        "verifier_transform_bytes": 10939392,
+        "vocab_size": 151936
+      }
+    },
+    "outputs": [
+      [
+        "$%$%",
+        [
+          3,
+          4,
+          3,
+          4
+        ]
+      ],
+      [
+        " ( ) = ",
+        [
+          320,
+          873,
+          284,
+          220
+        ]
+      ]
+    ],
+    "scheduler_trace": [
+      [
+        true,
+        [
+          [
+            4,
+            0,
+            4,
+            true
+          ],
+          [
+            3,
+            0,
+            3,
+            true
+          ]
+        ]
+      ],
+      [
+        false,
+        [
+          [
+            5,
+            4,
+            1,
+            false
+          ],
+          [
+            4,
+            3,
+            1,
+            false
+          ]
+        ]
+      ],
+      [
+        false,
+        [
+          [
+            6,
+            5,
+            1,
+            false
+          ],
+          [
+            5,
+            4,
+            1,
+            false
+          ]
+        ]
+      ],
+      [
+        false,
+        [
+          [
+            7,
+            6,
+            1,
+            false
+          ],
+          [
+            6,
+            5,
+            1,
+            false
+          ]
+        ]
+      ]
+    ],
+    "tokenizer_fingerprint": "54080f7622052c7ea95e2993366bd9ff624be5a1e9e894c49a08b04f4ed56fcd"
+  },
+  "recovery_engine_succeeded": true,
+  "retention_eligible": true,
+  "runtime_import_origins": {
+    "lifecycle_contract": "/workspace/nano-vllm-spec-v2/tests/run_speculative_v2_lifecycle.py",
+    "llm_class": "/workspace/nano-vllm-spec-v2/nanovllm/llm.py",
+    "model_runner_class": "/workspace/nano-vllm-spec-v2/nanovllm/engine/model_runner.py",
+    "nanovllm_package": "/workspace/nano-vllm-spec-v2/nanovllm/__init__.py"
+  },
+  "scope": {
+    "claim": "one injected V2 constructor failure rolls back GPU/process ownership and permits a healthy same-process recovery",
+    "limitations": [
+      "one fresh process is required per phase",
+      "the draft remains inert during recovery generation",
+      "no speculative-token or performance claim",
+      "GPU isolation is checked only at before/after endpoints",
+      "a late failure or healthy exit may retain at most the registered 32 MiB allocated / 64 MiB reserved process-global compiled-runtime cache ceilings"
+    ]
+  },
+  "torch_defaults_and_context_restored_after_failure": true
+}

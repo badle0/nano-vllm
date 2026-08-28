@@ -16,12 +16,13 @@ multi-token commit, speculative streaming, or speculative-metrics path in this
 rung. Consequently, V2 makes no acceptance-rate, latency, throughput, roofline,
 or speedup claim.
 
-The implementation commit is the commit containing this document. At the time
-that commit is created, no pre-commit A100 output is retention-eligible: a dirty
-or uncommitted tree cannot be tied to the exact source snapshot required by the
-evidence protocol. Retained V2 evidence is separate post-commit work. Until that
-work is run from a clean checkout and independently validated, V2's status is
-**implemented but not retained-certified**.
+The implementation commit is
+`d87f168b804778fbb5888a662dc8a0defccfd660`. Fresh clean-checkout A100 evidence
+for that exact SHA is retained under
+`benchmarks/speculative_v2/evidence/2026-08-28-a100-v2-d87f168/` and passes the
+GPU-free offline validator. V2 is therefore **retained-certified for this inert
+lifecycle claim only**; later speculative execution and performance rungs remain
+uncertified.
 
 This document is an implementation delta to the frozen source map and design in
 documents 02 through 04. It does not modify the V1 sampling-law certificate in
@@ -491,10 +492,14 @@ Retained V2 lifecycle and recovery evidence requires:
 - no foreign compute applications on the selected GPU at the before and after
   endpoints.
 
-The runner establishes a CUDA context and binds its container/host namespace PID
-before admitting that process as the sole owned GPU consumer. Endpoint checks
-cannot prove that a transient foreign process did not appear in the middle of a
-run. The evidence records that limitation and makes no stronger isolation claim.
+The runner establishes a CUDA context, identifies the sole new `nvidia-smi` PID,
+and proves ownership by matching that process's 390 MiB NVML increase to a 389
+MiB Torch allocator challenge within a 1 MiB rounding tolerance. It also requires
+all non-candidate process rows to remain unchanged and verifies exact allocator
+and NVML release to baseline. Container PID-namespace aliases are recorded only
+as diagnostics; they are not used as proof of ownership. Endpoint checks cannot
+prove that a transient foreign process did not appear in the middle of a run, so
+the evidence records that limitation and makes no stronger isolation claim.
 
 ### 6.3 Canonical V0 golden
 
@@ -502,8 +507,13 @@ After committing V2, create a separate detached checkout of canonical V0. The
 runner script itself remains in the clean V2 implementation checkout, while
 `PYTHONPATH` points to V0 so the imported engine is historical code:
 
+All producer commands in sections 6.3 through 6.5 must run from a clean checkout
+of the exact implementation commit `d87f168b804778fbb5888a662dc8a0defccfd660`.
+The later evidence/docs commit can validate the retained archive, but must not be
+substituted for the source SHA recorded by the raw evidence.
+
 ```bash
-SPEC_V2_COMMIT="$(git rev-parse HEAD)"
+SPEC_V2_COMMIT="d87f168b804778fbb5888a662dc8a0defccfd660"
 SPEC_V0_COMMIT="480a3b26c5a4e465aac06d1dabd34e1230686feb"
 
 git worktree add --detach \
@@ -534,7 +544,7 @@ following is the same-model ownership cell; it proves independent model/cache
 ownership but not heterogeneous target/draft geometry:
 
 ```bash
-SPEC_V2_COMMIT="$(git rev-parse HEAD)"
+SPEC_V2_COMMIT="d87f168b804778fbb5888a662dc8a0defccfd660"
 SPEC_V0_EAGER_SHA="<sha256 printed for v0-eager.json>"
 
 PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=. \
@@ -568,7 +578,9 @@ The retained lifecycle cell verifies, among other invariants:
 - generation with ownership enabled performs zero draft forwards;
 - tokenizer fingerprints and target/draft model manifests remain stable;
 - automatic and explicit joint-KV audits independently reconcile;
-- an impossible explicit block request raises the typed capacity error;
+- the exact automatic capacity N constructs successfully, while the
+  first-ineligible N+1 raises the typed capacity error and reports the same N
+  ceiling;
 - a healthy engine remains usable after another constructor is rejected;
 - teardown is idempotent; and
 - a smaller explicit engine can construct and run after the capacity failure.
@@ -580,7 +592,7 @@ mode for non-graph phases and graph mode for graph profiling, final draft graph
 capture, and draft pretouch:
 
 ```bash
-SPEC_V2_COMMIT="$(git rev-parse HEAD)"
+SPEC_V2_COMMIT="d87f168b804778fbb5888a662dc8a0defccfd660"
 
 for SPEC_PHASE in \
   draft_construct \
@@ -609,11 +621,11 @@ The loop is orchestration only; each Python invocation is the required fresh
 process. The explicit exit-status check prevents a later successful phase from
 hiding an earlier failure.
 
-## 7. Evidence retention status
+## 7. Retained evidence results
 
 The V2 implementation contains evidence producers and CPU tests for their
-schemas, provenance rules, write-once behavior, and failure paths. The schemas
-are:
+schemas, provenance rules, write-once behavior, and failure paths. The retained
+archive uses these schemas:
 
 ```text
 nano-vllm-speculative-v0-golden-v1
@@ -621,24 +633,28 @@ nano-vllm-speculative-v2-lifecycle-v2
 nano-vllm-speculative-v2-gpu-recovery-v1
 ```
 
-At implementation-commit time, these scripts are protocol code, not retained
-results. No lifecycle JSON produced from the dirty pre-commit worktree is a V2
-certificate. No result should enter a retained archive until all of the
-following are available:
+All retained-certification prerequisites are now satisfied for implementation SHA
+`d87f168b804778fbb5888a662dc8a0defccfd660`:
 
-1. the exact clean V2 implementation SHA;
-2. matching eager and graph canonical-V0 goldens and hashes;
-3. clean retained eager and graph lifecycle artifacts;
-4. all eight clean retained phase-recovery artifacts;
-5. an archive manifest that hashes the scripts, model manifests, and raw JSON;
-6. a GPU-free offline validator that rejects missing, altered, inconsistent, or
-   non-finite required fields; and
-7. documentation of the exact commands and any rejected runs.
+- canonical V0 eager and graph artifacts are pinned to detached commit
+  `480a3b26c5a4e465aac06d1dabd34e1230686feb`;
+- retained V2 eager and graph lifecycle cells pass exact historical output and
+  scheduler-trace parity, current speculation-off/on parity, RNG identity, and
+  zero draft generation forwards;
+- eager capacity certifies N=305 and typed-rejects N+1=306 with the same ceiling;
+- graph capacity certifies N=303 and typed-rejects N+1=304 with the same ceiling;
+- all eight fresh-process phase-recovery cells pass, with observed post-failure
+  and post-recovery maxima of 17,039,360 allocated bytes and 41,943,040 reserved
+  bytes, below the registered 32/64 MiB ceilings; and
+- the manifest and GPU-free validator cover exact hashes/file inventory,
+  duplicate/non-finite JSON rejection, independent planner/audit arithmetic,
+  model/tokenizer/source identity, A100 ownership, historical V0 parity, and
+  cross-artifact lifecycle/recovery invariants.
 
-Those artifacts, the validator, and their measured results belong in a separate
-post-implementation evidence/docs commit. That commit may state actual PASS/FAIL
-results and artifact hashes. This implementation document intentionally does
-not invent them.
+The archive README and raw provenance record the complete raw hashes, producer
+argv/environment, claim boundary, and two failed-closed attempts that wrote no
+evidence: one mid-run capacity drift and one endpoint observation of a foreign
+1,438 MiB GPU consumer. Only their idle fresh-process replays are retained.
 
 ## 8. Explicit limitations and remaining rungs
 

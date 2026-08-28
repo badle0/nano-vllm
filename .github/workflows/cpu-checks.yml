@@ -52,6 +52,11 @@ jobs:
           benchmarks/chunked_prefill_tail/evidence/2026-08-18-a100-contract-phase-e50e732
           benchmarks/chunked_prefill_tail/evidence/2026-08-18-a100-full-completion-ba1bde4
 
+      - name: Validate retained speculative V2 evidence
+        run: >-
+          python benchmarks/speculative_v2/validate_retained_evidence.py
+          benchmarks/speculative_v2/evidence/2026-08-28-a100-v2-d87f168/manifest.json
+
   speculative-contracts:
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -105,3 +110,4 @@ jobs:
           tests/test_speculative_v0_golden.py
           tests/test_speculative_v2_lifecycle_harness.py
           tests/test_speculative_v2_gpu_recovery_harness.py
+          tests/test_speculative_v2_retained_evidence.py

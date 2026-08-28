@@ -1,13 +1,13 @@
 # PR8 speculative decoding v2: implementation and validation plan
 
 Status: **V0 is frozen at `480a3b2`; V1 sampling-law implementation is locally
-certified through `8989e44`; V2 inert dual-model lifecycle code is implemented
-but not yet retained-certified**. V2 certification requires an atomic clean
-implementation commit followed by fresh SHA-bound A100 lifecycle and recovery
-artifacts. Every dirty-worktree or pre-commit A100 run is exploratory and cannot
-be retained, renamed, or used as release evidence. No draft proposal, scheduler
-plan, target verification, burst commit, or speculative streaming path exists
-yet.
+certified through `8989e44`; V2 inert dual-model lifecycle code at `d87f168` is
+retained-certified on A100**. The SHA-bound lifecycle and recovery archive is
+stored under
+`benchmarks/speculative_v2/evidence/2026-08-28-a100-v2-d87f168/`. Dirty-worktree
+and pre-commit A100 runs remain exploratory and cannot be retained, renamed, or
+used as release evidence. No draft proposal, scheduler plan, target verification,
+burst commit, or speculative streaming path exists yet.
 
 Base: `origin/fork-main` at `663753b`.
 

@@ -1,0 +1,292 @@
+{
+  "schema_version": 1,
+  "kind": "nano_vllm_speculative_v2_retained_archive",
+  "archive_id": "2026-08-28-a100-v2-d87f168",
+  "claim_boundary": {
+    "certified": [
+      "canonical V0 eager and graph greedy output/trace controls",
+      "V2 inert dual-model construction and independent ownership",
+      "current speculation-off/on output, scheduler-trace, and RNG identity",
+      "exact joint-KV automatic/explicit/N+1 capacity preflight",
+      "transactional cleanup and all eight registered constructor-failure recovery phases"
+    ],
+    "not_certified": [
+      "draft proposal execution",
+      "target verification or acceptance/rejection",
+      "multi-token commit, speculative streaming, or speculative metrics",
+      "heterogeneous target/draft model geometry",
+      "tensor parallelism or FlashInfer",
+      "latency, throughput, acceptance rate, or speedup"
+    ],
+    "feature_stage": "V2 inert dual-model ownership",
+    "gpu_isolation_scope": "before/after endpoint checks only",
+    "memory_workspace_gpu_certified": false
+  },
+  "source": {
+    "implementation_commit": "d87f168b804778fbb5888a662dc8a0defccfd660",
+    "implementation_tree": "4e98646e71c4550f58df291cf8efbbab71d9e2cb",
+    "implementation_source_tree_sha256": "9d6fca30d553ccb6ee6e37b3d6eb755c20e1a0d27e0055eddaca63ac9bd74797",
+    "canonical_v0_commit": "480a3b26c5a4e465aac06d1dabd34e1230686feb",
+    "canonical_v0_tree": "b5982753a5d9d4e7512253002985962c13a2435d"
+  },
+  "protocol": {
+    "seed": 20260828,
+    "configured_k": 2,
+    "tensor_parallel_size": 1,
+    "top_p_backend": "exact",
+    "gpu_memory_utilization": 0.5,
+    "max_model_len": 512,
+    "max_num_batched_tokens": 512,
+    "max_num_seqs": 4,
+    "kvcache_block_size": 256,
+    "recovery_num_kvcache_blocks": 4,
+    "workload": {
+      "prompt_token_ids": [
+        [
+          1,
+          2,
+          3,
+          4
+        ],
+        [
+          7,
+          8,
+          9
+        ]
+      ],
+      "sampling": {
+        "temperature": 0.0,
+        "top_k": -1,
+        "top_p": 1.0,
+        "max_tokens": 4,
+        "ignore_eos": true
+      }
+    },
+    "recovery_phase_modes": {
+      "draft_construct": "eager",
+      "draft_load": "eager",
+      "draft_warmup": "eager",
+      "graph_profile": "graph",
+      "joint_allocate": "eager",
+      "draft_graph": "graph",
+      "draft_pretouch": "graph",
+      "memory_finalize": "eager"
+    },
+    "recovery_expected_real_phase_calls": {
+      "draft_construct": 1,
+      "draft_load": 1,
+      "draft_warmup": 1,
+      "graph_profile": 1,
+      "joint_allocate": 1,
+      "draft_graph": 2,
+      "draft_pretouch": 1,
+      "memory_finalize": 1
+    }
+  },
+  "runner_files": {
+    "tests/run_speculative_v0_golden.py": "87cc0556daa866009a975ff5f9f38eaa2c182547f9847e51c9c07ad906693a72",
+    "tests/run_speculative_v2_lifecycle.py": "5eb7facfebbed315ebc2d50fcd8f2f71869e736c026eff1ea339deeea59bbafe",
+    "tests/run_speculative_v2_gpu_recovery.py": "5513de7d220a6e5c20ebe95c679cf9ed40241da6a92246fbb64f0eed880eec45",
+    "nanovllm/engine/speculative_memory.py": "de03b20aee633d3527868936841998b0d75cfb685c3f7ee38042e7b0fb3c6520"
+  },
+  "model_identity": {
+    "fixture": "/workspace/models/Qwen3-0.6B",
+    "target_equals_draft": true,
+    "canonical_content_sha256": "7a19d03d7e4e5a6209dfd4854274d771d3bc8cfe6436846d2db2400723386378",
+    "canonical_content_definition": [
+      "resolved_path",
+      "metadata_files",
+      "weight_files",
+      "total_weight_bytes"
+    ],
+    "tokenizer_manifest_sha256": "ae22ab112507b607364512e7b5aa1b912abe0cd730c5af8026a86ae14ac8976d",
+    "weight_file": {
+      "name": "model.safetensors",
+      "size_bytes": 1503300328,
+      "sha256": "f47f71177f32bcd101b7573ec9171e6a57f4f4d31148d38e382306f42996874b"
+    }
+  },
+  "registered_hardware": {
+    "name": "NVIDIA A100-SXM4-40GB",
+    "compute_capability": [
+      8,
+      0
+    ],
+    "total_memory_bytes": 42406903808,
+    "minimum_total_memory_bytes": 41875931136,
+    "multiprocessor_count": 108,
+    "uuid": "773e0633-edb0-6c38-1d2b-d232f9109126",
+    "driver_version": "570.133.20",
+    "allocator_challenge": {
+      "requested_bytes": 407896064,
+      "allocated_and_reserved_delta_bytes": 408944640,
+      "reserved_delta_mib": 390.0,
+      "nvidia_smi_delta_mib": 390,
+      "rounding_tolerance_mib": 1
+    }
+  },
+  "registered_software": {
+    "python": "3.12.13",
+    "python_implementation": "CPython",
+    "torch": "2.10.0+cu128",
+    "torch_cuda_build": "12.8",
+    "cudnn": 91002,
+    "nccl": [
+      2,
+      27,
+      5
+    ],
+    "transformers": "5.14.1"
+  },
+  "rejected_attempts": {
+    "count": 2,
+    "retained_raw_artifacts": 0,
+    "details": "README.md"
+  },
+  "artifacts": [
+    {
+      "path": "raw/recovery-draft_construct.json",
+      "role": "recovery",
+      "schema": "nano-vllm-speculative-v2-gpu-recovery-v1",
+      "mode": "eager",
+      "phase": "draft_construct",
+      "original_output_path": "/workspace/spec-v2-evidence/recovery-draft_construct.json",
+      "size_bytes": 28352,
+      "sha256": "8d9184185a5e29be192dd64063c40e1f6d3ba86ba3dbba36d230a9c061564516",
+      "source_commit": "d87f168b804778fbb5888a662dc8a0defccfd660",
+      "retention_eligible": true
+    },
+    {
+      "path": "raw/recovery-draft_graph.json",
+      "role": "recovery",
+      "schema": "nano-vllm-speculative-v2-gpu-recovery-v1",
+      "mode": "graph",
+      "phase": "draft_graph",
+      "original_output_path": "/workspace/spec-v2-evidence/recovery-draft_graph.json",
+      "size_bytes": 28468,
+      "sha256": "566d2f8a5e15484a0215e5e8c6d89a828714d55d477fb04296540bf9e9486ee9",
+      "source_commit": "d87f168b804778fbb5888a662dc8a0defccfd660",
+      "retention_eligible": true
+    },
+    {
+      "path": "raw/recovery-draft_load.json",
+      "role": "recovery",
+      "schema": "nano-vllm-speculative-v2-gpu-recovery-v1",
+      "mode": "eager",
+      "phase": "draft_load",
+      "original_output_path": "/workspace/spec-v2-evidence/recovery-draft_load.json",
+      "size_bytes": 28312,
+      "sha256": "44f33219000ce8c248f53b7bb431462f46f926baaa7bf218c85b4ea485cff59f",
+      "source_commit": "d87f168b804778fbb5888a662dc8a0defccfd660",
+      "retention_eligible": true
+    },
+    {
+      "path": "raw/recovery-draft_pretouch.json",
+      "role": "recovery",
+      "schema": "nano-vllm-speculative-v2-gpu-recovery-v1",
+      "mode": "graph",
+      "phase": "draft_pretouch",
+      "original_output_path": "/workspace/spec-v2-evidence/recovery-draft_pretouch.json",
+      "size_bytes": 28492,
+      "sha256": "29ac449e19a23642165de0664cda80fe697b91e73d0e04ea46419a5fe0059165",
+      "source_commit": "d87f168b804778fbb5888a662dc8a0defccfd660",
+      "retention_eligible": true
+    },
+    {
+      "path": "raw/recovery-draft_warmup.json",
+      "role": "recovery",
+      "schema": "nano-vllm-speculative-v2-gpu-recovery-v1",
+      "mode": "eager",
+      "phase": "draft_warmup",
+      "original_output_path": "/workspace/spec-v2-evidence/recovery-draft_warmup.json",
+      "size_bytes": 28341,
+      "sha256": "90efcf20415a720b9956990e85c89911451b2c853cc69fed068dae5d28a1daff",
+      "source_commit": "d87f168b804778fbb5888a662dc8a0defccfd660",
+      "retention_eligible": true
+    },
+    {
+      "path": "raw/recovery-graph_profile.json",
+      "role": "recovery",
+      "schema": "nano-vllm-speculative-v2-gpu-recovery-v1",
+      "mode": "graph",
+      "phase": "graph_profile",
+      "original_output_path": "/workspace/spec-v2-evidence/recovery-graph_profile.json",
+      "size_bytes": 28484,
+      "sha256": "01c61ffff5adbf04370c5ebaec369d9b1c113695766101c44e73b78d0ba46c3d",
+      "source_commit": "d87f168b804778fbb5888a662dc8a0defccfd660",
+      "retention_eligible": true
+    },
+    {
+      "path": "raw/recovery-joint_allocate.json",
+      "role": "recovery",
+      "schema": "nano-vllm-speculative-v2-gpu-recovery-v1",
+      "mode": "eager",
+      "phase": "joint_allocate",
+      "original_output_path": "/workspace/spec-v2-evidence/recovery-joint_allocate.json",
+      "size_bytes": 28371,
+      "sha256": "b11bf9a1be24b98bbd4dd03ab80bbbf2ffa2a9837a7afa7514893c76ae6b439e",
+      "source_commit": "d87f168b804778fbb5888a662dc8a0defccfd660",
+      "retention_eligible": true
+    },
+    {
+      "path": "raw/recovery-memory_finalize.json",
+      "role": "recovery",
+      "schema": "nano-vllm-speculative-v2-gpu-recovery-v1",
+      "mode": "eager",
+      "phase": "memory_finalize",
+      "original_output_path": "/workspace/spec-v2-evidence/recovery-memory_finalize.json",
+      "size_bytes": 28365,
+      "sha256": "21e25666cbaf3c3fbffae44b152a803db6f1237bc26b8851c42c7ba7c185cce2",
+      "source_commit": "d87f168b804778fbb5888a662dc8a0defccfd660",
+      "retention_eligible": true
+    },
+    {
+      "path": "raw/v0-eager.json",
+      "role": "canonical_v0",
+      "schema": "nano-vllm-speculative-v0-golden-v1",
+      "mode": "eager",
+      "phase": null,
+      "original_output_path": "/workspace/spec-v2-evidence/v0-eager.json",
+      "size_bytes": 12225,
+      "sha256": "8e6e7e4edd500ca98010c7bae1b6265d270d9c952fabcb1cd85cdcf80efebcda",
+      "source_commit": "480a3b26c5a4e465aac06d1dabd34e1230686feb",
+      "retention_eligible": true
+    },
+    {
+      "path": "raw/v0-graph.json",
+      "role": "canonical_v0",
+      "schema": "nano-vllm-speculative-v0-golden-v1",
+      "mode": "graph",
+      "phase": null,
+      "original_output_path": "/workspace/spec-v2-evidence/v0-graph.json",
+      "size_bytes": 12227,
+      "sha256": "24f5cfcaf667a61913a4018e3d7a9de48b9c38d5da03f0805f3a520eeb6c8a61",
+      "source_commit": "480a3b26c5a4e465aac06d1dabd34e1230686feb",
+      "retention_eligible": true
+    },
+    {
+      "path": "raw/v2-eager.json",
+      "role": "v2_lifecycle",
+      "schema": "nano-vllm-speculative-v2-lifecycle-v2",
+      "mode": "eager",
+      "phase": null,
+      "original_output_path": "/workspace/spec-v2-evidence/v2-eager.json",
+      "size_bytes": 47875,
+      "sha256": "f8d617ef25eb6389e4c9912efe1b893ea68abc883efa49afe54e51bfda25dba9",
+      "source_commit": "d87f168b804778fbb5888a662dc8a0defccfd660",
+      "retention_eligible": true
+    },
+    {
+      "path": "raw/v2-graph.json",
+      "role": "v2_lifecycle",
+      "schema": "nano-vllm-speculative-v2-lifecycle-v2",
+      "mode": "graph",
+      "phase": null,
+      "original_output_path": "/workspace/spec-v2-evidence/v2-graph.json",
+      "size_bytes": 48296,
+      "sha256": "462f14488147a7dae513043190401eb3ae4a36f2881169d06a2667d84d14d9d7",
+      "source_commit": "d87f168b804778fbb5888a662dc8a0defccfd660",
+      "retention_eligible": true
+    }
+  ]
+}

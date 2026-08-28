@@ -1,14 +1,15 @@
 # PR 8 design packet: speculative decoding v2
 
 Status: the V0 design packet was frozen in commit `480a3b2`, and V1 sampling-law
-work was implemented and locally certified through `8989e44`. V2 now implements
-an inert dual-model lifecycle inside one `ModelRunner`: typed configuration,
-target/draft identity checks, transactional load/warmup/KV/graph ownership,
-modeled speculative-workspace reservation, and rollback/teardown. V2 retained
-certification is intentionally pending the clean implementation commit and
-fresh A100 evidence tied to that exact SHA. Draft proposal execution, scheduler
-planning, target verification, burst commit, streaming/metrics integration, and
-performance routing remain V3-V7 work and have not begun.
+work was implemented and locally certified through `8989e44`. V2's inert
+dual-model lifecycle is implemented at `d87f168b804778fbb5888a662dc8a0defccfd660`
+and retained-certified on A100 by the versioned archive under
+`benchmarks/speculative_v2/evidence/2026-08-28-a100-v2-d87f168/`. The certificate
+covers typed configuration, target/draft identity, transactional
+load/warmup/KV/graph ownership, modeled speculative-workspace reservation, and
+rollback/teardown. Draft proposal execution, scheduler planning, target
+verification, burst commit, streaming/metrics integration, and performance
+routing remain V3-V7 work and have not begun.
 
 Design base: `origin/fork-main` at
 `663753b99131945c297c1fbe02341108f422dce7`.
