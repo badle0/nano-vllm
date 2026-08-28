@@ -30,8 +30,15 @@ For each proposed token `y_i`, draw an independent `u_i ~ Uniform(0, 1)` and
 accept the token when
 
 ```text
-u_i <= a_i(y_i),       a_i(y) = min(1, p_i(y) / q_i(y)).
+u_i < a_i(y_i),        a_i(y) = min(1, p_i(y) / q_i(y)).
 ```
+
+The strict comparison is part of the finite-precision contract. It is
+measure-equivalent to `<=` for an ideal continuous uniform, but nano-vLLM draws
+from the representable half-open interval `[0, 1)`, where zero is reachable.
+Using `<=` would therefore give an analytically zero-probability proposal a
+nonzero machine probability of acceptance when `u_i == 0`. Injected-uniform
+tests use the same strict boundary.
 
 Evaluation is sequential even though target logits are computed in parallel.
 Stop at the first rejection. If `y_i` is rejected, sample a replacement from

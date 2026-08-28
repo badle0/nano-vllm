@@ -1,7 +1,10 @@
 # PR 8 design packet: speculative decoding v2
 
-Status: design-only; no speculative-decoding production code has been added on
-this branch.
+Status: the V0 design packet was frozen in commit `480a3b2`. V1 sampling-law
+work is implemented on `feat/spec-v2-sampling-law`; it is an opt-in sampler
+seam and CPU reference oracle, not an engine-integrated speculative decoder.
+The dual-runner, scheduler, verifier, commit, streaming, and performance rungs
+have not begun.
 
 Design base: `origin/fork-main` at
 `663753b99131945c297c1fbe02341108f422dce7`.

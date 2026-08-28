@@ -1,6 +1,8 @@
 # PR8 speculative decoding v2: implementation and validation plan
 
-Status: **planning only; implementation has not begun**.
+Status: **V0 frozen at `480a3b2`; V1 sampling-law implementation and CPU
+certification are in progress on `feat/spec-v2-sampling-law`**. No dual-model or
+engine execution path exists yet.
 
 Base: `origin/fork-main` at `663753b`.
 
@@ -94,10 +96,13 @@ raises the typed speculative-sampling invariant error without caller-visible
 mutation.
 
 The implementation must define the finite-precision recovery branch explicitly.
-For residual weights `r = max(p - q, 0)` and mass `z = sum(r)`, the production
-path may use its certified fast dtype. If the fast mass is zero or non-finite,
-recompute `r` and `z` by upcasting the retained canonical FP32 rows to the FP64
-reference path. Then:
+For residual weights `r = max(p - q, 0)` and mass `z = sum(r)`, V1 always
+upcasts the retained canonical FP32 rows and their row masses to the FP64
+reference path. A later production path may use a faster dtype only after a
+separate gate proves categorical-law equivalence for every routed input class;
+finite positive fast mass alone is not such a proof because it can still lose
+reference-positive support. Zero, subnormal, or non-finite fast mass always
+routes to the reference path. Then:
 
 1. finite `z > 0`: sample the robust residual;
 2. `z == 0` after a numerical rejection: robustly renormalize `p`, sample it

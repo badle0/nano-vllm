@@ -1,7 +1,7 @@
 # PR 8 — 03: speculative decoding v2 design map
 
-This document records the architecture before implementation. It is a decision
-ledger, not a claim that the feature exists. The code base is
+This document records the architecture as frozen before implementation. It is a
+decision ledger, not a claim that the complete feature exists. The design base is
 `origin/fork-main` at `663753b99131945c297c1fbe02341108f422dce7`.
 The old `feat/speculative-decoding` tip `a632b59` is prototype evidence only.
 Throughout this packet, v1/v2 name milestones of this nano-vLLM fork; they do
@@ -152,9 +152,13 @@ mass, then define normalized `p_i` and `q_i` from those same retained weights.
 An invalid row raises the typed invariant error. Let
 `r_i = max(p_i - q_i, 0)` and `z_i = sum(r_i)`.
 
-The fast production path may compute `r_i` and `z_i` in its certified dtype. If
-its mass is zero or non-finite, recompute by upcasting the retained canonical
-FP32 rows to the FP64 reference path. Then:
+The correctness-first V1 path computes `r_i` and `z_i` by upcasting the retained
+canonical FP32 rows to the FP64 reference path. A merely finite, positive FP32
+residual mass is not a sufficient fast-path certificate: normalization can lose
+FP64-positive support while leaving substantial positive FP32 mass. A later fast
+production path may be selected only after proving that its categorical law
+matches the retained-row FP64 oracle for the routed input class. Zero,
+subnormal, or non-finite fast mass always routes to the reference path. Then:
 
 - finite `z_i > 0`: sample the robust residual, even if the fast path failed;
 - `z_i == 0` after a numerical rejection: robustly renormalize `p_i`, sample it
