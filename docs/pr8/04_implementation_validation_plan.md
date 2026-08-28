@@ -2,19 +2,23 @@
 
 Status: **V0 is frozen at `480a3b2`; V1 sampling-law implementation is locally
 certified through `8989e44`; V2 inert dual-model lifecycle code at `d87f168` is
-retained-certified on A100**. The SHA-bound lifecycle and recovery archive is
-stored under
-`benchmarks/speculative_v2/evidence/2026-08-28-a100-v2-d87f168/`. Dirty-worktree
-and pre-commit A100 runs remain exploratory and cannot be retained, renamed, or
-used as release evidence. V3's draft proposal/discard implementation is currently
-an uncertified change set on `feat/spec-v2-draft-path`. It now
-includes its draft-only route registry, constructor pretouch, fail-closed runtime
-admission, bounded/pruned route construction, and transaction/cancellation
-fences. Dirty-worktree A100 route-gate, eager/graph cache-neutrality, and
-speculation-off/on output-control runs have produced positive exploratory
-results, but no clean-SHA V3 A100 archive exists. This status is not a completion
-claim. Target verification, burst commit, and speculative streaming do not exist
-yet.
+retained-certified on A100; and V3 is narrowly retained-certified for
+draft-discard execution**. V2's immutable lifecycle archive remains under
+`benchmarks/speculative_v2/evidence/2026-08-28-a100-v2-d87f168/`.
+
+V3 runtime commit `7fec9993d5e4e0e06fec22e3973dfc203fdbd2d8` and
+evidence-harness commit `e8e0452f99727958077b51f340a5375a090e6884` contain the
+same `nanovllm` subtree `52398af379f767708a0b804646f4b490fa8323ad`. The clean-SHA
+A100 archive is under
+`benchmarks/speculative_v3/evidence/2026-08-28-a100-v3-e8e0452/`. It certifies
+transactional catch-up/proposal/discard, every registered finite draft-only
+route in the retained K=2, batch-cap=4 configuration, guarded draft-window
+compiler/RNG/context neutrality, the registered
+draft-KV fill comparisons, and authoritative target output/RNG parity for
+speculation off versus discard on. It does not certify target verification,
+acceptance/rejection, bonus or burst commit, speculative streaming/metrics,
+performance, TP>1, FlashInfer, or heterogeneous target/draft models. Aggregate
+compiler state outside guarded draft intervals is not claimed unchanged.
 
 Base: `origin/fork-main` at `663753b`.
 
@@ -149,25 +153,35 @@ request's licensed range. Before each speculative cycle, derive a batch-wide
 `effective_k`:
 
 ```text
-effective_k = min(
-    configured_k,
-    minimum (remaining completion-token budget - 1) in the selected batch,
-    minimum target model-position headroom in the selected batch,
-    floor(max_num_batched_tokens / selected batch size) - 1,
-)
+B = selected batch size
+C = draft catch-up model positions for the selected batch
+M = max_num_batched_tokens
+
+K_completion = min_i(max(remaining_completion_tokens_i - 1, 0))
+K_position   = min_i(max(target_model_position_headroom_i, 0))
+K_verifier   = max(floor(M / B) - 1, 0)
+K_aggregate  = max(floor((M - C - B) / (2*B)), 0)
+
+effective_k = min(configured_k,
+                  K_completion,
+                  K_position,
+                  K_verifier,
+                  K_aggregate,
+                  workspace_and_route_cap)
 ```
 
-For v1, use one `effective_k` for the whole speculative group. This intentionally
-trades a small amount of tail efficiency for simpler shapes, reservations,
-acceptance logic, and proofs. `effective_k == 0` routes through ordinary decode.
-The two `- 1` terms reserve different required headroom: one completion slot for
-the bonus token and one target-work slot because verification feeds the previous
-committed token plus `effective_k` drafts. Thus a fully accepted cycle may emit
-`effective_k + 1` tokens while its verification row still contains exactly
-`effective_k + 1` model inputs. The model-position term bounds those verification
-inputs; the bonus itself is the new unprocessed last token and is processed by a
-later cycle only if generation continues. EOS remains unknowable before
-verification. During commit, stop at the first EOS if and only if
+Use one `effective_k` for the whole speculative group. This intentionally trades
+a small amount of tail efficiency for simpler shapes, reservations, acceptance
+logic, and proofs. `effective_k == 0` routes through ordinary decode. The
+completion `- 1` reserves one output slot for the all-accepted bonus;
+`K_verifier` separately records that target verification consumes `B*(K+1)`
+inputs. `K_aggregate` accounts for all planned full-cycle model work:
+`C + B*K + B*(K+1)`. Thus a fully accepted cycle may emit `effective_k + 1`
+tokens while its verification row contains exactly `effective_k + 1` model
+inputs. The model-position term bounds those verification positions; the bonus
+itself is the new unprocessed last token and is processed by a later cycle only
+if generation continues. EOS remains unknowable before verification. During
+commit, stop at the first EOS if and only if
 `ignore_eos` is false. With `ignore_eos=true`, EOS is an ordinary committed
 token and the token-level finish predicate continues only until `max_tokens`.
 Cancellation and errors remain separate lifecycle paths, not token finish
@@ -184,10 +198,33 @@ plan must explicitly record:
 - `effective_k`;
 - target verification-token count;
 - draft-step token counts;
-- predicted `W_spec_live_peak`, `W_spec_reservation`, and machine-readable
-  `route_key`;
-- transient KV-block reservations;
+- draft-catch-up and aggregate cycle-work counts;
+- `modeled_live_peak_bytes`, `reservation_bytes`, the certification state, and
+  machine-readable `route_key`/workspace fingerprint;
+- transient KV-block reservation geometry, but never the scheduler-private live
+  reservation object;
 - baseline fallback decision and reason.
+
+V4 preserves V3's conservative work-budget interpretation while adding the
+independent verifier input bound. For batch `B`, common K, catch-up work `C`, and
+configured limit `M`:
+
+```text
+draft_query_tokens = B*K
+target_query_tokens = B*(K+1) <= M
+total_model_positions = C + B*K + B*(K+1) <= M
+K_budget = max(floor((M - C - B) / (2B)), 0)
+```
+
+This is the conservative **planned full-V5 cycle geometry** used for V4
+admission, route selection, and fairness—not a claim that V4 executes every
+position. V4 shadow execution actually performs `C + B*K` draft positions and
+the ordinary target path's `B` positions, then discards the speculative work.
+It nevertheless reserves and certifies the later verifier geometry now so V5
+cannot silently widen an already-admitted plan. The explicit verifier bound is
+also retained for input buffers and graph tiers. V7 may relax the aggregate
+rule only after separate-buffer and fairness measurements justify distinct
+safety and work budgets.
 
 For correctness-first v1, proposal probabilities are retained as FP32
 `q[B,K,V]` and verifier probabilities are materialized as FP32
@@ -236,7 +273,11 @@ proposal/verification tensors and therefore intentionally reports
 `gpu_certified=false`. Activation/library workspace, graph-static workspace,
 backend-internal selection/sort workspace, and allocator fragmentation remain
 named unresolved audit components. Actual per-route allocated/reserved peak
-reconciliation is a V3/V5/V7 gate once the corresponding runtime owners exist.
+reconciliation for the complete live set is a V5/V7 gate once verifier,
+acceptance, correction, and bonus owners exist. V3 measures only its draft-path
+pretouch envelope. V4 propagates an exact-geometry modeled certificate with
+`gpu_certified=false`; it cannot rename that model as actual
+`W_spec_live_peak`.
 
 For V2 joint KV sizing, one logical block costs the target block bytes plus the
 draft block bytes. Graph construction reserves the profiled capture peak plus
@@ -271,15 +312,27 @@ A target prefix-cache hit is not evidence that the corresponding draft cache is
 valid. Draft coverage must be tracked independently and reset whenever block
 identity may change, including preemption and deallocation/reuse.
 
-Speculative allocation is a transaction:
+To preserve the established decode-first/FIFO/preemption scheduler, V4 uses an
+explicit planning/reservation shadow transaction rather than silently replacing
+it with a second scheduler simulation:
 
-1. choose a plan;
-2. reserve only the additional blocks required by that plan;
-3. propose and verify;
-4. commit only accepted/corrective tokens;
-5. hash only committed complete blocks;
-6. trim unused trailing reservations safely;
-7. clear all transient state.
+1. execute the existing baseline schedule and immediately capture its exact
+   decode-append rollback record;
+2. promote only a resulting pure-decode batch to a primitive-only plan;
+3. reserve only the additional blocks required by that plan, with the live lease
+   retained solely by the scheduler;
+4. execute the existing draft proposal path in compute-then-discard mode;
+5. validate its host result, roll back every additional speculative block, and
+   clear transient state; and
+6. execute the ordinary one-token target path as the sole commit authority.
+
+V5 extends the proven V4 plan and scheduler-private lease into the full
+speculative transaction: propose, verify, prepare every row's accepted /
+corrective result, atomically finalize the required physical block prefixes and
+logical sequence/cache changes, hash only complete committed target blocks after
+the lease fence is released, and publish events. The V5 design must retain an
+undo record until finalization, hashing, and event assembly can no longer fail;
+V4's synthetic physical finalizer alone is not an atomic multi-token commit.
 
 Any exception after step 2 must roll back reservations and transient proposal
 state without hiding the primary exception. Rejected drafts must never enter
@@ -354,7 +407,8 @@ Each key records the actual nano-vLLM graph families rather than only a prose
 - acceptance `[B,K]`, corrective residual `[B,V]`, and bonus `[B,V]` paths;
 - each supported eager/graph mode and `(B,K)` bucket family.
 
-The current V3 implementation realizes the draft-only subset as the
+Runtime commit `7fec9993d5e4e0e06fec22e3973dfc203fdbd2d8` realizes the
+draft-only subset as the
 versioned `draft-discard-v1` registry. Its key is
 `(execution_mode, batch_bucket, effective_k, catchup_family,
 exact_sampler_envelope)` and its workspace certificate is fingerprinted to the
@@ -462,7 +516,7 @@ Recommended branch ladder from `origin/fork-main@663753b`:
 | V0 | `docs/speculative-decoding-v2` | Frozen plan and PR7 provenance only |
 | V1 | `feat/spec-v2-sampling-law` | CPU oracle plus current exact-sampler distribution seam |
 | V2 | `feat/spec-v2-dual-runner` | Inert typed config and transactional draft lifecycle/KV sizing |
-| V3 | `feat/spec-v2-draft-path` | Draft catch-up, a minimal discard plan/reservation, and compute-then-discard |
+| V3 | `feat/spec-v2-draft-path` | Implemented and narrowly retained-certified: draft catch-up, a minimal discard plan/reservation, and compute-then-discard |
 | V4 | `feat/spec-v2-scheduler-plan` | Generalized verification planning and transactional reservation |
 | V5 | `feat/spec-v2-verify-commit` | Target verification, rejection sampling, burst commit |
 | V6 | `feat/spec-v2-stream-lifecycle` | Streaming, metrics, cancel/finalizer, failure certification |
@@ -607,7 +661,7 @@ Hard gates:
 
 ### V3: draft path, compute then discard
 
-Implemented in the current V3 change set:
+Implemented at runtime commit `7fec9993d5e4e0e06fec22e3973dfc203fdbd2d8`:
 
 - track draft-cache coverage independently;
 - introduce the minimum immutable discard plan needed to derive a safe common
@@ -615,7 +669,8 @@ Implemented in the current V3 change set:
 - reserve only the extra draft-write blocks through proposal input position
   `committed_length + effective_k - 2`, as an all-or-nothing scheduler-owned
   transaction, and release them before ordinary target decode; this private V3
-  transaction is generalized for target verification and commit in V4;
+  transaction is generalized in V4 into planning/reservation/finalization
+  primitives for later V5 target verification and commit;
 - catch up the draft cache for cold, prefix-hit, mixed-history, and preempted
   sequences;
 - charge every catch-up position plus `B*K` proposal positions and the ordinary
@@ -670,59 +725,48 @@ Implemented in the current V3 change set:
   during speculation-enabled construction and broke off/on identity parity;
 - discard every proposal and execute ordinary target decode.
 
-Validation status at the current worktree:
+Retained V3 evidence status:
 
-- CPU control-plane, allocator fault-injection, route-registry, engine-ordering,
-  direct-q, and runner tests exist, together with a fresh-process A100 route
-  compile harness;
-- available dirty-worktree A100 route artifacts at configured K=2 and batch cap
-  4 visited 4/4 eager keys in 8 records and 12/12 graph keys in 24 records. They
-  observed empty compiler deltas, unchanged aggregate compiler state, stable
-  post-init CUDA-graph ledgers (0/0 eager and 20/20 graph contexts/objects), RNG
-  neutrality, reset attention context, and CUDA-free host results. Recorded
-  pretouch allocation peaks were 41,995,264 bytes eager and 41,970,688 bytes
-  graph;
-- paired dirty-worktree eager and graph cache-neutrality runs filled every
-  reserved draft slot with zeros versus NaNs. In each mode the block-boundary
-  positions 255/256/257 and shared-prefix scenario had equal host oracles, and
-  all nine full-vocabulary `[1,151936]` BF16 logits tensors and their FP32
-  probability rows were bitwise equal (maximum absolute and relative difference
-  zero);
-- fresh dirty-worktree eager and graph output-control pairs used sampled
-  `temperature=0.8`, `top_k=8`, and `top_p=0.9`. Speculation off/on matched exact
-  public sequence IDs, authoritative target events and tokens, and CPU/CUDA RNG
-  hashes at all four checkpoints (post-init, post-prefill, first target decode,
-  and repeated target decode). Off entered zero of the five instrumented draft
-  constructor phases, owned no draft/speculative runner attributes or resources,
-  and executed zero runtime draft intervals; on executed two real RNG-neutral V3
-  intervals, first cold with catch-up and then warm without catch-up; and
-- these exploratory runs came from a dirty worktree, so none can be promoted
-  into a SHA-bound certificate. Fresh eager and graph replay from the final clean SHA,
-  full regression, block/prefix/preemption coverage, memory reconciliation, and
-  retained manifest validation remain required before V3 may be called
-  certified.
+- the versioned archive binds runtime commit `7fec999`, harness commit `e8e0452`,
+  their shared `nanovllm` subtree, the complete target/draft model identity, the
+  A100 and software environment, every producer/comparator source blob, and the
+  exact 21 raw/comparison/validation artifacts;
+- at configured K=2 and batch cap 4, the route cells visit 4/4 eager and 12/12
+  graph registry keys in 32 guarded intervals per mode. Every interval has
+  unchanged compiler/RNG/context snapshots and a strict empty marked log region.
+  Post-init CUDA-graph ledgers remain 0/0 eager and 18/18 graph; recorded
+  pretouch peaks are 41,995,264 and 41,970,688 bytes respectively;
+- paired eager and graph cache cells initialize every reserved draft slot with
+  zeros versus NaNs after the same declared neutral first-use warmup. In each
+  mode, all nine 255/256/257 and cold/prefix-hit shared-prefix
+  `[1,151936]` BF16 logits and FP32 probability rows are bitwise equal, with
+  maximum absolute difference zero and equal host oracles;
+- fresh eager and graph output-control pairs use `temperature=0.8`, `top_k=8`,
+  and `top_p=0.9`. Off/on have exact public IDs, authoritative target events and
+  tokens, and CPU/CUDA RNG hashes at post-init, post-prefill, first target decode,
+  and repeated target decode. Off owns no draft resources and executes zero
+  draft intervals; on executes one cold and one warm real V3 interval; and
+- the clean harness commit passes the complete CPU suite (812 passed, 31
+  skipped). The retained archive is intentionally narrower than that regression
+  result and does not convert every CPU-only case into an A100 certificate.
 
-Hard gates:
+Green gates in the narrow retained certificate:
 
-- speculation enabled in discard mode produces the same baseline output and
-  stream events under deterministic, non-tied fixtures;
-- draft logits/tokens are nontrivial and proposal-count/draft-position
-  diagnostics are sane; V3 must not label any statistic an acceptance rate;
-- a tensor-lifetime test proves the retained-q write contract and rejects any
-  implementation whose peak includes an unpriced result row or second q stack;
-- boundary cases around block positions 255/256/257 and multi-block K pass;
-- cold versus shared-prefix versus block-reuse draft cache results agree within
-  the registered numerical contract;
-- preemption clears/rebuilds draft coverage correctly;
-- injected draft catch-up/proposal failures clear ephemeral state and leave the
-  engine reusable or cleanly closable;
-- with the empty-cache protocol from §2.7, the first eligible discard-mode cycle
-  for every admitted draft key produces no new compile, unique graph, graph
-  break, recompile, guard miss, or graph capture after initialization;
-- no PR8 field is added to the TP DTO unless a worker actually needs it;
-- all current chunked-prefill, prefix-cache, scheduler-cancel, streaming, and
-  lifecycle tests pass with speculation off and relevant tests with discard mode
-  on.
+- every registered finite eager/graph draft-only route for the retained
+  configuration is exercised twice across cold and zero-catch-up families;
+- draft-KV fill cannot affect the registered boundary/shared-prefix logits or
+  probabilities; and
+- speculation off/on preserves authoritative target output and registered RNG
+  checkpoints while the on side executes non-vacuous draft work.
+
+Green local controls outside the retained A100 claim include direct-q tensor
+lifetime/accounting tests, allocator and runner fault injection, preemption and
+cancel rollback tests, TP DTO non-expansion, Python 3.10 compatibility checks,
+and the existing chunked-prefill, prefix-cache, streaming, and lifecycle suite.
+Broader GPU preemption/block-reuse matrices, routed runtime memory
+reconciliation, target verification, rejection/bonus behavior, burst commit,
+and end-to-end speculative streaming/performance remain later-rung gates; the
+narrow V3 certificate must not be described as covering them.
 
 The A100 compile-completeness gate uses
 `tests/run_speculative_v3_route_compile.py` in separate eager and graph processes
@@ -733,11 +777,11 @@ paged-catch-up and zero-catch-up families. `fail_on_recompile` guards each draft
 interval, across which compiler counters/manifests, guard failures, graph-break
 reasons, RNG hashes, attention-context state, and host-only result ownership must
 remain unchanged. The CUDA-graph construction ledger must remain unchanged for
-the complete post-initialization run. The dirty-tree results summarized above
-passed the route protocol for their then-current source and limited K=2,
-batch-cap=4 matrix. They are not a substitute for rerunning the final source from
-a clean commit and retaining a validated archive; no retained V3 A100 artifact
-exists yet.
+the complete post-initialization run. The clean retained cells satisfy this
+protocol for every registered finite key in their K=2, batch-cap=4 matrix. The
+offline validator intentionally recomputes, but does not require equality of,
+the aggregate post-init/runtime compiler snapshots: only the explicitly marked
+draft intervals support the compiler-neutrality claim.
 
 The output-control gate uses `tests/run_speculative_v3_output_control.py` in four
 fresh processes—off/on for eager and off/on for graph—and compares each mode with
@@ -745,26 +789,34 @@ fresh processes—off/on for eager and off/on for graph—and compares each mode
 ledger covers draft construction, draft warmup, draft graph capture, draft eager
 prefill pretouch, and draft route pretouch. Exact sequence IDs are part of the
 authoritative events and per-sequence token map; exact RNG comparison includes
-both CPU and CUDA state at every registered checkpoint. The current dirty-tree
-passes validate the protocol during development, but the final clean V3 SHA must
-repeat it before the results can enter retained evidence.
+both CPU and CUDA state at every registered checkpoint. The clean retained pairs
+pass this protocol. The graph cache-neutrality and output-control runs emitted a
+Dynamo recompile-limit warning outside the route-proof windows, so those cells
+support their stated numerical and output oracles only and do not independently
+extend the guarded compiler claim.
 
 ### V4: scheduler plan and reservations
 
 Changes:
 
 - generalize V3's private discard plan into the explicit speculative step plan
-  consumed by target verification and commit;
+  that V5 target verification and commit will consume; keep V4 execution in
+  compute-then-discard shadow mode;
 - retain and extend V3's batch-wide `effective_k` derivation from completion,
   model-position, token-budget, workspace, and writable-position limits;
 - reserve completion and target-work headroom for the full-acceptance bonus;
-- enforce the configured verification-token budget;
-- compute and record `W_spec_live_peak` and `W_spec_reservation` for the exact
-  machine-readable `route_key`, and reject the
-  speculative plan before tensor/block allocation when reserved headroom is
-  insufficient;
-- generalize V3's temporary draft-write reservation to cover verifier writes,
-  accepted/corrective commit, and refcount-safe trailing trim;
+- enforce both `B*(K+1)` verifier input capacity and the conservative aggregate
+  `catchup + B*K + B*(K+1)` cycle-work budget;
+- compute and record exact-geometry `modeled_live_peak_bytes`,
+  `reservation_bytes`, route key, and workspace fingerprint with
+  `gpu_certified=false`; reject an ineligible plan before speculative
+  tensor/block allocation, without claiming a measured V5 live peak;
+- keep the immutable primitive-only runner plan separate from the
+  scheduler-private reservation and baseline rollback records;
+- generalize V3's temporary draft-write reservation to reserve geometry for
+  later verifier writes,
+  and add group-atomic, refcount-safe prefix retention/trailing trim primitives
+  for later accepted/corrective commit;
 - define deterministic whole-selected-batch baseline fallback; explicitly defer
   speculative subgrouping and microbatching to a measured V7-or-later extension.
 
@@ -773,22 +825,28 @@ Hard gates:
 - property sweep over prompt length, `max_tokens`, configured K, block size,
   model limit, pool size, batch size, and mixed waiting/running queues;
 - no planned target position exceeds `max_model_len - 1`;
-- a rejection cycle emits at most `effective_k` accepted/corrective tokens and a
-  full-acceptance cycle emits exactly `effective_k + 1`, without exceeding the
-  request's remaining completion budget;
-- plan work never exceeds `max_num_batched_tokens` or allocated input buffers;
-- the maximum eligible workspace case completes without OOM, while the first
+- every plan records exact draft, verifier, catch-up, and aggregate counts; both
+  verifier and aggregate bounds stay within `max_num_batched_tokens`;
+- remaining completion and model-position headroom reserve K+1 output capacity
+  and planned target writes through `L+K-1`, without emitting a burst in V4;
+- the largest modeled eligible certificate is admitted and the first
   one-above-cap case routes the whole selected batch through baseline before any
-  speculative allocation and preserves scheduler order/RNG contracts;
-- adversarial heterogeneous active-row compositions cover the largest exact
-  top-k/top-p index/select/copy/sort workspace, and every router-admitted key is
-  present in the workspace-certified registry;
-- failed reservations restore exact free-block counts/refcounts/tables;
-- partial rejection and tail cycles trim unused trailing blocks;
+  speculative allocation while preserving scheduler order/RNG contracts;
+- every router-admitted planning key has the exact modeled certificate and the
+  runner independently revalidates its bytes and fingerprint;
+- failed reservations restore exact free-list order, used membership, refcounts,
+  block metadata/tables/hashes, and both cache coverages;
+- synthetic finalization retains all, some, or none of each row's appended
+  suffix atomically, while shared/prefix-hashed blocks remain untouched;
 - the current `mid_chunk_seq`, decode-first, FIFO, bounded-capacity, preemption,
   and targeted-cancel suites stay green;
 - repeated speculative boundary cycles do not leak capacity;
-- speculation-off scheduler traces remain unchanged.
+- speculation-off scheduler traces remain unchanged; and
+- V4 shadow execution preserves V3's authoritative target output/RNG control.
+
+Real rejection/full-acceptance emission, acceptance-driven trim, actual
+maximum-workspace execution, heterogeneous sampler CUDA peaks, and allocated /
+reserved memory reconciliation are V5/V7 gates, not V4 gates.
 
 ### V5: verify, accept, and commit
 
@@ -805,7 +863,10 @@ Changes:
 - first gate an isolated no-bonus intermediate commit if useful, then sample and
   commit the standard target bonus when every draft is accepted; the no-bonus
   checkpoint is not a complete v1;
-- append, hash, account, trim, and clear state in the proved order.
+- atomically finalize retained physical prefixes and logical token/cache state,
+  release the lease fence, hash complete committed target blocks while the undo
+  record remains live, account and publish events, then clear undo/transient
+  state.
 
 Hard gates:
 

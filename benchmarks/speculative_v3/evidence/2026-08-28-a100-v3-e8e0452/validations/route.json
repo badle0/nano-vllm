@@ -1,0 +1,1210 @@
+{
+  "all_draft_intervals_compiler_state_unchanged": true,
+  "all_routes_complete": true,
+  "all_stderr_intervals_strict_and_empty": true,
+  "artifact_descriptors": {
+    "eager": {
+      "path": "route-eager/result.json",
+      "sha256": "c02cc201dce99918e465bb8aa7be483192d012318afdaba5318a3f74463ded33",
+      "size_bytes": 326198
+    },
+    "graph": {
+      "path": "route-graph-retry/result.json",
+      "sha256": "53fb2fbce216168c13847a8ffaef65c96f37d2c887133d862e5293ab9bf95225",
+      "size_bytes": 367425
+    }
+  },
+  "capture_ledger_stable": true,
+  "log_descriptors": {
+    "eager": {
+      "path": "route-eager/stderr.log",
+      "sha256": "3b4d002a239e3080f203d5beaaf80ec7f9b51c26341a07c396168b65a6f9418a",
+      "size_bytes": 19962
+    },
+    "graph": {
+      "path": "route-graph-retry/stderr.log",
+      "sha256": "76f3c08f0d187f89571715c5fb015e94a1ba9499bbdf4142ffac1ab4b750a22f",
+      "size_bytes": 32369
+    }
+  },
+  "log_validations": {
+    "eager": {
+      "draft_interval_output_empty": true,
+      "interval_count": 32,
+      "intervals": [
+        {
+          "begin_line": 73,
+          "end_line": 74,
+          "label": "run=a50796e961994256a8305dd22bbab2c2,record=0,batch=1,bucket=4,k=1,catchup=4"
+        },
+        {
+          "begin_line": 75,
+          "end_line": 76,
+          "label": "run=a50796e961994256a8305dd22bbab2c2,record=1,batch=1,bucket=4,k=1,catchup=0"
+        },
+        {
+          "begin_line": 77,
+          "end_line": 78,
+          "label": "run=a50796e961994256a8305dd22bbab2c2,record=2,batch=1,bucket=4,k=1,catchup=4"
+        },
+        {
+          "begin_line": 79,
+          "end_line": 80,
+          "label": "run=a50796e961994256a8305dd22bbab2c2,record=3,batch=1,bucket=4,k=1,catchup=0"
+        },
+        {
+          "begin_line": 81,
+          "end_line": 82,
+          "label": "run=a50796e961994256a8305dd22bbab2c2,record=4,batch=1,bucket=4,k=2,catchup=4"
+        },
+        {
+          "begin_line": 83,
+          "end_line": 84,
+          "label": "run=a50796e961994256a8305dd22bbab2c2,record=5,batch=1,bucket=4,k=2,catchup=0"
+        },
+        {
+          "begin_line": 85,
+          "end_line": 86,
+          "label": "run=a50796e961994256a8305dd22bbab2c2,record=6,batch=1,bucket=4,k=2,catchup=4"
+        },
+        {
+          "begin_line": 87,
+          "end_line": 88,
+          "label": "run=a50796e961994256a8305dd22bbab2c2,record=7,batch=1,bucket=4,k=2,catchup=0"
+        },
+        {
+          "begin_line": 95,
+          "end_line": 96,
+          "label": "run=a50796e961994256a8305dd22bbab2c2,record=8,batch=2,bucket=4,k=1,catchup=8"
+        },
+        {
+          "begin_line": 97,
+          "end_line": 98,
+          "label": "run=a50796e961994256a8305dd22bbab2c2,record=9,batch=2,bucket=4,k=1,catchup=0"
+        },
+        {
+          "begin_line": 99,
+          "end_line": 100,
+          "label": "run=a50796e961994256a8305dd22bbab2c2,record=10,batch=2,bucket=4,k=1,catchup=8"
+        },
+        {
+          "begin_line": 101,
+          "end_line": 102,
+          "label": "run=a50796e961994256a8305dd22bbab2c2,record=11,batch=2,bucket=4,k=1,catchup=0"
+        },
+        {
+          "begin_line": 103,
+          "end_line": 104,
+          "label": "run=a50796e961994256a8305dd22bbab2c2,record=12,batch=2,bucket=4,k=2,catchup=8"
+        },
+        {
+          "begin_line": 105,
+          "end_line": 106,
+          "label": "run=a50796e961994256a8305dd22bbab2c2,record=13,batch=2,bucket=4,k=2,catchup=0"
+        },
+        {
+          "begin_line": 107,
+          "end_line": 108,
+          "label": "run=a50796e961994256a8305dd22bbab2c2,record=14,batch=2,bucket=4,k=2,catchup=8"
+        },
+        {
+          "begin_line": 109,
+          "end_line": 110,
+          "label": "run=a50796e961994256a8305dd22bbab2c2,record=15,batch=2,bucket=4,k=2,catchup=0"
+        },
+        {
+          "begin_line": 111,
+          "end_line": 112,
+          "label": "run=a50796e961994256a8305dd22bbab2c2,record=16,batch=3,bucket=4,k=1,catchup=12"
+        },
+        {
+          "begin_line": 113,
+          "end_line": 114,
+          "label": "run=a50796e961994256a8305dd22bbab2c2,record=17,batch=3,bucket=4,k=1,catchup=0"
+        },
+        {
+          "begin_line": 115,
+          "end_line": 116,
+          "label": "run=a50796e961994256a8305dd22bbab2c2,record=18,batch=3,bucket=4,k=1,catchup=12"
+        },
+        {
+          "begin_line": 117,
+          "end_line": 118,
+          "label": "run=a50796e961994256a8305dd22bbab2c2,record=19,batch=3,bucket=4,k=1,catchup=0"
+        },
+        {
+          "begin_line": 119,
+          "end_line": 120,
+          "label": "run=a50796e961994256a8305dd22bbab2c2,record=20,batch=3,bucket=4,k=2,catchup=12"
+        },
+        {
+          "begin_line": 121,
+          "end_line": 122,
+          "label": "run=a50796e961994256a8305dd22bbab2c2,record=21,batch=3,bucket=4,k=2,catchup=0"
+        },
+        {
+          "begin_line": 123,
+          "end_line": 124,
+          "label": "run=a50796e961994256a8305dd22bbab2c2,record=22,batch=3,bucket=4,k=2,catchup=12"
+        },
+        {
+          "begin_line": 125,
+          "end_line": 126,
+          "label": "run=a50796e961994256a8305dd22bbab2c2,record=23,batch=3,bucket=4,k=2,catchup=0"
+        },
+        {
+          "begin_line": 127,
+          "end_line": 128,
+          "label": "run=a50796e961994256a8305dd22bbab2c2,record=24,batch=4,bucket=4,k=1,catchup=16"
+        },
+        {
+          "begin_line": 129,
+          "end_line": 130,
+          "label": "run=a50796e961994256a8305dd22bbab2c2,record=25,batch=4,bucket=4,k=1,catchup=0"
+        },
+        {
+          "begin_line": 131,
+          "end_line": 132,
+          "label": "run=a50796e961994256a8305dd22bbab2c2,record=26,batch=4,bucket=4,k=1,catchup=16"
+        },
+        {
+          "begin_line": 133,
+          "end_line": 134,
+          "label": "run=a50796e961994256a8305dd22bbab2c2,record=27,batch=4,bucket=4,k=1,catchup=0"
+        },
+        {
+          "begin_line": 135,
+          "end_line": 136,
+          "label": "run=a50796e961994256a8305dd22bbab2c2,record=28,batch=4,bucket=4,k=2,catchup=16"
+        },
+        {
+          "begin_line": 137,
+          "end_line": 138,
+          "label": "run=a50796e961994256a8305dd22bbab2c2,record=29,batch=4,bucket=4,k=2,catchup=0"
+        },
+        {
+          "begin_line": 139,
+          "end_line": 140,
+          "label": "run=a50796e961994256a8305dd22bbab2c2,record=30,batch=4,bucket=4,k=2,catchup=16"
+        },
+        {
+          "begin_line": 141,
+          "end_line": 142,
+          "label": "run=a50796e961994256a8305dd22bbab2c2,record=31,batch=4,bucket=4,k=2,catchup=0"
+        }
+      ],
+      "marker_count": 64,
+      "record_order_exact": true,
+      "strict_nonnested_pairs": true
+    },
+    "graph": {
+      "draft_interval_output_empty": true,
+      "interval_count": 32,
+      "intervals": [
+        {
+          "begin_line": 134,
+          "end_line": 135,
+          "label": "run=265d269fcca24baf933b6c60b399b844,record=0,batch=1,bucket=1,k=1,catchup=4"
+        },
+        {
+          "begin_line": 136,
+          "end_line": 137,
+          "label": "run=265d269fcca24baf933b6c60b399b844,record=1,batch=1,bucket=1,k=1,catchup=0"
+        },
+        {
+          "begin_line": 138,
+          "end_line": 139,
+          "label": "run=265d269fcca24baf933b6c60b399b844,record=2,batch=1,bucket=1,k=1,catchup=4"
+        },
+        {
+          "begin_line": 140,
+          "end_line": 141,
+          "label": "run=265d269fcca24baf933b6c60b399b844,record=3,batch=1,bucket=1,k=1,catchup=0"
+        },
+        {
+          "begin_line": 142,
+          "end_line": 143,
+          "label": "run=265d269fcca24baf933b6c60b399b844,record=4,batch=1,bucket=1,k=2,catchup=4"
+        },
+        {
+          "begin_line": 144,
+          "end_line": 145,
+          "label": "run=265d269fcca24baf933b6c60b399b844,record=5,batch=1,bucket=1,k=2,catchup=0"
+        },
+        {
+          "begin_line": 146,
+          "end_line": 147,
+          "label": "run=265d269fcca24baf933b6c60b399b844,record=6,batch=1,bucket=1,k=2,catchup=4"
+        },
+        {
+          "begin_line": 148,
+          "end_line": 149,
+          "label": "run=265d269fcca24baf933b6c60b399b844,record=7,batch=1,bucket=1,k=2,catchup=0"
+        },
+        {
+          "begin_line": 156,
+          "end_line": 157,
+          "label": "run=265d269fcca24baf933b6c60b399b844,record=8,batch=2,bucket=2,k=1,catchup=8"
+        },
+        {
+          "begin_line": 158,
+          "end_line": 159,
+          "label": "run=265d269fcca24baf933b6c60b399b844,record=9,batch=2,bucket=2,k=1,catchup=0"
+        },
+        {
+          "begin_line": 160,
+          "end_line": 161,
+          "label": "run=265d269fcca24baf933b6c60b399b844,record=10,batch=2,bucket=2,k=1,catchup=8"
+        },
+        {
+          "begin_line": 162,
+          "end_line": 163,
+          "label": "run=265d269fcca24baf933b6c60b399b844,record=11,batch=2,bucket=2,k=1,catchup=0"
+        },
+        {
+          "begin_line": 164,
+          "end_line": 165,
+          "label": "run=265d269fcca24baf933b6c60b399b844,record=12,batch=2,bucket=2,k=2,catchup=8"
+        },
+        {
+          "begin_line": 166,
+          "end_line": 167,
+          "label": "run=265d269fcca24baf933b6c60b399b844,record=13,batch=2,bucket=2,k=2,catchup=0"
+        },
+        {
+          "begin_line": 168,
+          "end_line": 169,
+          "label": "run=265d269fcca24baf933b6c60b399b844,record=14,batch=2,bucket=2,k=2,catchup=8"
+        },
+        {
+          "begin_line": 170,
+          "end_line": 171,
+          "label": "run=265d269fcca24baf933b6c60b399b844,record=15,batch=2,bucket=2,k=2,catchup=0"
+        },
+        {
+          "begin_line": 172,
+          "end_line": 173,
+          "label": "run=265d269fcca24baf933b6c60b399b844,record=16,batch=3,bucket=4,k=1,catchup=12"
+        },
+        {
+          "begin_line": 174,
+          "end_line": 175,
+          "label": "run=265d269fcca24baf933b6c60b399b844,record=17,batch=3,bucket=4,k=1,catchup=0"
+        },
+        {
+          "begin_line": 176,
+          "end_line": 177,
+          "label": "run=265d269fcca24baf933b6c60b399b844,record=18,batch=3,bucket=4,k=1,catchup=12"
+        },
+        {
+          "begin_line": 178,
+          "end_line": 179,
+          "label": "run=265d269fcca24baf933b6c60b399b844,record=19,batch=3,bucket=4,k=1,catchup=0"
+        },
+        {
+          "begin_line": 180,
+          "end_line": 181,
+          "label": "run=265d269fcca24baf933b6c60b399b844,record=20,batch=3,bucket=4,k=2,catchup=12"
+        },
+        {
+          "begin_line": 182,
+          "end_line": 183,
+          "label": "run=265d269fcca24baf933b6c60b399b844,record=21,batch=3,bucket=4,k=2,catchup=0"
+        },
+        {
+          "begin_line": 184,
+          "end_line": 185,
+          "label": "run=265d269fcca24baf933b6c60b399b844,record=22,batch=3,bucket=4,k=2,catchup=12"
+        },
+        {
+          "begin_line": 186,
+          "end_line": 187,
+          "label": "run=265d269fcca24baf933b6c60b399b844,record=23,batch=3,bucket=4,k=2,catchup=0"
+        },
+        {
+          "begin_line": 188,
+          "end_line": 189,
+          "label": "run=265d269fcca24baf933b6c60b399b844,record=24,batch=4,bucket=4,k=1,catchup=16"
+        },
+        {
+          "begin_line": 190,
+          "end_line": 191,
+          "label": "run=265d269fcca24baf933b6c60b399b844,record=25,batch=4,bucket=4,k=1,catchup=0"
+        },
+        {
+          "begin_line": 192,
+          "end_line": 193,
+          "label": "run=265d269fcca24baf933b6c60b399b844,record=26,batch=4,bucket=4,k=1,catchup=16"
+        },
+        {
+          "begin_line": 194,
+          "end_line": 195,
+          "label": "run=265d269fcca24baf933b6c60b399b844,record=27,batch=4,bucket=4,k=1,catchup=0"
+        },
+        {
+          "begin_line": 196,
+          "end_line": 197,
+          "label": "run=265d269fcca24baf933b6c60b399b844,record=28,batch=4,bucket=4,k=2,catchup=16"
+        },
+        {
+          "begin_line": 198,
+          "end_line": 199,
+          "label": "run=265d269fcca24baf933b6c60b399b844,record=29,batch=4,bucket=4,k=2,catchup=0"
+        },
+        {
+          "begin_line": 200,
+          "end_line": 201,
+          "label": "run=265d269fcca24baf933b6c60b399b844,record=30,batch=4,bucket=4,k=2,catchup=16"
+        },
+        {
+          "begin_line": 202,
+          "end_line": 203,
+          "label": "run=265d269fcca24baf933b6c60b399b844,record=31,batch=4,bucket=4,k=2,catchup=0"
+        }
+      ],
+      "marker_count": 64,
+      "record_order_exact": true,
+      "strict_nonnested_pairs": true
+    }
+  },
+  "producer_provenance": {
+    "eager": {
+      "environment": {
+        "hardware": {
+          "cuda_available": true,
+          "device_count": 1,
+          "devices": [
+            {
+              "compute_capability": [
+                8,
+                0
+              ],
+              "index": 0,
+              "name": "NVIDIA A100-SXM4-40GB",
+              "total_memory_bytes": 42406903808,
+              "uuid": "773e0633-edb0-6c38-1d2b-d232f9109126"
+            }
+          ],
+          "nvidia_smi": "0, GPU-773e0633-edb0-6c38-1d2b-d232f9109126, NVIDIA A100-SXM4-40GB, 570.133.20, 40960"
+        },
+        "selected_environment": {
+          "CUDA_VISIBLE_DEVICES": "0",
+          "PYTHONDONTWRITEBYTECODE": "1",
+          "PYTHONPATH": ".",
+          "TORCHDYNAMO_DISABLE": "0",
+          "TORCHDYNAMO_SUPPRESS_ERRORS": null,
+          "TORCHINDUCTOR_AUTOGRAD_CACHE": "0",
+          "TORCHINDUCTOR_AUTOGRAD_REMOTE_CACHE": "0",
+          "TORCHINDUCTOR_AUTOTUNE_REMOTE_CACHE": "0",
+          "TORCHINDUCTOR_BUNDLED_AUTOTUNE_REMOTE_CACHE": "0",
+          "TORCHINDUCTOR_CACHE_DIR": "/tmp/nv_spec_v3_caches_e8e0452_run1/route-eager-inductor",
+          "TORCHINDUCTOR_FX_GRAPH_REMOTE_CACHE": "0",
+          "TORCH_COMPILE_DISABLE": "0",
+          "TORCH_DYNAMO_AUTOMATIC_DYNAMIC_LOCAL_PGO": "0",
+          "TORCH_DYNAMO_AUTOMATIC_DYNAMIC_REMOTE_PGO": "0",
+          "TORCH_LOGS": "recompiles,graph_breaks",
+          "TRITON_CACHE_DIR": "/tmp/nv_spec_v3_caches_e8e0452_run1/route-eager-triton"
+        },
+        "software": {
+          "cudnn": 91002,
+          "platform": "Linux-5.15.0-1079-nvidia-x86_64-with-glibc2.39",
+          "python": "3.12.13",
+          "python_executable": "/venv/main/bin/python3.12",
+          "python_optimize": 0,
+          "torch": "2.10.0+cu128",
+          "torch_cuda": "12.8",
+          "torch_dynamo_disable": false,
+          "torch_dynamo_suppress_errors": false
+        }
+      },
+      "implementation": {
+        "commit": "7fec9993d5e4e0e06fec22e3973dfc203fdbd2d8",
+        "nanovllm_tree": "52398af379f767708a0b804646f4b490fa8323ad",
+        "parent": "e252086ee625ea8aefdb63f3affc093380f40064",
+        "tree": "5820fb685d76b549fe21117baa31b3b32ebae14b"
+      },
+      "models": {
+        "draft": {
+          "metadata_files": {
+            "config.json": {
+              "sha256": "660db3b73d788119c04535e48cf9be5f55bc3100841a718637ae695b442f27dd",
+              "size_bytes": 726
+            },
+            "generation_config.json": {
+              "sha256": "2325da0f15bb848e018c5ae071b7943332e9f871d6b60e2ed22ca97d4cb993d2",
+              "size_bytes": 239
+            },
+            "merges.txt": {
+              "sha256": "8831e4f1a044471340f7c0a83d7bd71306a5b867e95fd870f74d0c5308a904d5",
+              "size_bytes": 1671853
+            },
+            "tokenizer.json": {
+              "sha256": "aeb13307a71acd8fe81861d94ad54ab689df773318809eed3cbe794b4492dae4",
+              "size_bytes": 11422654
+            },
+            "tokenizer_config.json": {
+              "sha256": "d5d09f07b48c3086c508b30d1c9114bd1189145b74e982a265350c923acd8101",
+              "size_bytes": 9732
+            },
+            "vocab.json": {
+              "sha256": "ca10d7e9fb3ed18575dd1e277a2579c16d108e32f27439684afa0e10b1440910",
+              "size_bytes": 2776833
+            }
+          },
+          "resolved_path": "/workspace/models/Qwen3-0.6B",
+          "total_weight_bytes": 1503300328,
+          "weight_files": [
+            {
+              "name": "model.safetensors",
+              "sha256": "f47f71177f32bcd101b7573ec9171e6a57f4f4d31148d38e382306f42996874b",
+              "size_bytes": 1503300328
+            }
+          ]
+        },
+        "target": {
+          "metadata_files": {
+            "config.json": {
+              "sha256": "660db3b73d788119c04535e48cf9be5f55bc3100841a718637ae695b442f27dd",
+              "size_bytes": 726
+            },
+            "generation_config.json": {
+              "sha256": "2325da0f15bb848e018c5ae071b7943332e9f871d6b60e2ed22ca97d4cb993d2",
+              "size_bytes": 239
+            },
+            "merges.txt": {
+              "sha256": "8831e4f1a044471340f7c0a83d7bd71306a5b867e95fd870f74d0c5308a904d5",
+              "size_bytes": 1671853
+            },
+            "tokenizer.json": {
+              "sha256": "aeb13307a71acd8fe81861d94ad54ab689df773318809eed3cbe794b4492dae4",
+              "size_bytes": 11422654
+            },
+            "tokenizer_config.json": {
+              "sha256": "d5d09f07b48c3086c508b30d1c9114bd1189145b74e982a265350c923acd8101",
+              "size_bytes": 9732
+            },
+            "vocab.json": {
+              "sha256": "ca10d7e9fb3ed18575dd1e277a2579c16d108e32f27439684afa0e10b1440910",
+              "size_bytes": 2776833
+            }
+          },
+          "resolved_path": "/workspace/models/Qwen3-0.6B",
+          "total_weight_bytes": 1503300328,
+          "weight_files": [
+            {
+              "name": "model.safetensors",
+              "sha256": "f47f71177f32bcd101b7573ec9171e6a57f4f4d31148d38e382306f42996874b",
+              "size_bytes": 1503300328
+            }
+          ]
+        }
+      },
+      "producer_commit": "e8e0452f99727958077b51f340a5375a090e6884",
+      "runtime_imports": {
+        "DraftRouteRegistry": {
+          "head_blob": "09474f91abf4bc87efdeceb9679c631fa4fbca90",
+          "head_blob_sha256": "7be9c5e913ee9d4343b1b5d679c14dca5fc5feb43c3abf6fbca57b0a8fa65347",
+          "matches_head": true,
+          "path": "nanovllm/engine/speculative_routes.py",
+          "sha256": "7be9c5e913ee9d4343b1b5d679c14dca5fc5feb43c3abf6fbca57b0a8fa65347"
+        },
+        "LLM": {
+          "head_blob": "4f51a44f160c2b6f982719bbb45de12d3ff509b5",
+          "head_blob_sha256": "ffe74fe7f64ba5169471a17596757b8d8f309e75f4db7040ac41b84db2e38179",
+          "matches_head": true,
+          "path": "nanovllm/llm.py",
+          "sha256": "ffe74fe7f64ba5169471a17596757b8d8f309e75f4db7040ac41b84db2e38179"
+        },
+        "LLMEngine": {
+          "head_blob": "f2bb0bf7df92d89364f8cbcd19c80028ccee1f32",
+          "head_blob_sha256": "d285f2e1689338e0e91c54c69c44a4e9c18ae3a1afb8ccdb892f79bfbb026b4d",
+          "matches_head": true,
+          "path": "nanovllm/engine/llm_engine.py",
+          "sha256": "d285f2e1689338e0e91c54c69c44a4e9c18ae3a1afb8ccdb892f79bfbb026b4d"
+        },
+        "ModelRunner": {
+          "head_blob": "f094824b2d9d62fe5083ccbf68c9e2bfced49598",
+          "head_blob_sha256": "2d81f3512c8f163dc4007f1ef655ef8e137843f97283c8d10341b676863c154d",
+          "matches_head": true,
+          "path": "nanovllm/engine/model_runner.py",
+          "sha256": "2d81f3512c8f163dc4007f1ef655ef8e137843f97283c8d10341b676863c154d"
+        },
+        "Sampler": {
+          "head_blob": "bf7b0000f6ed39aeda97a4de1ac5fd1093f3b367",
+          "head_blob_sha256": "f49738cff50f14af854028f14cb5d0e2478ac02afc3367d372596303dfa5dada",
+          "matches_head": true,
+          "path": "nanovllm/layers/sampler.py",
+          "sha256": "f49738cff50f14af854028f14cb5d0e2478ac02afc3367d372596303dfa5dada"
+        },
+        "SamplingParams": {
+          "head_blob": "49105ef794b3c2e518caccc994af62d3f85cfba1",
+          "head_blob_sha256": "70914640af4d34247d4164a235069d7a19d75dac1e71548c19289a7ace5f4b52",
+          "matches_head": true,
+          "path": "nanovllm/sampling_params.py",
+          "sha256": "70914640af4d34247d4164a235069d7a19d75dac1e71548c19289a7ace5f4b52"
+        },
+        "Scheduler": {
+          "head_blob": "3ed7a790ff1bdf074701dbe36d161922b2f5716b",
+          "head_blob_sha256": "8426ce967b8a12a8c24e0187e30128aa412907bb2ea6732d6d3628bd11c20474",
+          "matches_head": true,
+          "path": "nanovllm/engine/scheduler.py",
+          "sha256": "8426ce967b8a12a8c24e0187e30128aa412907bb2ea6732d6d3628bd11c20474"
+        },
+        "nanovllm": {
+          "head_blob": "ba2602ae0e416fbb43ff12ad4499df83cd8f1059",
+          "head_blob_sha256": "333cbca6b38b7da83b2c13fe3a27dbde9aa245cd6f206946d96d689df8a9ce57",
+          "matches_head": true,
+          "path": "nanovllm/__init__.py",
+          "sha256": "333cbca6b38b7da83b2c13fe3a27dbde9aa245cd6f206946d96d689df8a9ce57"
+        }
+      },
+      "source": {
+        "branch": "feat/spec-v2-draft-path",
+        "clean": true,
+        "detached": false,
+        "head": "e8e0452f99727958077b51f340a5375a090e6884",
+        "nanovllm_tree": "52398af379f767708a0b804646f4b490fa8323ad",
+        "repository": "/workspace/nano-vllm-spec-v2",
+        "source_tree_sha256": "c60fbec34960d522f7b9dc2437ed3a0c8eeccda2d90f2adb9cf4ed994b6e1079",
+        "status_porcelain_v1": [],
+        "status_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "tree": "51a5a1f1ee5452c8f1de4b08dc4647c9fff6dcdf"
+      },
+      "source_files": {
+        "helper": {
+          "head_blob": "d60294304f51c032711a1b9d6bc43ba6ee9905a7",
+          "head_blob_sha256": "73319d770cfb3650f3c66cd26141e73ca2eb26a4fe8568cf18ab79a5ec099b35",
+          "matches_head": true,
+          "path": "tests/_speculative_v3_evidence.py",
+          "sha256": "73319d770cfb3650f3c66cd26141e73ca2eb26a4fe8568cf18ab79a5ec099b35"
+        },
+        "runner": {
+          "head_blob": "1837f00e1025ee775459c69699e98614f5b3d23a",
+          "head_blob_sha256": "ec537370bc9b20642a4ec896413aa658b83ed1572c57f9e4a3c9c408ef36f35c",
+          "matches_head": true,
+          "path": "tests/run_speculative_v3_route_compile.py",
+          "sha256": "ec537370bc9b20642a4ec896413aa658b83ed1572c57f9e4a3c9c408ef36f35c"
+        }
+      }
+    },
+    "graph": {
+      "environment": {
+        "hardware": {
+          "cuda_available": true,
+          "device_count": 1,
+          "devices": [
+            {
+              "compute_capability": [
+                8,
+                0
+              ],
+              "index": 0,
+              "name": "NVIDIA A100-SXM4-40GB",
+              "total_memory_bytes": 42406903808,
+              "uuid": "773e0633-edb0-6c38-1d2b-d232f9109126"
+            }
+          ],
+          "nvidia_smi": "0, GPU-773e0633-edb0-6c38-1d2b-d232f9109126, NVIDIA A100-SXM4-40GB, 570.133.20, 40960"
+        },
+        "selected_environment": {
+          "CUDA_VISIBLE_DEVICES": "0",
+          "PYTHONDONTWRITEBYTECODE": "1",
+          "PYTHONPATH": ".",
+          "TORCHDYNAMO_DISABLE": "0",
+          "TORCHDYNAMO_SUPPRESS_ERRORS": null,
+          "TORCHINDUCTOR_AUTOGRAD_CACHE": "0",
+          "TORCHINDUCTOR_AUTOGRAD_REMOTE_CACHE": "0",
+          "TORCHINDUCTOR_AUTOTUNE_REMOTE_CACHE": "0",
+          "TORCHINDUCTOR_BUNDLED_AUTOTUNE_REMOTE_CACHE": "0",
+          "TORCHINDUCTOR_CACHE_DIR": "/tmp/nv_spec_v3_caches_e8e0452_remaining/route-graph-retry-inductor",
+          "TORCHINDUCTOR_FX_GRAPH_REMOTE_CACHE": "0",
+          "TORCH_COMPILE_DISABLE": "0",
+          "TORCH_DYNAMO_AUTOMATIC_DYNAMIC_LOCAL_PGO": "0",
+          "TORCH_DYNAMO_AUTOMATIC_DYNAMIC_REMOTE_PGO": "0",
+          "TORCH_LOGS": "recompiles,graph_breaks",
+          "TRITON_CACHE_DIR": "/tmp/nv_spec_v3_caches_e8e0452_remaining/route-graph-retry-triton"
+        },
+        "software": {
+          "cudnn": 91002,
+          "platform": "Linux-5.15.0-1079-nvidia-x86_64-with-glibc2.39",
+          "python": "3.12.13",
+          "python_executable": "/venv/main/bin/python3.12",
+          "python_optimize": 0,
+          "torch": "2.10.0+cu128",
+          "torch_cuda": "12.8",
+          "torch_dynamo_disable": false,
+          "torch_dynamo_suppress_errors": false
+        }
+      },
+      "implementation": {
+        "commit": "7fec9993d5e4e0e06fec22e3973dfc203fdbd2d8",
+        "nanovllm_tree": "52398af379f767708a0b804646f4b490fa8323ad",
+        "parent": "e252086ee625ea8aefdb63f3affc093380f40064",
+        "tree": "5820fb685d76b549fe21117baa31b3b32ebae14b"
+      },
+      "models": {
+        "draft": {
+          "metadata_files": {
+            "config.json": {
+              "sha256": "660db3b73d788119c04535e48cf9be5f55bc3100841a718637ae695b442f27dd",
+              "size_bytes": 726
+            },
+            "generation_config.json": {
+              "sha256": "2325da0f15bb848e018c5ae071b7943332e9f871d6b60e2ed22ca97d4cb993d2",
+              "size_bytes": 239
+            },
+            "merges.txt": {
+              "sha256": "8831e4f1a044471340f7c0a83d7bd71306a5b867e95fd870f74d0c5308a904d5",
+              "size_bytes": 1671853
+            },
+            "tokenizer.json": {
+              "sha256": "aeb13307a71acd8fe81861d94ad54ab689df773318809eed3cbe794b4492dae4",
+              "size_bytes": 11422654
+            },
+            "tokenizer_config.json": {
+              "sha256": "d5d09f07b48c3086c508b30d1c9114bd1189145b74e982a265350c923acd8101",
+              "size_bytes": 9732
+            },
+            "vocab.json": {
+              "sha256": "ca10d7e9fb3ed18575dd1e277a2579c16d108e32f27439684afa0e10b1440910",
+              "size_bytes": 2776833
+            }
+          },
+          "resolved_path": "/workspace/models/Qwen3-0.6B",
+          "total_weight_bytes": 1503300328,
+          "weight_files": [
+            {
+              "name": "model.safetensors",
+              "sha256": "f47f71177f32bcd101b7573ec9171e6a57f4f4d31148d38e382306f42996874b",
+              "size_bytes": 1503300328
+            }
+          ]
+        },
+        "target": {
+          "metadata_files": {
+            "config.json": {
+              "sha256": "660db3b73d788119c04535e48cf9be5f55bc3100841a718637ae695b442f27dd",
+              "size_bytes": 726
+            },
+            "generation_config.json": {
+              "sha256": "2325da0f15bb848e018c5ae071b7943332e9f871d6b60e2ed22ca97d4cb993d2",
+              "size_bytes": 239
+            },
+            "merges.txt": {
+              "sha256": "8831e4f1a044471340f7c0a83d7bd71306a5b867e95fd870f74d0c5308a904d5",
+              "size_bytes": 1671853
+            },
+            "tokenizer.json": {
+              "sha256": "aeb13307a71acd8fe81861d94ad54ab689df773318809eed3cbe794b4492dae4",
+              "size_bytes": 11422654
+            },
+            "tokenizer_config.json": {
+              "sha256": "d5d09f07b48c3086c508b30d1c9114bd1189145b74e982a265350c923acd8101",
+              "size_bytes": 9732
+            },
+            "vocab.json": {
+              "sha256": "ca10d7e9fb3ed18575dd1e277a2579c16d108e32f27439684afa0e10b1440910",
+              "size_bytes": 2776833
+            }
+          },
+          "resolved_path": "/workspace/models/Qwen3-0.6B",
+          "total_weight_bytes": 1503300328,
+          "weight_files": [
+            {
+              "name": "model.safetensors",
+              "sha256": "f47f71177f32bcd101b7573ec9171e6a57f4f4d31148d38e382306f42996874b",
+              "size_bytes": 1503300328
+            }
+          ]
+        }
+      },
+      "producer_commit": "e8e0452f99727958077b51f340a5375a090e6884",
+      "runtime_imports": {
+        "DraftRouteRegistry": {
+          "head_blob": "09474f91abf4bc87efdeceb9679c631fa4fbca90",
+          "head_blob_sha256": "7be9c5e913ee9d4343b1b5d679c14dca5fc5feb43c3abf6fbca57b0a8fa65347",
+          "matches_head": true,
+          "path": "nanovllm/engine/speculative_routes.py",
+          "sha256": "7be9c5e913ee9d4343b1b5d679c14dca5fc5feb43c3abf6fbca57b0a8fa65347"
+        },
+        "LLM": {
+          "head_blob": "4f51a44f160c2b6f982719bbb45de12d3ff509b5",
+          "head_blob_sha256": "ffe74fe7f64ba5169471a17596757b8d8f309e75f4db7040ac41b84db2e38179",
+          "matches_head": true,
+          "path": "nanovllm/llm.py",
+          "sha256": "ffe74fe7f64ba5169471a17596757b8d8f309e75f4db7040ac41b84db2e38179"
+        },
+        "LLMEngine": {
+          "head_blob": "f2bb0bf7df92d89364f8cbcd19c80028ccee1f32",
+          "head_blob_sha256": "d285f2e1689338e0e91c54c69c44a4e9c18ae3a1afb8ccdb892f79bfbb026b4d",
+          "matches_head": true,
+          "path": "nanovllm/engine/llm_engine.py",
+          "sha256": "d285f2e1689338e0e91c54c69c44a4e9c18ae3a1afb8ccdb892f79bfbb026b4d"
+        },
+        "ModelRunner": {
+          "head_blob": "f094824b2d9d62fe5083ccbf68c9e2bfced49598",
+          "head_blob_sha256": "2d81f3512c8f163dc4007f1ef655ef8e137843f97283c8d10341b676863c154d",
+          "matches_head": true,
+          "path": "nanovllm/engine/model_runner.py",
+          "sha256": "2d81f3512c8f163dc4007f1ef655ef8e137843f97283c8d10341b676863c154d"
+        },
+        "Sampler": {
+          "head_blob": "bf7b0000f6ed39aeda97a4de1ac5fd1093f3b367",
+          "head_blob_sha256": "f49738cff50f14af854028f14cb5d0e2478ac02afc3367d372596303dfa5dada",
+          "matches_head": true,
+          "path": "nanovllm/layers/sampler.py",
+          "sha256": "f49738cff50f14af854028f14cb5d0e2478ac02afc3367d372596303dfa5dada"
+        },
+        "SamplingParams": {
+          "head_blob": "49105ef794b3c2e518caccc994af62d3f85cfba1",
+          "head_blob_sha256": "70914640af4d34247d4164a235069d7a19d75dac1e71548c19289a7ace5f4b52",
+          "matches_head": true,
+          "path": "nanovllm/sampling_params.py",
+          "sha256": "70914640af4d34247d4164a235069d7a19d75dac1e71548c19289a7ace5f4b52"
+        },
+        "Scheduler": {
+          "head_blob": "3ed7a790ff1bdf074701dbe36d161922b2f5716b",
+          "head_blob_sha256": "8426ce967b8a12a8c24e0187e30128aa412907bb2ea6732d6d3628bd11c20474",
+          "matches_head": true,
+          "path": "nanovllm/engine/scheduler.py",
+          "sha256": "8426ce967b8a12a8c24e0187e30128aa412907bb2ea6732d6d3628bd11c20474"
+        },
+        "nanovllm": {
+          "head_blob": "ba2602ae0e416fbb43ff12ad4499df83cd8f1059",
+          "head_blob_sha256": "333cbca6b38b7da83b2c13fe3a27dbde9aa245cd6f206946d96d689df8a9ce57",
+          "matches_head": true,
+          "path": "nanovllm/__init__.py",
+          "sha256": "333cbca6b38b7da83b2c13fe3a27dbde9aa245cd6f206946d96d689df8a9ce57"
+        }
+      },
+      "source": {
+        "branch": "feat/spec-v2-draft-path",
+        "clean": true,
+        "detached": false,
+        "head": "e8e0452f99727958077b51f340a5375a090e6884",
+        "nanovllm_tree": "52398af379f767708a0b804646f4b490fa8323ad",
+        "repository": "/workspace/nano-vllm-spec-v2",
+        "source_tree_sha256": "c60fbec34960d522f7b9dc2437ed3a0c8eeccda2d90f2adb9cf4ed994b6e1079",
+        "status_porcelain_v1": [],
+        "status_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "tree": "51a5a1f1ee5452c8f1de4b08dc4647c9fff6dcdf"
+      },
+      "source_files": {
+        "helper": {
+          "head_blob": "d60294304f51c032711a1b9d6bc43ba6ee9905a7",
+          "head_blob_sha256": "73319d770cfb3650f3c66cd26141e73ca2eb26a4fe8568cf18ab79a5ec099b35",
+          "matches_head": true,
+          "path": "tests/_speculative_v3_evidence.py",
+          "sha256": "73319d770cfb3650f3c66cd26141e73ca2eb26a4fe8568cf18ab79a5ec099b35"
+        },
+        "runner": {
+          "head_blob": "1837f00e1025ee775459c69699e98614f5b3d23a",
+          "head_blob_sha256": "ec537370bc9b20642a4ec896413aa658b83ed1572c57f9e4a3c9c408ef36f35c",
+          "matches_head": true,
+          "path": "tests/run_speculative_v3_route_compile.py",
+          "sha256": "ec537370bc9b20642a4ec896413aa658b83ed1572c57f9e4a3c9c408ef36f35c"
+        }
+      }
+    },
+    "pair_identity": {
+      "environment": {
+        "hardware": {
+          "cuda_available": true,
+          "device_count": 1,
+          "devices": [
+            {
+              "compute_capability": [
+                8,
+                0
+              ],
+              "index": 0,
+              "name": "NVIDIA A100-SXM4-40GB",
+              "total_memory_bytes": 42406903808,
+              "uuid": "773e0633-edb0-6c38-1d2b-d232f9109126"
+            }
+          ],
+          "nvidia_smi": "0, GPU-773e0633-edb0-6c38-1d2b-d232f9109126, NVIDIA A100-SXM4-40GB, 570.133.20, 40960"
+        },
+        "selected_environment": {
+          "CUDA_VISIBLE_DEVICES": "0",
+          "PYTHONDONTWRITEBYTECODE": "1",
+          "PYTHONPATH": ".",
+          "TORCHDYNAMO_DISABLE": "0",
+          "TORCHDYNAMO_SUPPRESS_ERRORS": null,
+          "TORCHINDUCTOR_AUTOGRAD_CACHE": "0",
+          "TORCHINDUCTOR_AUTOGRAD_REMOTE_CACHE": "0",
+          "TORCHINDUCTOR_AUTOTUNE_REMOTE_CACHE": "0",
+          "TORCHINDUCTOR_BUNDLED_AUTOTUNE_REMOTE_CACHE": "0",
+          "TORCHINDUCTOR_FX_GRAPH_REMOTE_CACHE": "0",
+          "TORCH_COMPILE_DISABLE": "0",
+          "TORCH_DYNAMO_AUTOMATIC_DYNAMIC_LOCAL_PGO": "0",
+          "TORCH_DYNAMO_AUTOMATIC_DYNAMIC_REMOTE_PGO": "0",
+          "TORCH_LOGS": "recompiles,graph_breaks"
+        },
+        "software": {
+          "cudnn": 91002,
+          "platform": "Linux-5.15.0-1079-nvidia-x86_64-with-glibc2.39",
+          "python": "3.12.13",
+          "python_executable": "/venv/main/bin/python3.12",
+          "python_optimize": 0,
+          "torch": "2.10.0+cu128",
+          "torch_cuda": "12.8",
+          "torch_dynamo_disable": false,
+          "torch_dynamo_suppress_errors": false
+        }
+      },
+      "implementation": {
+        "commit": "7fec9993d5e4e0e06fec22e3973dfc203fdbd2d8",
+        "nanovllm_tree": "52398af379f767708a0b804646f4b490fa8323ad",
+        "parent": "e252086ee625ea8aefdb63f3affc093380f40064",
+        "tree": "5820fb685d76b549fe21117baa31b3b32ebae14b"
+      },
+      "models": {
+        "draft": {
+          "metadata_files": {
+            "config.json": {
+              "sha256": "660db3b73d788119c04535e48cf9be5f55bc3100841a718637ae695b442f27dd",
+              "size_bytes": 726
+            },
+            "generation_config.json": {
+              "sha256": "2325da0f15bb848e018c5ae071b7943332e9f871d6b60e2ed22ca97d4cb993d2",
+              "size_bytes": 239
+            },
+            "merges.txt": {
+              "sha256": "8831e4f1a044471340f7c0a83d7bd71306a5b867e95fd870f74d0c5308a904d5",
+              "size_bytes": 1671853
+            },
+            "tokenizer.json": {
+              "sha256": "aeb13307a71acd8fe81861d94ad54ab689df773318809eed3cbe794b4492dae4",
+              "size_bytes": 11422654
+            },
+            "tokenizer_config.json": {
+              "sha256": "d5d09f07b48c3086c508b30d1c9114bd1189145b74e982a265350c923acd8101",
+              "size_bytes": 9732
+            },
+            "vocab.json": {
+              "sha256": "ca10d7e9fb3ed18575dd1e277a2579c16d108e32f27439684afa0e10b1440910",
+              "size_bytes": 2776833
+            }
+          },
+          "resolved_path": "/workspace/models/Qwen3-0.6B",
+          "total_weight_bytes": 1503300328,
+          "weight_files": [
+            {
+              "name": "model.safetensors",
+              "sha256": "f47f71177f32bcd101b7573ec9171e6a57f4f4d31148d38e382306f42996874b",
+              "size_bytes": 1503300328
+            }
+          ]
+        },
+        "target": {
+          "metadata_files": {
+            "config.json": {
+              "sha256": "660db3b73d788119c04535e48cf9be5f55bc3100841a718637ae695b442f27dd",
+              "size_bytes": 726
+            },
+            "generation_config.json": {
+              "sha256": "2325da0f15bb848e018c5ae071b7943332e9f871d6b60e2ed22ca97d4cb993d2",
+              "size_bytes": 239
+            },
+            "merges.txt": {
+              "sha256": "8831e4f1a044471340f7c0a83d7bd71306a5b867e95fd870f74d0c5308a904d5",
+              "size_bytes": 1671853
+            },
+            "tokenizer.json": {
+              "sha256": "aeb13307a71acd8fe81861d94ad54ab689df773318809eed3cbe794b4492dae4",
+              "size_bytes": 11422654
+            },
+            "tokenizer_config.json": {
+              "sha256": "d5d09f07b48c3086c508b30d1c9114bd1189145b74e982a265350c923acd8101",
+              "size_bytes": 9732
+            },
+            "vocab.json": {
+              "sha256": "ca10d7e9fb3ed18575dd1e277a2579c16d108e32f27439684afa0e10b1440910",
+              "size_bytes": 2776833
+            }
+          },
+          "resolved_path": "/workspace/models/Qwen3-0.6B",
+          "total_weight_bytes": 1503300328,
+          "weight_files": [
+            {
+              "name": "model.safetensors",
+              "sha256": "f47f71177f32bcd101b7573ec9171e6a57f4f4d31148d38e382306f42996874b",
+              "size_bytes": 1503300328
+            }
+          ]
+        }
+      },
+      "producer_commit": "e8e0452f99727958077b51f340a5375a090e6884",
+      "runtime_imports": {
+        "DraftRouteRegistry": {
+          "head_blob": "09474f91abf4bc87efdeceb9679c631fa4fbca90",
+          "head_blob_sha256": "7be9c5e913ee9d4343b1b5d679c14dca5fc5feb43c3abf6fbca57b0a8fa65347",
+          "matches_head": true,
+          "path": "nanovllm/engine/speculative_routes.py",
+          "sha256": "7be9c5e913ee9d4343b1b5d679c14dca5fc5feb43c3abf6fbca57b0a8fa65347"
+        },
+        "LLM": {
+          "head_blob": "4f51a44f160c2b6f982719bbb45de12d3ff509b5",
+          "head_blob_sha256": "ffe74fe7f64ba5169471a17596757b8d8f309e75f4db7040ac41b84db2e38179",
+          "matches_head": true,
+          "path": "nanovllm/llm.py",
+          "sha256": "ffe74fe7f64ba5169471a17596757b8d8f309e75f4db7040ac41b84db2e38179"
+        },
+        "LLMEngine": {
+          "head_blob": "f2bb0bf7df92d89364f8cbcd19c80028ccee1f32",
+          "head_blob_sha256": "d285f2e1689338e0e91c54c69c44a4e9c18ae3a1afb8ccdb892f79bfbb026b4d",
+          "matches_head": true,
+          "path": "nanovllm/engine/llm_engine.py",
+          "sha256": "d285f2e1689338e0e91c54c69c44a4e9c18ae3a1afb8ccdb892f79bfbb026b4d"
+        },
+        "ModelRunner": {
+          "head_blob": "f094824b2d9d62fe5083ccbf68c9e2bfced49598",
+          "head_blob_sha256": "2d81f3512c8f163dc4007f1ef655ef8e137843f97283c8d10341b676863c154d",
+          "matches_head": true,
+          "path": "nanovllm/engine/model_runner.py",
+          "sha256": "2d81f3512c8f163dc4007f1ef655ef8e137843f97283c8d10341b676863c154d"
+        },
+        "Sampler": {
+          "head_blob": "bf7b0000f6ed39aeda97a4de1ac5fd1093f3b367",
+          "head_blob_sha256": "f49738cff50f14af854028f14cb5d0e2478ac02afc3367d372596303dfa5dada",
+          "matches_head": true,
+          "path": "nanovllm/layers/sampler.py",
+          "sha256": "f49738cff50f14af854028f14cb5d0e2478ac02afc3367d372596303dfa5dada"
+        },
+        "SamplingParams": {
+          "head_blob": "49105ef794b3c2e518caccc994af62d3f85cfba1",
+          "head_blob_sha256": "70914640af4d34247d4164a235069d7a19d75dac1e71548c19289a7ace5f4b52",
+          "matches_head": true,
+          "path": "nanovllm/sampling_params.py",
+          "sha256": "70914640af4d34247d4164a235069d7a19d75dac1e71548c19289a7ace5f4b52"
+        },
+        "Scheduler": {
+          "head_blob": "3ed7a790ff1bdf074701dbe36d161922b2f5716b",
+          "head_blob_sha256": "8426ce967b8a12a8c24e0187e30128aa412907bb2ea6732d6d3628bd11c20474",
+          "matches_head": true,
+          "path": "nanovllm/engine/scheduler.py",
+          "sha256": "8426ce967b8a12a8c24e0187e30128aa412907bb2ea6732d6d3628bd11c20474"
+        },
+        "nanovllm": {
+          "head_blob": "ba2602ae0e416fbb43ff12ad4499df83cd8f1059",
+          "head_blob_sha256": "333cbca6b38b7da83b2c13fe3a27dbde9aa245cd6f206946d96d689df8a9ce57",
+          "matches_head": true,
+          "path": "nanovllm/__init__.py",
+          "sha256": "333cbca6b38b7da83b2c13fe3a27dbde9aa245cd6f206946d96d689df8a9ce57"
+        }
+      },
+      "source": {
+        "branch": "feat/spec-v2-draft-path",
+        "clean": true,
+        "detached": false,
+        "head": "e8e0452f99727958077b51f340a5375a090e6884",
+        "nanovllm_tree": "52398af379f767708a0b804646f4b490fa8323ad",
+        "repository": "/workspace/nano-vllm-spec-v2",
+        "source_tree_sha256": "c60fbec34960d522f7b9dc2437ed3a0c8eeccda2d90f2adb9cf4ed994b6e1079",
+        "status_porcelain_v1": [],
+        "status_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "tree": "51a5a1f1ee5452c8f1de4b08dc4647c9fff6dcdf"
+      },
+      "source_files": {
+        "helper": {
+          "head_blob": "d60294304f51c032711a1b9d6bc43ba6ee9905a7",
+          "head_blob_sha256": "73319d770cfb3650f3c66cd26141e73ca2eb26a4fe8568cf18ab79a5ec099b35",
+          "matches_head": true,
+          "path": "tests/_speculative_v3_evidence.py",
+          "sha256": "73319d770cfb3650f3c66cd26141e73ca2eb26a4fe8568cf18ab79a5ec099b35"
+        },
+        "runner": {
+          "head_blob": "1837f00e1025ee775459c69699e98614f5b3d23a",
+          "head_blob_sha256": "ec537370bc9b20642a4ec896413aa658b83ed1572c57f9e4a3c9c408ef36f35c",
+          "matches_head": true,
+          "path": "tests/run_speculative_v3_route_compile.py",
+          "sha256": "ec537370bc9b20642a4ec896413aa658b83ed1572c57f9e4a3c9c408ef36f35c"
+        }
+      }
+    }
+  },
+  "record_count_per_mode": 32,
+  "retention_eligible": true,
+  "route_registry_cardinality": {
+    "eager": 4,
+    "graph": 12
+  },
+  "schema": "nano-vllm-speculative-v3-route-compile-validation-v2",
+  "validator_provenance": {
+    "cwd": "/workspace/nano-vllm-spec-v2",
+    "environment": {
+      "after": {
+        "hardware": {
+          "cuda_available": false,
+          "device_count": 0,
+          "devices": [],
+          "nvidia_smi": "0, GPU-773e0633-edb0-6c38-1d2b-d232f9109126, NVIDIA A100-SXM4-40GB, 570.133.20, 40960"
+        },
+        "selected_environment": {
+          "CUDA_VISIBLE_DEVICES": "",
+          "PYTHONDONTWRITEBYTECODE": "1",
+          "PYTHONPATH": ".",
+          "TORCHDYNAMO_DISABLE": null,
+          "TORCHDYNAMO_SUPPRESS_ERRORS": null,
+          "TORCHINDUCTOR_AUTOGRAD_CACHE": null,
+          "TORCHINDUCTOR_AUTOGRAD_REMOTE_CACHE": null,
+          "TORCHINDUCTOR_AUTOTUNE_REMOTE_CACHE": null,
+          "TORCHINDUCTOR_BUNDLED_AUTOTUNE_REMOTE_CACHE": null,
+          "TORCHINDUCTOR_CACHE_DIR": "/tmp/torchinductor_root",
+          "TORCHINDUCTOR_FX_GRAPH_REMOTE_CACHE": null,
+          "TORCH_COMPILE_DISABLE": null,
+          "TORCH_DYNAMO_AUTOMATIC_DYNAMIC_LOCAL_PGO": null,
+          "TORCH_DYNAMO_AUTOMATIC_DYNAMIC_REMOTE_PGO": null,
+          "TORCH_LOGS": null,
+          "TRITON_CACHE_DIR": null
+        },
+        "software": {
+          "cudnn": 91002,
+          "platform": "Linux-5.15.0-1079-nvidia-x86_64-with-glibc2.39",
+          "python": "3.12.13",
+          "python_executable": "/venv/main/bin/python3.12",
+          "python_optimize": 0,
+          "torch": "2.10.0+cu128",
+          "torch_cuda": "12.8",
+          "torch_dynamo_disable": false,
+          "torch_dynamo_suppress_errors": false
+        }
+      },
+      "before": {
+        "hardware": {
+          "cuda_available": false,
+          "device_count": 0,
+          "devices": [],
+          "nvidia_smi": "0, GPU-773e0633-edb0-6c38-1d2b-d232f9109126, NVIDIA A100-SXM4-40GB, 570.133.20, 40960"
+        },
+        "selected_environment": {
+          "CUDA_VISIBLE_DEVICES": "",
+          "PYTHONDONTWRITEBYTECODE": "1",
+          "PYTHONPATH": ".",
+          "TORCHDYNAMO_DISABLE": null,
+          "TORCHDYNAMO_SUPPRESS_ERRORS": null,
+          "TORCHINDUCTOR_AUTOGRAD_CACHE": null,
+          "TORCHINDUCTOR_AUTOGRAD_REMOTE_CACHE": null,
+          "TORCHINDUCTOR_AUTOTUNE_REMOTE_CACHE": null,
+          "TORCHINDUCTOR_BUNDLED_AUTOTUNE_REMOTE_CACHE": null,
+          "TORCHINDUCTOR_CACHE_DIR": "/tmp/torchinductor_root",
+          "TORCHINDUCTOR_FX_GRAPH_REMOTE_CACHE": null,
+          "TORCH_COMPILE_DISABLE": null,
+          "TORCH_DYNAMO_AUTOMATIC_DYNAMIC_LOCAL_PGO": null,
+          "TORCH_DYNAMO_AUTOMATIC_DYNAMIC_REMOTE_PGO": null,
+          "TORCH_LOGS": null,
+          "TRITON_CACHE_DIR": null
+        },
+        "software": {
+          "cudnn": 91002,
+          "platform": "Linux-5.15.0-1079-nvidia-x86_64-with-glibc2.39",
+          "python": "3.12.13",
+          "python_executable": "/venv/main/bin/python3.12",
+          "python_optimize": 0,
+          "torch": "2.10.0+cu128",
+          "torch_cuda": "12.8",
+          "torch_dynamo_disable": false,
+          "torch_dynamo_suppress_errors": false
+        }
+      },
+      "unchanged": true
+    },
+    "implementation": {
+      "commit": "7fec9993d5e4e0e06fec22e3973dfc203fdbd2d8",
+      "nanovllm_tree": "52398af379f767708a0b804646f4b490fa8323ad",
+      "parent": "e252086ee625ea8aefdb63f3affc093380f40064",
+      "tree": "5820fb685d76b549fe21117baa31b3b32ebae14b"
+    },
+    "invocation": [
+      "/workspace/nano-vllm-spec-v2/tests/validate_speculative_v3_route_compile.py",
+      "--eager-json",
+      "/tmp/nv_spec_v3_evidence_e8e0452_run1/route-eager/result.json",
+      "--eager-log",
+      "/tmp/nv_spec_v3_evidence_e8e0452_run1/route-eager/stderr.log",
+      "--graph-json",
+      "/tmp/nv_spec_v3_evidence_e8e0452_run1/route-graph-retry/result.json",
+      "--graph-log",
+      "/tmp/nv_spec_v3_evidence_e8e0452_run1/route-graph-retry/stderr.log",
+      "--evidence-root",
+      "/tmp/nv_spec_v3_evidence_e8e0452_run1",
+      "--retained",
+      "--expected-commit",
+      "e8e0452f99727958077b51f340a5375a090e6884",
+      "--output",
+      "/tmp/nv_spec_v3_evidence_e8e0452_run1/route-validation.json"
+    ],
+    "models": {},
+    "producer_commit": "e8e0452f99727958077b51f340a5375a090e6884",
+    "retention_eligible": true,
+    "retention_requested": true,
+    "runtime_imports": {
+      "after": {},
+      "before": {},
+      "unchanged": true
+    },
+    "source": {
+      "after": {
+        "branch": "feat/spec-v2-draft-path",
+        "clean": true,
+        "detached": false,
+        "head": "e8e0452f99727958077b51f340a5375a090e6884",
+        "nanovllm_tree": "52398af379f767708a0b804646f4b490fa8323ad",
+        "repository": "/workspace/nano-vllm-spec-v2",
+        "source_tree_sha256": "c60fbec34960d522f7b9dc2437ed3a0c8eeccda2d90f2adb9cf4ed994b6e1079",
+        "status_porcelain_v1": [],
+        "status_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "tree": "51a5a1f1ee5452c8f1de4b08dc4647c9fff6dcdf"
+      },
+      "before": {
+        "branch": "feat/spec-v2-draft-path",
+        "clean": true,
+        "detached": false,
+        "head": "e8e0452f99727958077b51f340a5375a090e6884",
+        "nanovllm_tree": "52398af379f767708a0b804646f4b490fa8323ad",
+        "repository": "/workspace/nano-vllm-spec-v2",
+        "source_tree_sha256": "c60fbec34960d522f7b9dc2437ed3a0c8eeccda2d90f2adb9cf4ed994b6e1079",
+        "status_porcelain_v1": [],
+        "status_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "tree": "51a5a1f1ee5452c8f1de4b08dc4647c9fff6dcdf"
+      },
+      "unchanged": true
+    },
+    "source_files": {
+      "after": {
+        "helper": {
+          "head_blob": "d60294304f51c032711a1b9d6bc43ba6ee9905a7",
+          "head_blob_sha256": "73319d770cfb3650f3c66cd26141e73ca2eb26a4fe8568cf18ab79a5ec099b35",
+          "matches_head": true,
+          "path": "tests/_speculative_v3_evidence.py",
+          "sha256": "73319d770cfb3650f3c66cd26141e73ca2eb26a4fe8568cf18ab79a5ec099b35"
+        },
+        "runner": {
+          "head_blob": "9f769a341c8473129acc96adf02bb59fc86b9cc1",
+          "head_blob_sha256": "1ee54a4040e2d6377e2c989a4f99ba55bc7d3f6fe1a00e65ccfcadd6453aa40b",
+          "matches_head": true,
+          "path": "tests/validate_speculative_v3_route_compile.py",
+          "sha256": "1ee54a4040e2d6377e2c989a4f99ba55bc7d3f6fe1a00e65ccfcadd6453aa40b"
+        }
+      },
+      "before": {
+        "helper": {
+          "head_blob": "d60294304f51c032711a1b9d6bc43ba6ee9905a7",
+          "head_blob_sha256": "73319d770cfb3650f3c66cd26141e73ca2eb26a4fe8568cf18ab79a5ec099b35",
+          "matches_head": true,
+          "path": "tests/_speculative_v3_evidence.py",
+          "sha256": "73319d770cfb3650f3c66cd26141e73ca2eb26a4fe8568cf18ab79a5ec099b35"
+        },
+        "runner": {
+          "head_blob": "9f769a341c8473129acc96adf02bb59fc86b9cc1",
+          "head_blob_sha256": "1ee54a4040e2d6377e2c989a4f99ba55bc7d3f6fe1a00e65ccfcadd6453aa40b",
+          "matches_head": true,
+          "path": "tests/validate_speculative_v3_route_compile.py",
+          "sha256": "1ee54a4040e2d6377e2c989a4f99ba55bc7d3f6fe1a00e65ccfcadd6453aa40b"
+        }
+      },
+      "unchanged": true
+    }
+  },
+  "verdict": "pass"
+}

@@ -15,8 +15,11 @@ since landed the inert dual-model construction/lifecycle delta described in
 [06_v2_dual_model_lifecycle.md](06_v2_dual_model_lifecycle.md). Statements below
 written in the future tense remain the historical landing map unless that V2
 delta document explicitly marks them implemented. The
-`feat/spec-v2-draft-path` change set now implements the V3 overlay summarized in
-§3.1. That overlay is a code map, not an A100 certification claim.
+V3 runtime commit `7fec9993d5e4e0e06fec22e3973dfc203fdbd2d8` implements the
+overlay summarized in §3.1. Evidence-harness commit
+`e8e0452f99727958077b51f340a5375a090e6884` preserves the same `nanovllm`
+subtree and supplies the narrow retained A100 certificate under
+`benchmarks/speculative_v3/evidence/2026-08-28-a100-v3-e8e0452/`.
 
 ## 1. One current request, from construction to cleanup
 
@@ -410,10 +413,10 @@ state; it does not claim that every malformed checkpoint raises the historical
 exception or that every sampled workload/performance point has already been
 certified.
 
-### 3.1 Current V3 worktree overlay: implemented, not yet certified
+### 3.1 V3 implementation overlay and narrow retained certificate
 
-The current `feat/spec-v2-draft-path` worktree adds the following draft-only
-path without changing the authoritative one-token target commit:
+Runtime commit `7fec9993d5e4e0e06fec22e3973dfc203fdbd2d8` adds the following
+draft-only path without changing the authoritative one-token target commit:
 
 - `nanovllm/engine/speculative_routes.py` defines immutable
   `draft-discard-v1` keys over execution mode, batch bucket, effective K,
@@ -497,32 +500,33 @@ path without changing the authoritative one-token target commit:
   missing note support cannot replace the original draft failure.
 
 `tests/run_speculative_v3_route_compile.py` is the fresh-process A100 protocol
-for enumerating every registered eager/graph key at cold and warm catch-up states
-under `fail_on_recompile`, unique empty Inductor/Triton caches, RNG/context
-checks, and a CUDA-graph capture ledger. Dirty-worktree A100 runs with configured
-K=2 and batch cap 4 visited 4/4 eager and 12/12 graph registry keys, with two
-records per key, unchanged compiler state, stable CUDA-graph construction
-ledgers, RNG neutrality, reset attention context, and CUDA-free host results.
-Separate eager and graph cache-neutrality runs filled the reserved draft slots
-with zeros versus NaNs. In each mode, boundary positions 255/256/257 and the
-shared-prefix scenario produced equal host oracles; all nine full-vocabulary
-BF16 logits comparisons and their FP32 probability comparisons were bitwise
-identical. These are exploratory observations from a dirty worktree, not
-retained evidence. A fresh run from the eventual clean V3 SHA and the remaining
-V3 gates are still required. V2's archive and claims remain bound to `d87f168`.
+for enumerating every registered eager/graph key at cold and zero-catch-up states
+under guarded `fail_on_recompile` windows, unique empty Inductor/Triton caches,
+RNG/context checks, and a CUDA-graph capture ledger. The clean `e8e0452` archive
+visits 4/4 eager and 12/12 graph keys in 32 run-bound intervals per mode. Every
+guarded interval has unchanged compiler, CPU/CUDA RNG, and attention-context
+snapshots; all strict log intervals are empty of forbidden events; and the
+post-initialization CUDA-graph ledger remains 0/0 in eager mode and 18/18 in
+graph mode. This is guarded draft-window compiler neutrality, not a claim that
+aggregate compiler state is unchanged outside those windows.
 
-`tests/run_speculative_v3_output_control.py` and its companion comparator provide
-a second dirty-worktree A100 control in both eager and graph modes. Fresh
-speculation-off/on processes use sampled temperature plus combined top-k/top-p.
-They produced exact public sequence IDs, step/event order, authoritative target
-tokens, and CPU/CUDA RNG hashes at four checkpoints: after construction, after
-prefill, after the first target decode, and after the repeated target decode.
-The off side entered none of the five instrumented draft constructor phases,
-created no draft/speculative runner attributes or live resources, and executed
-zero runtime draft intervals. The on side executed two real RNG-neutral V3
-intervals: one cold route with catch-up and one warm route without catch-up.
-These output-control results are also dirty-tree observations and require replay
-from a clean SHA before retention.
+Separate retained eager and graph cache-neutrality pairs fill reserved draft
+slots with zeros versus NaNs after a symmetric declared first-use warmup. In
+each mode, the 255/256/257 boundary and cold/prefix-hit shared-prefix cases have
+equal host oracles; all nine full-vocabulary BF16 logits and FP32 probability
+rows are bitwise identical, with maximum absolute difference zero.
+
+`tests/run_speculative_v3_output_control.py` and its comparator retain fresh
+speculation-off/on controls for eager and graph execution using sampled
+temperature plus combined top-k/top-p. Each pair has exact public sequence IDs,
+authoritative target events/tokens, and CPU/CUDA RNG hashes at the four
+registered checkpoints. Off enters none of five instrumented draft-constructor
+phases, owns no draft resources, and executes no draft interval; on executes one
+cold and one warm real V3 interval. The graph cache and output-control producers
+emitted a Dynamo recompile-limit warning outside the route-proof windows, so
+those artifacts certify only their numerical and output oracles. They do not
+extend the route compile claim. V2's archive remains independently bound to
+`d87f168`.
 
 ## 4. Change matrix
 
@@ -544,7 +548,7 @@ from a clean SHA before retention.
 | `nanovllm/utils/loader.py` | Loads model safetensors into nano-vLLM parameter names | V2 hardens exact direct/alias/packed-shard coverage, rejects broadcast or oversized global/local tensor geometry, and preserves typed resource-exhaustion errors for two-model ownership |
 | `nanovllm/utils/tokenizer_identity.py` | Not present at the frozen base | V2 adds a fail-closed full fast-tokenizer/token-ID-space fingerprint checked before CUDA ownership |
 | `nanovllm/engine/speculative_memory.py` | Not present at the frozen base | V2 adds a pure configured-maximum probability/workspace and joint-KV planning model; measured route certification remains later work |
-| `nanovllm/engine/speculative_routes.py` | Not present at the frozen base | V3 adds a finite immutable draft-only route/workspace/warm registry and host-only fail-closed admission; clean-SHA A100 route certification remains pending |
+| `nanovllm/engine/speculative_routes.py` | Not present at the frozen base | V3 adds a finite immutable draft-only route/workspace/warm registry and host-only fail-closed admission; every registered finite draft-only route in the retained K=2, batch-cap=4 configuration is certified on one A100, while verifier/performance routing remains pending |
 | `.github/ci/speculative_v2/sitecustomize.py` | Not present at the frozen base | V2 CPU CI supplies a deliberately non-executable fake Qwen leaf for control-plane tests only; it never certifies real kernels or GPU behavior |
 | `nanovllm/metrics.py` | Computes queue, TTFT, ITL, E2E, and delivery metrics from sequence timestamps | Preserve per-token timing; add cycle/accepted/proposed/target-position/draft-position counters through engine result data |
 | `nanovllm/utils/streaming_detokenizer.py` | Converts individual token events into incremental text | No algorithmic change if postprocess continues emitting one ordered event per committed token |

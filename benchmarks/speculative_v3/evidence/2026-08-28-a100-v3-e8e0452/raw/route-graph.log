@@ -1,0 +1,203 @@
+[rank0]:V0828 18:45:56.439000 430414 site-packages/torch/_dynamo/guards.py:4514] [0/1] [__recompiles] Recompiling function rms_forward in /workspace/nano-vllm-spec-v2/nanovllm/layers/layernorm.py:16
+[rank0]:V0828 18:45:56.439000 430414 site-packages/torch/_dynamo/guards.py:4514] [0/1] [__recompiles]     triggered by the following guard failure(s):
+[rank0]:V0828 18:45:56.439000 430414 site-packages/torch/_dynamo/guards.py:4514] [0/1] [__recompiles]     - 0/0: tensor 'x' rank mismatch. expected 2, actual 3
+[rank0]:V0828 18:46:01.115000 430414 site-packages/torch/_dynamo/guards.py:4514] [4/1] [__recompiles] Recompiling function forward in /workspace/nano-vllm-spec-v2/nanovllm/layers/sampler.py:518
+[rank0]:V0828 18:46:01.115000 430414 site-packages/torch/_dynamo/guards.py:4514] [4/1] [__recompiles]     triggered by the following guard failure(s):
+[rank0]:V0828 18:46:01.115000 430414 site-packages/torch/_dynamo/guards.py:4514] [4/1] [__recompiles]     - 4/0: tensor 'logits' dispatch key set mismatch. expected DispatchKeySet(CUDA, BackendSelect, ADInplaceOrView), actual DispatchKeySet(CUDA, BackendSelect, ADInplaceOrView, AutogradCUDA)
+[rank0]:V0828 18:46:01.697000 430414 site-packages/torch/_dynamo/guards.py:4514] [4/2] [__recompiles] Recompiling function forward in /workspace/nano-vllm-spec-v2/nanovllm/layers/sampler.py:518
+[rank0]:V0828 18:46:01.697000 430414 site-packages/torch/_dynamo/guards.py:4514] [4/2] [__recompiles]     triggered by the following guard failure(s):
+[rank0]:V0828 18:46:01.697000 430414 site-packages/torch/_dynamo/guards.py:4514] [4/2] [__recompiles]     - 4/1: tensor 'logits' size mismatch at index 0. expected 1, actual 2
+[rank0]:V0828 18:46:01.697000 430414 site-packages/torch/_dynamo/guards.py:4514] [4/2] [__recompiles]     - 4/0: tensor 'logits' dispatch key set mismatch. expected DispatchKeySet(CUDA, BackendSelect, ADInplaceOrView), actual DispatchKeySet(CUDA, BackendSelect, ADInplaceOrView, AutogradCUDA)
+[rank0]:V0828 18:46:03.069000 430414 site-packages/torch/_dynamo/guards.py:4514] [5/1] [__recompiles] Recompiling function greedy in /workspace/nano-vllm-spec-v2/nanovllm/layers/sampler.py:205
+[rank0]:V0828 18:46:03.069000 430414 site-packages/torch/_dynamo/guards.py:4514] [5/1] [__recompiles]     triggered by the following guard failure(s):
+[rank0]:V0828 18:46:03.069000 430414 site-packages/torch/_dynamo/guards.py:4514] [5/1] [__recompiles]     - 5/0: tensor 'logits' size mismatch at index 0. expected 1, actual 2
+[rank0]:V0828 18:46:03.689000 430414 site-packages/torch/_dynamo/guards.py:4514] [0/2] [__recompiles] Recompiling function rms_forward in /workspace/nano-vllm-spec-v2/nanovllm/layers/layernorm.py:16
+[rank0]:V0828 18:46:03.689000 430414 site-packages/torch/_dynamo/guards.py:4514] [0/2] [__recompiles]     triggered by the following guard failure(s):
+[rank0]:V0828 18:46:03.689000 430414 site-packages/torch/_dynamo/guards.py:4514] [0/2] [__recompiles]     - 0/1: tensor 'x' rank mismatch. expected 3, actual 2
+[rank0]:V0828 18:46:03.689000 430414 site-packages/torch/_dynamo/guards.py:4514] [0/2] [__recompiles]     - 0/0: tensor 'x' size mismatch at index 0. expected 512, actual 4
+[rank0]:V0828 18:46:04.214000 430414 site-packages/torch/_dynamo/guards.py:4514] [1/1] [__recompiles] Recompiling function forward in /workspace/nano-vllm-spec-v2/nanovllm/layers/rotary_embedding.py:37
+[rank0]:V0828 18:46:04.214000 430414 site-packages/torch/_dynamo/guards.py:4514] [1/1] [__recompiles]     triggered by the following guard failure(s):
+[rank0]:V0828 18:46:04.214000 430414 site-packages/torch/_dynamo/guards.py:4514] [1/1] [__recompiles]     - 1/0: tensor 'key' size mismatch at index 0. expected 512, actual 4
+[rank0]:V0828 18:46:05.814000 430414 site-packages/torch/_dynamo/guards.py:4514] [2/1] [__recompiles] Recompiling function add_rms_forward in /workspace/nano-vllm-spec-v2/nanovllm/layers/layernorm.py:28
+[rank0]:V0828 18:46:05.814000 430414 site-packages/torch/_dynamo/guards.py:4514] [2/1] [__recompiles]     triggered by the following guard failure(s):
+[rank0]:V0828 18:46:05.814000 430414 site-packages/torch/_dynamo/guards.py:4514] [2/1] [__recompiles]     - 2/0: tensor 'x' size mismatch at index 0. expected 512, actual 4
+[rank0]:V0828 18:46:06.433000 430414 site-packages/torch/_dynamo/guards.py:4514] [3/1] [__recompiles] Recompiling function forward in /workspace/nano-vllm-spec-v2/nanovllm/layers/activation.py:8
+[rank0]:V0828 18:46:06.433000 430414 site-packages/torch/_dynamo/guards.py:4514] [3/1] [__recompiles]     triggered by the following guard failure(s):
+[rank0]:V0828 18:46:06.433000 430414 site-packages/torch/_dynamo/guards.py:4514] [3/1] [__recompiles]     - 3/0: tensor 'x' size mismatch at index 0. expected 512, actual 4
+[rank0]:V0828 18:46:07.022000 430414 site-packages/torch/_dynamo/guards.py:4514] [0/3] [__recompiles] Recompiling function rms_forward in /workspace/nano-vllm-spec-v2/nanovllm/layers/layernorm.py:16
+[rank0]:V0828 18:46:07.022000 430414 site-packages/torch/_dynamo/guards.py:4514] [0/3] [__recompiles]     triggered by the following guard failure(s):
+[rank0]:V0828 18:46:07.022000 430414 site-packages/torch/_dynamo/guards.py:4514] [0/3] [__recompiles]     - 0/1: tensor 'x' rank mismatch. expected 3, actual 2
+[rank0]:V0828 18:46:07.022000 430414 site-packages/torch/_dynamo/guards.py:4514] [0/3] [__recompiles]     - 0/2: 2 <= x.size()[0] <= 2147483647  # orig_dtype = x.dtype  # orkspace/nano-vllm-spec-v2/nanovllm/layers/layernorm.py:21 in rms_forward (user code shown is first use of this value--the guard itself is not due user code but due to 0/1 specialization in the framework; to avoid specialization try torch._dynamo.decorators.mark_unbacked(tensor, dim)) and (_inductor/codegen/simd.py:1860 in can_use_32bit_indexing)
+[rank0]:V0828 18:46:07.022000 430414 site-packages/torch/_dynamo/guards.py:4514] [0/3] [__recompiles]     - 0/0: tensor 'x' size mismatch at index 0. expected 512, actual 1
+[rank0]:V0828 18:46:07.475000 430414 site-packages/torch/_dynamo/guards.py:4514] [0/4] [__recompiles] Recompiling function rms_forward in /workspace/nano-vllm-spec-v2/nanovllm/layers/layernorm.py:16
+[rank0]:V0828 18:46:07.475000 430414 site-packages/torch/_dynamo/guards.py:4514] [0/4] [__recompiles]     triggered by the following guard failure(s):
+[rank0]:V0828 18:46:07.475000 430414 site-packages/torch/_dynamo/guards.py:4514] [0/4] [__recompiles]     - 0/3: tensor 'x' rank mismatch. expected 2, actual 3
+[rank0]:V0828 18:46:07.475000 430414 site-packages/torch/_dynamo/guards.py:4514] [0/4] [__recompiles]     - 0/1: x.stride()[0] != (128*x.size()[1])  # return func(*args, **kwargs)  # utils/_device.py:109 in __torch_function__ (_prims_common/__init__.py:280 in check_contiguous_sizes_strides)
+[rank0]:V0828 18:46:07.475000 430414 site-packages/torch/_dynamo/guards.py:4514] [0/4] [__recompiles]     - 0/2: tensor 'x' rank mismatch. expected 2, actual 3
+[rank0]:V0828 18:46:07.475000 430414 site-packages/torch/_dynamo/guards.py:4514] [0/4] [__recompiles]     - 0/0: tensor 'x' rank mismatch. expected 2, actual 3
+[rank0]:V0828 18:46:08.376000 430414 site-packages/torch/_dynamo/guards.py:4514] [1/2] [__recompiles] Recompiling function forward in /workspace/nano-vllm-spec-v2/nanovllm/layers/rotary_embedding.py:37
+[rank0]:V0828 18:46:08.376000 430414 site-packages/torch/_dynamo/guards.py:4514] [1/2] [__recompiles]     triggered by the following guard failure(s):
+[rank0]:V0828 18:46:08.376000 430414 site-packages/torch/_dynamo/guards.py:4514] [1/2] [__recompiles]     - 1/1: 2 <= positions.size()[0] <= 2147483647  # query = apply_rotary_emb(query, cos, sin)  # orkspace/nano-vllm-spec-v2/nanovllm/layers/rotary_embedding.py:46 in forward (user code shown is first use of this value--the guard itself is not due user code but due to 0/1 specialization in the framework; to avoid specialization try torch._dynamo.decorators.mark_unbacked(tensor, dim)) and (_inductor/codegen/simd.py:1860 in can_use_32bit_indexing)
+[rank0]:V0828 18:46:08.376000 430414 site-packages/torch/_dynamo/guards.py:4514] [1/2] [__recompiles]     - 1/0: tensor 'key' size mismatch at index 0. expected 512, actual 1
+[rank0]:V0828 18:46:09.411000 430414 site-packages/torch/_dynamo/guards.py:4514] [2/2] [__recompiles] Recompiling function add_rms_forward in /workspace/nano-vllm-spec-v2/nanovllm/layers/layernorm.py:28
+[rank0]:V0828 18:46:09.411000 430414 site-packages/torch/_dynamo/guards.py:4514] [2/2] [__recompiles]     triggered by the following guard failure(s):
+[rank0]:V0828 18:46:09.411000 430414 site-packages/torch/_dynamo/guards.py:4514] [2/2] [__recompiles]     - 2/1: 2 <= x.size()[0] <= 2147483647  # x = x.float().add_(residual.float())  # orkspace/nano-vllm-spec-v2/nanovllm/layers/layernorm.py:35 in add_rms_forward (user code shown is first use of this value--the guard itself is not due user code but due to 0/1 specialization in the framework; to avoid specialization try torch._dynamo.decorators.mark_unbacked(tensor, dim)) and (_inductor/codegen/simd.py:1860 in can_use_32bit_indexing)
+[rank0]:V0828 18:46:09.411000 430414 site-packages/torch/_dynamo/guards.py:4514] [2/2] [__recompiles]     - 2/0: tensor 'x' size mismatch at index 0. expected 512, actual 1
+[rank0]:V0828 18:46:09.872000 430414 site-packages/torch/_dynamo/guards.py:4514] [3/2] [__recompiles] Recompiling function forward in /workspace/nano-vllm-spec-v2/nanovllm/layers/activation.py:8
+[rank0]:V0828 18:46:09.872000 430414 site-packages/torch/_dynamo/guards.py:4514] [3/2] [__recompiles]     triggered by the following guard failure(s):
+[rank0]:V0828 18:46:09.872000 430414 site-packages/torch/_dynamo/guards.py:4514] [3/2] [__recompiles]     - 3/1: 2 <= x.size()[0]  # x, y = x.chunk(2, -1)  # orkspace/nano-vllm-spec-v2/nanovllm/layers/activation.py:10 in forward (user code shown is first use of this value--the guard itself is not due user code but due to 0/1 specialization in the framework; to avoid specialization try torch._dynamo.decorators.mark_unbacked(tensor, dim))
+[rank0]:V0828 18:46:09.872000 430414 site-packages/torch/_dynamo/guards.py:4514] [3/2] [__recompiles]     - 3/0: tensor 'x' size mismatch at index 0. expected 512, actual 1
+[rank0]:V0828 18:46:11.399000 430414 site-packages/torch/_dynamo/guards.py:4514] [0/5] [__recompiles] Recompiling function rms_forward in /workspace/nano-vllm-spec-v2/nanovllm/layers/layernorm.py:16
+[rank0]:V0828 18:46:11.399000 430414 site-packages/torch/_dynamo/guards.py:4514] [0/5] [__recompiles]     triggered by the following guard failure(s):
+[rank0]:V0828 18:46:11.399000 430414 site-packages/torch/_dynamo/guards.py:4514] [0/5] [__recompiles]     - 0/4: GLOBAL_STATE changed: default_dtype 
+[rank0]:V0828 18:46:11.399000 430414 site-packages/torch/_dynamo/guards.py:4514] [0/5] [__recompiles]     - 0/3: GLOBAL_STATE changed: default_dtype 
+[rank0]:V0828 18:46:11.399000 430414 site-packages/torch/_dynamo/guards.py:4514] [0/5] [__recompiles]     - 0/1: GLOBAL_STATE changed: default_dtype 
+[rank0]:V0828 18:46:11.399000 430414 site-packages/torch/_dynamo/guards.py:4514] [0/5] [__recompiles]     - 0/2: GLOBAL_STATE changed: default_dtype 
+[rank0]:V0828 18:46:11.399000 430414 site-packages/torch/_dynamo/guards.py:4514] [0/5] [__recompiles]     - 0/0: GLOBAL_STATE changed: default_dtype 
+[rank0]:V0828 18:46:11.576000 430414 site-packages/torch/_dynamo/guards.py:4514] [0/6] [__recompiles] Recompiling function rms_forward in /workspace/nano-vllm-spec-v2/nanovllm/layers/layernorm.py:16
+[rank0]:V0828 18:46:11.576000 430414 site-packages/torch/_dynamo/guards.py:4514] [0/6] [__recompiles]     triggered by the following guard failure(s):
+[rank0]:V0828 18:46:11.576000 430414 site-packages/torch/_dynamo/guards.py:4514] [0/6] [__recompiles]     - 0/5: tensor 'x' rank mismatch. expected 2, actual 3
+[rank0]:V0828 18:46:11.576000 430414 site-packages/torch/_dynamo/guards.py:4514] [0/6] [__recompiles]     - 0/4: GLOBAL_STATE changed: default_dtype 
+[rank0]:V0828 18:46:11.576000 430414 site-packages/torch/_dynamo/guards.py:4514] [0/6] [__recompiles]     - 0/3: GLOBAL_STATE changed: default_dtype 
+[rank0]:V0828 18:46:11.576000 430414 site-packages/torch/_dynamo/guards.py:4514] [0/6] [__recompiles]     - 0/1: GLOBAL_STATE changed: default_dtype 
+[rank0]:V0828 18:46:11.576000 430414 site-packages/torch/_dynamo/guards.py:4514] [0/6] [__recompiles]     - 0/2: GLOBAL_STATE changed: default_dtype 
+[rank0]:V0828 18:46:11.576000 430414 site-packages/torch/_dynamo/guards.py:4514] [0/6] [__recompiles]     - 0/0: GLOBAL_STATE changed: default_dtype 
+[rank0]:V0828 18:46:11.797000 430414 site-packages/torch/_dynamo/guards.py:4514] [1/3] [__recompiles] Recompiling function forward in /workspace/nano-vllm-spec-v2/nanovllm/layers/rotary_embedding.py:37
+[rank0]:V0828 18:46:11.797000 430414 site-packages/torch/_dynamo/guards.py:4514] [1/3] [__recompiles]     triggered by the following guard failure(s):
+[rank0]:V0828 18:46:11.797000 430414 site-packages/torch/_dynamo/guards.py:4514] [1/3] [__recompiles]     - 1/2: GLOBAL_STATE changed: default_dtype 
+[rank0]:V0828 18:46:11.797000 430414 site-packages/torch/_dynamo/guards.py:4514] [1/3] [__recompiles]     - 1/1: GLOBAL_STATE changed: default_dtype 
+[rank0]:V0828 18:46:11.797000 430414 site-packages/torch/_dynamo/guards.py:4514] [1/3] [__recompiles]     - 1/0: GLOBAL_STATE changed: default_dtype 
+[rank0]:V0828 18:46:12.256000 430414 site-packages/torch/_dynamo/guards.py:4514] [2/3] [__recompiles] Recompiling function add_rms_forward in /workspace/nano-vllm-spec-v2/nanovllm/layers/layernorm.py:28
+[rank0]:V0828 18:46:12.256000 430414 site-packages/torch/_dynamo/guards.py:4514] [2/3] [__recompiles]     triggered by the following guard failure(s):
+[rank0]:V0828 18:46:12.256000 430414 site-packages/torch/_dynamo/guards.py:4514] [2/3] [__recompiles]     - 2/2: GLOBAL_STATE changed: default_dtype 
+[rank0]:V0828 18:46:12.256000 430414 site-packages/torch/_dynamo/guards.py:4514] [2/3] [__recompiles]     - 2/1: GLOBAL_STATE changed: default_dtype 
+[rank0]:V0828 18:46:12.256000 430414 site-packages/torch/_dynamo/guards.py:4514] [2/3] [__recompiles]     - 2/0: GLOBAL_STATE changed: default_dtype 
+[rank0]:V0828 18:46:12.447000 430414 site-packages/torch/_dynamo/guards.py:4514] [3/3] [__recompiles] Recompiling function forward in /workspace/nano-vllm-spec-v2/nanovllm/layers/activation.py:8
+[rank0]:V0828 18:46:12.447000 430414 site-packages/torch/_dynamo/guards.py:4514] [3/3] [__recompiles]     triggered by the following guard failure(s):
+[rank0]:V0828 18:46:12.447000 430414 site-packages/torch/_dynamo/guards.py:4514] [3/3] [__recompiles]     - 3/2: GLOBAL_STATE changed: default_dtype 
+[rank0]:V0828 18:46:12.447000 430414 site-packages/torch/_dynamo/guards.py:4514] [3/3] [__recompiles]     - 3/1: GLOBAL_STATE changed: default_dtype 
+[rank0]:V0828 18:46:12.447000 430414 site-packages/torch/_dynamo/guards.py:4514] [3/3] [__recompiles]     - 3/0: GLOBAL_STATE changed: default_dtype 
+[rank0]:V0828 18:46:12.625000 430414 site-packages/torch/_dynamo/guards.py:4514] [0/7] [__recompiles] Recompiling function rms_forward in /workspace/nano-vllm-spec-v2/nanovllm/layers/layernorm.py:16
+[rank0]:V0828 18:46:12.625000 430414 site-packages/torch/_dynamo/guards.py:4514] [0/7] [__recompiles]     triggered by the following guard failure(s):
+[rank0]:V0828 18:46:12.625000 430414 site-packages/torch/_dynamo/guards.py:4514] [0/7] [__recompiles]     - 0/6: tensor 'x' rank mismatch. expected 3, actual 2
+[rank0]:V0828 18:46:12.625000 430414 site-packages/torch/_dynamo/guards.py:4514] [0/7] [__recompiles]     - 0/5: 2 <= x.size()[0] <= 2147483647  # orig_dtype = x.dtype  # orkspace/nano-vllm-spec-v2/nanovllm/layers/layernorm.py:21 in rms_forward (user code shown is first use of this value--the guard itself is not due user code but due to 0/1 specialization in the framework; to avoid specialization try torch._dynamo.decorators.mark_unbacked(tensor, dim)) and (_inductor/codecache.py:1349 in _lookup_graph)
+[rank0]:V0828 18:46:12.625000 430414 site-packages/torch/_dynamo/guards.py:4514] [0/7] [__recompiles]     - 0/4: GLOBAL_STATE changed: default_dtype 
+[rank0]:V0828 18:46:12.625000 430414 site-packages/torch/_dynamo/guards.py:4514] [0/7] [__recompiles]     - 0/3: GLOBAL_STATE changed: default_dtype 
+[rank0]:V0828 18:46:12.625000 430414 site-packages/torch/_dynamo/guards.py:4514] [0/7] [__recompiles]     - 0/1: GLOBAL_STATE changed: default_dtype 
+[rank0]:V0828 18:46:12.625000 430414 site-packages/torch/_dynamo/guards.py:4514] [0/7] [__recompiles]     - 0/2: GLOBAL_STATE changed: default_dtype 
+[rank0]:V0828 18:46:12.625000 430414 site-packages/torch/_dynamo/guards.py:4514] [0/7] [__recompiles]     - 0/0: GLOBAL_STATE changed: default_dtype 
+[rank0]:V0828 18:46:12.769000 430414 site-packages/torch/_dynamo/guards.py:4514] [0/8] [__recompiles] Recompiling function rms_forward in /workspace/nano-vllm-spec-v2/nanovllm/layers/layernorm.py:16
+[rank0]:V0828 18:46:12.769000 430414 site-packages/torch/_dynamo/guards.py:4514] [0/8] [__recompiles]     triggered by the following guard failure(s):
+[rank0]:V0828 18:46:12.769000 430414 site-packages/torch/_dynamo/guards.py:4514] [0/8] [__recompiles]     - 0/7: tensor 'x' rank mismatch. expected 2, actual 3
+[rank0]:V0828 18:46:12.769000 430414 site-packages/torch/_dynamo/guards.py:4514] [0/8] [__recompiles]     - 0/6: x.stride()[0] != (128*x.size()[1])  # return func(*args, **kwargs)  # utils/_device.py:109 in __torch_function__ (_prims_common/__init__.py:280 in check_contiguous_sizes_strides)
+[rank0]:V0828 18:46:12.769000 430414 site-packages/torch/_dynamo/guards.py:4514] [0/8] [__recompiles]     - 0/5: tensor 'x' rank mismatch. expected 2, actual 3
+[rank0]:V0828 18:46:12.769000 430414 site-packages/torch/_dynamo/guards.py:4514] [0/8] [__recompiles]     - 0/4: GLOBAL_STATE changed: default_dtype 
+[rank0]:V0828 18:46:12.769000 430414 site-packages/torch/_dynamo/guards.py:4514] [0/8] [__recompiles]     - 0/3: GLOBAL_STATE changed: default_dtype 
+[rank0]:V0828 18:46:12.769000 430414 site-packages/torch/_dynamo/guards.py:4514] [0/8] [__recompiles]     - 0/1: GLOBAL_STATE changed: default_dtype 
+[rank0]:V0828 18:46:12.769000 430414 site-packages/torch/_dynamo/guards.py:4514] [0/8] [__recompiles]     - 0/2: GLOBAL_STATE changed: default_dtype 
+[rank0]:V0828 18:46:12.769000 430414 site-packages/torch/_dynamo/guards.py:4514] [0/8] [__recompiles]     - 0/0: GLOBAL_STATE changed: default_dtype 
+[rank0]:W0828 18:46:12.770000 430414 site-packages/torch/_dynamo/convert_frame.py:1676] [0/8] torch._dynamo hit config.recompile_limit (8)
+[rank0]:W0828 18:46:12.770000 430414 site-packages/torch/_dynamo/convert_frame.py:1676] [0/8]    function: 'rms_forward' (/workspace/nano-vllm-spec-v2/nanovllm/layers/layernorm.py:16)
+[rank0]:W0828 18:46:12.770000 430414 site-packages/torch/_dynamo/convert_frame.py:1676] [0/8]    last reason: 0/7: tensor 'x' rank mismatch. expected 2, actual 3
+[rank0]:W0828 18:46:12.770000 430414 site-packages/torch/_dynamo/convert_frame.py:1676] [0/8] To log all recompilation reasons, use TORCH_LOGS="recompiles".
+[rank0]:W0828 18:46:12.770000 430414 site-packages/torch/_dynamo/convert_frame.py:1676] [0/8] To diagnose recompilation issues, see https://pytorch.org/docs/main/compile/programming_model.recompilation.html
+[rank0]:V0828 18:46:12.793000 430414 site-packages/torch/_dynamo/guards.py:4514] [1/4] [__recompiles] Recompiling function forward in /workspace/nano-vllm-spec-v2/nanovllm/layers/rotary_embedding.py:37
+[rank0]:V0828 18:46:12.793000 430414 site-packages/torch/_dynamo/guards.py:4514] [1/4] [__recompiles]     triggered by the following guard failure(s):
+[rank0]:V0828 18:46:12.793000 430414 site-packages/torch/_dynamo/guards.py:4514] [1/4] [__recompiles]     - 1/3: tensor 'positions' dispatch key set mismatch. expected DispatchKeySet(CUDA, BackendSelect, ADInplaceOrView), actual DispatchKeySet(CUDA, BackendSelect)
+[rank0]:V0828 18:46:12.793000 430414 site-packages/torch/_dynamo/guards.py:4514] [1/4] [__recompiles]     - 1/2: GLOBAL_STATE changed: default_dtype 
+[rank0]:V0828 18:46:12.793000 430414 site-packages/torch/_dynamo/guards.py:4514] [1/4] [__recompiles]     - 1/1: GLOBAL_STATE changed: default_dtype 
+[rank0]:V0828 18:46:12.793000 430414 site-packages/torch/_dynamo/guards.py:4514] [1/4] [__recompiles]     - 1/0: GLOBAL_STATE changed: default_dtype 
+[rank0]:V0828 18:46:13.629000 430414 site-packages/torch/_dynamo/guards.py:4514] [2/4] [__recompiles] Recompiling function add_rms_forward in /workspace/nano-vllm-spec-v2/nanovllm/layers/layernorm.py:28
+[rank0]:V0828 18:46:13.629000 430414 site-packages/torch/_dynamo/guards.py:4514] [2/4] [__recompiles]     triggered by the following guard failure(s):
+[rank0]:V0828 18:46:13.629000 430414 site-packages/torch/_dynamo/guards.py:4514] [2/4] [__recompiles]     - 2/3: 2 <= x.size()[0] <= 2147483647  # x = x.float().add_(residual.float())  # orkspace/nano-vllm-spec-v2/nanovllm/layers/layernorm.py:35 in add_rms_forward (user code shown is first use of this value--the guard itself is not due user code but due to 0/1 specialization in the framework; to avoid specialization try torch._dynamo.decorators.mark_unbacked(tensor, dim)) and (_inductor/codecache.py:1349 in _lookup_graph)
+[rank0]:V0828 18:46:13.629000 430414 site-packages/torch/_dynamo/guards.py:4514] [2/4] [__recompiles]     - 2/2: GLOBAL_STATE changed: default_dtype 
+[rank0]:V0828 18:46:13.629000 430414 site-packages/torch/_dynamo/guards.py:4514] [2/4] [__recompiles]     - 2/1: GLOBAL_STATE changed: default_dtype 
+[rank0]:V0828 18:46:13.629000 430414 site-packages/torch/_dynamo/guards.py:4514] [2/4] [__recompiles]     - 2/0: GLOBAL_STATE changed: default_dtype 
+[rank0]:V0828 18:46:13.759000 430414 site-packages/torch/_dynamo/guards.py:4514] [3/4] [__recompiles] Recompiling function forward in /workspace/nano-vllm-spec-v2/nanovllm/layers/activation.py:8
+[rank0]:V0828 18:46:13.759000 430414 site-packages/torch/_dynamo/guards.py:4514] [3/4] [__recompiles]     triggered by the following guard failure(s):
+[rank0]:V0828 18:46:13.759000 430414 site-packages/torch/_dynamo/guards.py:4514] [3/4] [__recompiles]     - 3/3: 2 <= x.size()[0]  # x, y = x.chunk(2, -1)  # orkspace/nano-vllm-spec-v2/nanovllm/layers/activation.py:10 in forward (user code shown is first use of this value--the guard itself is not due user code but due to 0/1 specialization in the framework; to avoid specialization try torch._dynamo.decorators.mark_unbacked(tensor, dim))
+[rank0]:V0828 18:46:13.759000 430414 site-packages/torch/_dynamo/guards.py:4514] [3/4] [__recompiles]     - 3/2: GLOBAL_STATE changed: default_dtype 
+[rank0]:V0828 18:46:13.759000 430414 site-packages/torch/_dynamo/guards.py:4514] [3/4] [__recompiles]     - 3/1: GLOBAL_STATE changed: default_dtype 
+[rank0]:V0828 18:46:13.759000 430414 site-packages/torch/_dynamo/guards.py:4514] [3/4] [__recompiles]     - 3/0: GLOBAL_STATE changed: default_dtype 
+[rank0]:V0828 18:46:13.865000 430414 site-packages/torch/_dynamo/guards.py:4514] [1/5] [__recompiles] Recompiling function forward in /workspace/nano-vllm-spec-v2/nanovllm/layers/rotary_embedding.py:37
+[rank0]:V0828 18:46:13.865000 430414 site-packages/torch/_dynamo/guards.py:4514] [1/5] [__recompiles]     triggered by the following guard failure(s):
+[rank0]:V0828 18:46:13.865000 430414 site-packages/torch/_dynamo/guards.py:4514] [1/5] [__recompiles]     - 1/4: tensor 'key' size mismatch at index 0. expected 1, actual 257
+[rank0]:V0828 18:46:13.865000 430414 site-packages/torch/_dynamo/guards.py:4514] [1/5] [__recompiles]     - 1/3: tensor 'positions' dispatch key set mismatch. expected DispatchKeySet(CUDA, BackendSelect, ADInplaceOrView), actual DispatchKeySet(CUDA, BackendSelect)
+[rank0]:V0828 18:46:13.865000 430414 site-packages/torch/_dynamo/guards.py:4514] [1/5] [__recompiles]     - 1/2: GLOBAL_STATE changed: default_dtype 
+[rank0]:V0828 18:46:13.865000 430414 site-packages/torch/_dynamo/guards.py:4514] [1/5] [__recompiles]     - 1/1: GLOBAL_STATE changed: default_dtype 
+[rank0]:V0828 18:46:13.865000 430414 site-packages/torch/_dynamo/guards.py:4514] [1/5] [__recompiles]     - 1/0: GLOBAL_STATE changed: default_dtype 
+[rank0]:V0828 18:46:14.511000 430414 site-packages/torch/_dynamo/guards.py:4514] [4/3] [__recompiles] Recompiling function forward in /workspace/nano-vllm-spec-v2/nanovllm/layers/sampler.py:518
+[rank0]:V0828 18:46:14.511000 430414 site-packages/torch/_dynamo/guards.py:4514] [4/3] [__recompiles]     triggered by the following guard failure(s):
+[rank0]:V0828 18:46:14.511000 430414 site-packages/torch/_dynamo/guards.py:4514] [4/3] [__recompiles]     - 4/2: GLOBAL_STATE changed: default_dtype 
+[rank0]:V0828 18:46:14.511000 430414 site-packages/torch/_dynamo/guards.py:4514] [4/3] [__recompiles]     - 4/1: GLOBAL_STATE changed: default_dtype 
+[rank0]:V0828 18:46:14.511000 430414 site-packages/torch/_dynamo/guards.py:4514] [4/3] [__recompiles]     - 4/0: GLOBAL_STATE changed: default_dtype 
+V3_DRAFT_INTERVAL_BEGIN run=265d269fcca24baf933b6c60b399b844,record=0,batch=1,bucket=1,k=1,catchup=4
+V3_DRAFT_INTERVAL_END run=265d269fcca24baf933b6c60b399b844,record=0,batch=1,bucket=1,k=1,catchup=4
+V3_DRAFT_INTERVAL_BEGIN run=265d269fcca24baf933b6c60b399b844,record=1,batch=1,bucket=1,k=1,catchup=0
+V3_DRAFT_INTERVAL_END run=265d269fcca24baf933b6c60b399b844,record=1,batch=1,bucket=1,k=1,catchup=0
+V3_DRAFT_INTERVAL_BEGIN run=265d269fcca24baf933b6c60b399b844,record=2,batch=1,bucket=1,k=1,catchup=4
+V3_DRAFT_INTERVAL_END run=265d269fcca24baf933b6c60b399b844,record=2,batch=1,bucket=1,k=1,catchup=4
+V3_DRAFT_INTERVAL_BEGIN run=265d269fcca24baf933b6c60b399b844,record=3,batch=1,bucket=1,k=1,catchup=0
+V3_DRAFT_INTERVAL_END run=265d269fcca24baf933b6c60b399b844,record=3,batch=1,bucket=1,k=1,catchup=0
+V3_DRAFT_INTERVAL_BEGIN run=265d269fcca24baf933b6c60b399b844,record=4,batch=1,bucket=1,k=2,catchup=4
+V3_DRAFT_INTERVAL_END run=265d269fcca24baf933b6c60b399b844,record=4,batch=1,bucket=1,k=2,catchup=4
+V3_DRAFT_INTERVAL_BEGIN run=265d269fcca24baf933b6c60b399b844,record=5,batch=1,bucket=1,k=2,catchup=0
+V3_DRAFT_INTERVAL_END run=265d269fcca24baf933b6c60b399b844,record=5,batch=1,bucket=1,k=2,catchup=0
+V3_DRAFT_INTERVAL_BEGIN run=265d269fcca24baf933b6c60b399b844,record=6,batch=1,bucket=1,k=2,catchup=4
+V3_DRAFT_INTERVAL_END run=265d269fcca24baf933b6c60b399b844,record=6,batch=1,bucket=1,k=2,catchup=4
+V3_DRAFT_INTERVAL_BEGIN run=265d269fcca24baf933b6c60b399b844,record=7,batch=1,bucket=1,k=2,catchup=0
+V3_DRAFT_INTERVAL_END run=265d269fcca24baf933b6c60b399b844,record=7,batch=1,bucket=1,k=2,catchup=0
+[rank0]:V0828 18:46:15.715000 430414 site-packages/torch/_dynamo/guards.py:4514] [4/4] [__recompiles] Recompiling function forward in /workspace/nano-vllm-spec-v2/nanovllm/layers/sampler.py:518
+[rank0]:V0828 18:46:15.715000 430414 site-packages/torch/_dynamo/guards.py:4514] [4/4] [__recompiles]     triggered by the following guard failure(s):
+[rank0]:V0828 18:46:15.715000 430414 site-packages/torch/_dynamo/guards.py:4514] [4/4] [__recompiles]     - 4/3: tensor 'logits' size mismatch at index 0. expected 1, actual 2
+[rank0]:V0828 18:46:15.715000 430414 site-packages/torch/_dynamo/guards.py:4514] [4/4] [__recompiles]     - 4/2: GLOBAL_STATE changed: default_dtype 
+[rank0]:V0828 18:46:15.715000 430414 site-packages/torch/_dynamo/guards.py:4514] [4/4] [__recompiles]     - 4/1: GLOBAL_STATE changed: default_dtype 
+[rank0]:V0828 18:46:15.715000 430414 site-packages/torch/_dynamo/guards.py:4514] [4/4] [__recompiles]     - 4/0: GLOBAL_STATE changed: default_dtype 
+V3_DRAFT_INTERVAL_BEGIN run=265d269fcca24baf933b6c60b399b844,record=8,batch=2,bucket=2,k=1,catchup=8
+V3_DRAFT_INTERVAL_END run=265d269fcca24baf933b6c60b399b844,record=8,batch=2,bucket=2,k=1,catchup=8
+V3_DRAFT_INTERVAL_BEGIN run=265d269fcca24baf933b6c60b399b844,record=9,batch=2,bucket=2,k=1,catchup=0
+V3_DRAFT_INTERVAL_END run=265d269fcca24baf933b6c60b399b844,record=9,batch=2,bucket=2,k=1,catchup=0
+V3_DRAFT_INTERVAL_BEGIN run=265d269fcca24baf933b6c60b399b844,record=10,batch=2,bucket=2,k=1,catchup=8
+V3_DRAFT_INTERVAL_END run=265d269fcca24baf933b6c60b399b844,record=10,batch=2,bucket=2,k=1,catchup=8
+V3_DRAFT_INTERVAL_BEGIN run=265d269fcca24baf933b6c60b399b844,record=11,batch=2,bucket=2,k=1,catchup=0
+V3_DRAFT_INTERVAL_END run=265d269fcca24baf933b6c60b399b844,record=11,batch=2,bucket=2,k=1,catchup=0
+V3_DRAFT_INTERVAL_BEGIN run=265d269fcca24baf933b6c60b399b844,record=12,batch=2,bucket=2,k=2,catchup=8
+V3_DRAFT_INTERVAL_END run=265d269fcca24baf933b6c60b399b844,record=12,batch=2,bucket=2,k=2,catchup=8
+V3_DRAFT_INTERVAL_BEGIN run=265d269fcca24baf933b6c60b399b844,record=13,batch=2,bucket=2,k=2,catchup=0
+V3_DRAFT_INTERVAL_END run=265d269fcca24baf933b6c60b399b844,record=13,batch=2,bucket=2,k=2,catchup=0
+V3_DRAFT_INTERVAL_BEGIN run=265d269fcca24baf933b6c60b399b844,record=14,batch=2,bucket=2,k=2,catchup=8
+V3_DRAFT_INTERVAL_END run=265d269fcca24baf933b6c60b399b844,record=14,batch=2,bucket=2,k=2,catchup=8
+V3_DRAFT_INTERVAL_BEGIN run=265d269fcca24baf933b6c60b399b844,record=15,batch=2,bucket=2,k=2,catchup=0
+V3_DRAFT_INTERVAL_END run=265d269fcca24baf933b6c60b399b844,record=15,batch=2,bucket=2,k=2,catchup=0
+V3_DRAFT_INTERVAL_BEGIN run=265d269fcca24baf933b6c60b399b844,record=16,batch=3,bucket=4,k=1,catchup=12
+V3_DRAFT_INTERVAL_END run=265d269fcca24baf933b6c60b399b844,record=16,batch=3,bucket=4,k=1,catchup=12
+V3_DRAFT_INTERVAL_BEGIN run=265d269fcca24baf933b6c60b399b844,record=17,batch=3,bucket=4,k=1,catchup=0
+V3_DRAFT_INTERVAL_END run=265d269fcca24baf933b6c60b399b844,record=17,batch=3,bucket=4,k=1,catchup=0
+V3_DRAFT_INTERVAL_BEGIN run=265d269fcca24baf933b6c60b399b844,record=18,batch=3,bucket=4,k=1,catchup=12
+V3_DRAFT_INTERVAL_END run=265d269fcca24baf933b6c60b399b844,record=18,batch=3,bucket=4,k=1,catchup=12
+V3_DRAFT_INTERVAL_BEGIN run=265d269fcca24baf933b6c60b399b844,record=19,batch=3,bucket=4,k=1,catchup=0
+V3_DRAFT_INTERVAL_END run=265d269fcca24baf933b6c60b399b844,record=19,batch=3,bucket=4,k=1,catchup=0
+V3_DRAFT_INTERVAL_BEGIN run=265d269fcca24baf933b6c60b399b844,record=20,batch=3,bucket=4,k=2,catchup=12
+V3_DRAFT_INTERVAL_END run=265d269fcca24baf933b6c60b399b844,record=20,batch=3,bucket=4,k=2,catchup=12
+V3_DRAFT_INTERVAL_BEGIN run=265d269fcca24baf933b6c60b399b844,record=21,batch=3,bucket=4,k=2,catchup=0
+V3_DRAFT_INTERVAL_END run=265d269fcca24baf933b6c60b399b844,record=21,batch=3,bucket=4,k=2,catchup=0
+V3_DRAFT_INTERVAL_BEGIN run=265d269fcca24baf933b6c60b399b844,record=22,batch=3,bucket=4,k=2,catchup=12
+V3_DRAFT_INTERVAL_END run=265d269fcca24baf933b6c60b399b844,record=22,batch=3,bucket=4,k=2,catchup=12
+V3_DRAFT_INTERVAL_BEGIN run=265d269fcca24baf933b6c60b399b844,record=23,batch=3,bucket=4,k=2,catchup=0
+V3_DRAFT_INTERVAL_END run=265d269fcca24baf933b6c60b399b844,record=23,batch=3,bucket=4,k=2,catchup=0
+V3_DRAFT_INTERVAL_BEGIN run=265d269fcca24baf933b6c60b399b844,record=24,batch=4,bucket=4,k=1,catchup=16
+V3_DRAFT_INTERVAL_END run=265d269fcca24baf933b6c60b399b844,record=24,batch=4,bucket=4,k=1,catchup=16
+V3_DRAFT_INTERVAL_BEGIN run=265d269fcca24baf933b6c60b399b844,record=25,batch=4,bucket=4,k=1,catchup=0
+V3_DRAFT_INTERVAL_END run=265d269fcca24baf933b6c60b399b844,record=25,batch=4,bucket=4,k=1,catchup=0
+V3_DRAFT_INTERVAL_BEGIN run=265d269fcca24baf933b6c60b399b844,record=26,batch=4,bucket=4,k=1,catchup=16
+V3_DRAFT_INTERVAL_END run=265d269fcca24baf933b6c60b399b844,record=26,batch=4,bucket=4,k=1,catchup=16
+V3_DRAFT_INTERVAL_BEGIN run=265d269fcca24baf933b6c60b399b844,record=27,batch=4,bucket=4,k=1,catchup=0
+V3_DRAFT_INTERVAL_END run=265d269fcca24baf933b6c60b399b844,record=27,batch=4,bucket=4,k=1,catchup=0
+V3_DRAFT_INTERVAL_BEGIN run=265d269fcca24baf933b6c60b399b844,record=28,batch=4,bucket=4,k=2,catchup=16
+V3_DRAFT_INTERVAL_END run=265d269fcca24baf933b6c60b399b844,record=28,batch=4,bucket=4,k=2,catchup=16
+V3_DRAFT_INTERVAL_BEGIN run=265d269fcca24baf933b6c60b399b844,record=29,batch=4,bucket=4,k=2,catchup=0
+V3_DRAFT_INTERVAL_END run=265d269fcca24baf933b6c60b399b844,record=29,batch=4,bucket=4,k=2,catchup=0
+V3_DRAFT_INTERVAL_BEGIN run=265d269fcca24baf933b6c60b399b844,record=30,batch=4,bucket=4,k=2,catchup=16
+V3_DRAFT_INTERVAL_END run=265d269fcca24baf933b6c60b399b844,record=30,batch=4,bucket=4,k=2,catchup=16
+V3_DRAFT_INTERVAL_BEGIN run=265d269fcca24baf933b6c60b399b844,record=31,batch=4,bucket=4,k=2,catchup=0
+V3_DRAFT_INTERVAL_END run=265d269fcca24baf933b6c60b399b844,record=31,batch=4,bucket=4,k=2,catchup=0

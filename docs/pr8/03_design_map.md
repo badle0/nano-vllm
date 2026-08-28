@@ -73,11 +73,14 @@ baseline prefill / chunked prefill ----> ordinary one-token decode fallback
         |                                      ^
         | prompt complete                      | ineligible / no headroom /
         v                                      | over budget / policy bypass
-select pure-decode candidates --> build SpecStepPlan + reserve provisional slots
+baseline-schedule pure-decode candidates and capture decode rollback
+        |
+        v
+build primitive SpecStepPlan + reserve only additional provisional slots
         |                                      |
         |                                      | exception
         v                                      v
-catch draft cache up to committed prefix    rollback reservation
+catch draft cache up to committed prefix    rollback spec lease + decode append
         |
         v
 draft K candidates and retain the actual q_i distributions
@@ -96,7 +99,10 @@ left-to-right accept/reject using p_i and q_i
 validate every row's SpecResult before mutating any Sequence
         |
         v
-atomically commit tokens/cache coverage; trim reservation; hash committed blocks
+atomically finalize physical prefixes and logical tokens/cache coverage
+        |
+        v
+release the lease fence; hash complete committed target blocks while undo remains
         |
         v
 emit one StreamOutput per committed token; record work and delivery separately
@@ -224,12 +230,38 @@ Names below are design sketches, not frozen APIs.
 
 ```python
 @dataclass(frozen=True, slots=True)
+class SpecPlanRow:
+    seq_id: int
+    committed_tokens: int
+    target_cached_tokens: int
+    draft_cached_tokens: int
+    remaining_completion_tokens: int
+    model_position_headroom: int
+    highest_draft_write_position: int | None
+    highest_target_write_position: int | None
+    block_table: tuple[int, ...]
+
+@dataclass(frozen=True, slots=True)
 class SpecStepPlan:
-    rows: tuple[Sequence, ...]
-    lookahead: int                 # common maximum K for this cycle
-    target_query_tokens: int       # sum(K + 1) for verifier rows
-    reservation: BlockReservation # owns only newly appended block IDs
+    cycle_id: int
+    rows: tuple[SpecPlanRow, ...]   # primitive-only, pickle-safe snapshots
+    effective_k: int                # common admitted K for this cycle
+    route_key: SpecRouteKey | None
+    draft_catchup_tokens: int
+    draft_query_tokens: int         # B*K
+    target_query_tokens: int        # B*(K+1) verifier rows
+    total_model_positions: int      # planned full-V5 catch-up+draft+verifier work
+    modeled_live_peak_bytes: int
+    reservation_bytes: int
+    workspace_fingerprint: str
+    gpu_certified: bool
     bypass_reason: str | None
+
+@dataclass(slots=True)
+class ActiveSpecTransaction:       # scheduler-private; never transported
+    plan: SpecStepPlan
+    reservation: BlockReservation
+    baseline_decode_rollback: DecodeScheduleRollback
 
 @dataclass(frozen=True, slots=True)
 class ProposalBatch:
@@ -254,10 +286,18 @@ class SpecExecutionResult:
     draft_positions: int
 ```
 
-`ModelRunner` reads a plan and produces an execution result. It does not append
-tokens or alter scheduler queues. `Scheduler` validates all rows and owns the
-commit. A separate `BlockReservation` object makes rollback and trimming
-idempotent and prevents a failed cycle from guessing which blocks it owns.
+The ordinary-decode fallback sentinel has `effective_k == 0`, both highest
+write positions set to `None`, and `route_key is None`. A live
+`BlockReservation` and the exact baseline decode-append rollback record are
+scheduler-private transaction state; neither may enter the pickle-safe plan.
+
+`ModelRunner` reads the primitive-only plan and produces an execution result. It
+does not append tokens or alter scheduler queues. `Scheduler` validates all rows,
+owns the live `Sequence` references, and owns commit. A `BlockReservation`
+contains live sequence references and allocator snapshots, so it remains inside
+the scheduler-private transaction and is never placed in the pickle-safe runner
+DTO. The separate lease makes rollback and trimming idempotent and prevents a
+failed cycle from guessing which blocks it owns.
 
 Cycle-local proposal tensors must not be added to `Sequence`. The only new
 persistent per-request state should be draft cache coverage (and, only if needed,
@@ -377,8 +417,18 @@ Options: retain `(seqs, is_prefill)` and infer speculation; add flags to
 
 Verdict: introduce a typed plan. The current boolean already means both
 "prefill" and "ragged/mixed". A third meaning would make token charging,
-reservations, TP transport, and runner dispatch implicit. The planner should
-select rows/mode first and reserve exact write coverage second.
+reservations, TP transport, and runner dispatch implicit.
+
+V4 preserves the already-certified baseline scheduling transaction rather than
+attempting a second mutation-free scheduler simulator. It first schedules with
+the existing decode-first/FIFO/preemption rules and captures an exact
+decode-append rollback record. Only a resulting pure-decode batch may then be
+promoted to a
+primitive-only speculative plan; the scheduler reserves all *additional*
+write coverage before speculative GPU/RNG work. Failure rolls back the
+speculative lease and, when ordinary target execution has not established the
+scheduled boundary, the captured baseline append. A future plan-first scheduler
+rewrite requires its own ordering/preemption proof and is not hidden inside V4.
 
 The ordinary plan remains representable without speculative fields so the same
 scheduler can preserve current behavior.
@@ -400,12 +450,17 @@ is not a v1 shortcut.
 
 A verifier for batch `B` and lookahead `K` evaluates `B*(K+1)` target query
 positions, not `B`. It must fit `max_num_batched_tokens`, captured buffers, and
-the selected graph tier.
+the selected graph tier. Separately, nano-vLLM uses the same configured limit as
+a conservative per-cycle work budget so draft catch-up and proposal work cannot
+be hidden behind a verifier-only count.
 
 Verdict: compute a common batch-wide effective `K`:
 
 ```text
-K_budget = floor(max_num_batched_tokens / B) - 1
+target_query_tokens = B*(K+1) <= max_num_batched_tokens
+total_model_positions = catchup + B*K + B*(K+1)
+total_model_positions <= max_num_batched_tokens
+K_budget = max(floor((max_num_batched_tokens - catchup - B) / (2B)), 0)
 K_eff = min(configured_K, K_budget, per-request headroom minima)
 ```
 
@@ -414,8 +469,10 @@ into speculative and ordinary subgroups in one engine step; that complicates
 fairness and RNG identity. If high-batch measurements justify it, a separately
 planned speculative microbatch can be added with explicit ordering tests.
 
-Draft positions are counted separately even though the target token budget is
-the graph/input safety bound.
+The plan records verifier, draft, catch-up, and aggregate counts separately.
+This aggregate rule is intentionally conservative: V7 may relax it only after
+separate-buffer and fairness measurements justify distinct safety and work
+budgets.
 
 ### F12 — Remaining-length and model-position headroom
 
@@ -443,15 +500,18 @@ transactional API such as:
 
 ```text
 reserve_through(sequence, highest_written_position) -> BlockReservation
-commit(reservation, blocks_needed_by_committed_sequence)
+finalize(reservation, keep_block_counts_by_seq_id)
 rollback(reservation)
 ```
 
-The lease records exact appended block IDs and verifies refcounts. On rejection,
-physical rejected KV may remain dirty inside retained committed blocks, but
-logical coverage stops before it. Blocks beyond the committed sequence length
-are trimmed. Prefix hashing sees only complete, committed, logically cached
-blocks.
+The lease records exact appended block IDs and verifies refcounts. Finalization
+validates every row before mutation, retains only a prefix of each row's newly
+appended IDs, releases only exclusive unhashed suffix blocks, and consumes the
+group lease exactly once. Scheduler state remains the sole authority for logical
+cache coverage and committed tokens. On rejection, physical rejected KV may
+remain dirty inside retained committed blocks, but logical coverage stops before
+it. Blocks beyond the committed sequence length are trimmed. Prefix hashing sees
+only complete, committed, logically cached blocks.
 
 ### F14 — Verification compute path and logits selection
 
@@ -541,6 +601,15 @@ verifier ragged `(token_bucket, slot_tier)`, `effective_k`, execution mode, and
 the heterogeneous sampler-plan signature. The signature distinguishes active
 plain/temperature/top-k/top-p/combined row composition, or selects a proved
 conservative worst case. A homogeneous mode label alone is insufficient.
+
+Rung boundary: V4 may compute an exact-geometry
+`modeled_live_peak_bytes`, `reservation_bytes`, and workspace fingerprint, but
+must retain `gpu_certified=false`. It has no live verifier `p`, acceptance,
+correction, or bonus owners from which to measure actual `W_spec_live_peak`.
+Maximum-workspace execution, heterogeneous-sampler CUDA peaks, and allocated /
+reserved reconciliation become V5/V7 gates after those owners exist. V4 proves
+only that modeled ineligible work falls back before speculative allocation and
+that its immutable certificate is propagated and independently revalidated.
 
 After certification, streamed/recomputed target rows, recompute-on-rejection, or
 an exact sparse-support representation may reduce memory. Each alternative must
@@ -777,14 +846,17 @@ as a v2 result.
 | Performance | high acceptance does not imply speedup | paired phase timings and workload-specific roofline/crossover |
 | TP | every rank must execute the same collectives and cache updates | fail-fast v1; real TP certification later |
 
-## 8. Compatibility matrix for the complete v1 path and current V2
+## 8. Compatibility matrix for the complete v1 path and retained V2 snapshot
 
-The “complete path” column is the intended V3-V7 destination, not a claim about
-the current branch. V2 constructs an inert draft owner but deliberately executes
-ordinary target decoding; tests assert that generation performs zero draft
-forwards.
+The “complete path” column is the intended V3-V7 destination. The behavior
+column is intentionally the retained V2 commit `d87f168`, not the current
+branch; it remains here as a historical rung comparison. V2 constructs an inert
+draft owner but deliberately executes ordinary target decoding, and its tests
+assert that generation performs zero draft forwards. The current V3
+draft-proposal/discard overlay and its narrow retained certificate are described
+above in F9, F11, F13, and F26 and in document 04.
 
-| Feature | Complete path | Current V2 behavior |
+| Feature | Complete path | Retained V2 behavior |
 |---|---|---|
 | speculation disabled | supported; exact registered baseline success path | supported; no draft tokenizer/config/model/cache/graph owner; shared loader and RoPE teardown hardening are disclosed above |
 | greedy, TP1 | target-argmax proposal verification, correction, and bonus | configuration/lifecycle only; ordinary target decode, zero draft forwards |

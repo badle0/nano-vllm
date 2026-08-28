@@ -4,34 +4,32 @@ Status: the V0 design packet was frozen in commit `480a3b2`, and V1 sampling-law
 work was implemented and locally certified through `8989e44`. V2's inert
 dual-model lifecycle is implemented at `d87f168b804778fbb5888a662dc8a0defccfd660`
 and retained-certified on A100 by the versioned archive under
-`benchmarks/speculative_v2/evidence/2026-08-28-a100-v2-d87f168/`. The certificate
-covers typed configuration, target/draft identity, transactional
-load/warmup/KV/graph ownership, modeled speculative-workspace reservation, and
-rollback/teardown. Its offline validator resolves the registered runner bytes
-from the immutable `d87f168` Git object, rather than the evolving current
-worktree; CI therefore checks out full history. The V2 archive, manifest, and
-raw artifacts remain byte-for-byte unchanged as V3 evolves. V3 draft catch-up,
-pure-decode planning, transactional
-proposal-write reservation, direct retained-q proposal execution, and
-compute-then-discard are implemented on `feat/spec-v2-draft-path`. The current
-V3 change set also contains the finite draft-only route/workspace/warm
-registry, a 32-token ready-route K cap, a 512-row graph-batch admission cap,
-structurally unreachable-route pruning, post-default-restoration constructor
-pretouch, host-only fail-closed route admission, and the allocator/scheduler/session
-rollback and cancellation fences required by discard execution. The route code
-and tensor-bearing-error wrapper remain Python 3.10 compatible. Dirty-worktree
-A100 exploration has passed the configured-K=2, batch-cap=4 eager and graph
-route gate and both eager and graph zero-versus-NaN draft-cache-neutrality
-comparisons. Fresh eager and graph speculation-off/on output controls also match
-public sequence IDs, authoritative target events/tokens, and all four CPU/CUDA
-RNG checkpoints under combined top-k/top-p sampling. The control exposed and the
-worktree fixed a constructor identity leak: draft warmup now uses a counter-free
-`ScheduledSequence` DTO instead of consuming a public `Sequence` ID. These runs
-are useful development observations, but V3 remains **uncertified**: they are
-not retained clean-SHA evidence, and the complete memory,
-boundary, end-to-end, regression, and archive-validation gates remain pending.
-Target verification, burst commit, speculative streaming/metrics, and
-performance routing remain V4-V7 work.
+`benchmarks/speculative_v2/evidence/2026-08-28-a100-v2-d87f168/`.
+
+V3's draft-discard runtime is frozen at
+`7fec9993d5e4e0e06fec22e3973dfc203fdbd2d8`. Its retained-evidence harness is
+`e8e0452f99727958077b51f340a5375a090e6884`; both commits contain the identical
+`nanovllm` subtree `52398af379f767708a0b804646f4b490fa8323ad`. The clean-SHA
+A100 archive is under
+`benchmarks/speculative_v3/evidence/2026-08-28-a100-v3-e8e0452/`.
+
+V3 is retained-certified for the draft-discard milestone only. On one A100,
+using the same checkpoint as target and draft, the evidence certifies
+transactional draft catch-up, proposal execution and discard; exhaustive
+exercise of every registered finite `draft-discard-v1` route in the retained
+K=2, batch-cap=4 configuration; compiler, RNG,
+and attention-context neutrality inside explicitly guarded draft intervals;
+draft-KV fill neutrality for the registered boundary and shared-prefix
+comparisons; and speculation-off/on parity of public IDs, authoritative target
+events/tokens, and registered RNG checkpoints.
+
+This is not a certificate for target verification, acceptance/rejection, bonus
+or burst commit, speculative streaming or metrics, performance or speedup,
+tensor parallelism greater than one, FlashInfer, or heterogeneous target/draft
+models. Aggregate compiler state outside guarded draft intervals is not claimed
+unchanged. The graph cache-neutrality and output-control runs emitted a Dynamo
+recompile-limit warning outside the route proof, so those artifacts support only
+their stated numerical and output oracles. V4-V7 remain pending.
 
 Design base: `origin/fork-main` at
 `663753b99131945c297c1fbe02341108f422dce7`.
@@ -111,7 +109,8 @@ origin/fork-main @ 663753b
   -> docs/speculative-decoding-v2       (this packet)
   -> feat/spec-v2-sampling-law          (V1 exact sampling-law seam)
   -> feat/spec-v2-dual-runner           (V2 inert dual-model lifecycle)
-  -> feat/spec-v2-draft-path ...        (V3-V7 gated implementation branches)
+  -> feat/spec-v2-draft-path            (V3 narrow retained certificate)
+  -> feat/spec-v2-scheduler-plan ...    (V4-V7 gated implementation branches)
   -> release/speculative-decoding-v2    (only after correctness + A100 gates)
 
 feat/speculative-decoding @ a632b59     (preserved prototype; never merged wholesale)

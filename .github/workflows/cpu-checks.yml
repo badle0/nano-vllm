@@ -61,6 +61,11 @@ jobs:
           python benchmarks/speculative_v2/validate_retained_evidence.py
           benchmarks/speculative_v2/evidence/2026-08-28-a100-v2-d87f168/manifest.json
 
+      - name: Validate retained speculative V3 evidence
+        run: >-
+          python benchmarks/speculative_v3/validate_retained_evidence.py
+          benchmarks/speculative_v3/evidence/2026-08-28-a100-v3-e8e0452
+
   speculative-contracts:
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -117,3 +122,4 @@ jobs:
           tests/test_speculative_v2_lifecycle_harness.py
           tests/test_speculative_v2_gpu_recovery_harness.py
           tests/test_speculative_v2_retained_evidence.py
+          tests/test_speculative_v3_retained_archive.py
