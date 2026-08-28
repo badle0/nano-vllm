@@ -16,6 +16,7 @@ import hashlib
 import json
 import os
 import sys
+import uuid
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
@@ -23,15 +24,40 @@ from types import CodeType
 
 import torch
 
+import nanovllm
+
 from nanovllm import LLM, SamplingParams
+from nanovllm.engine.llm_engine import LLMEngine
+from nanovllm.engine.model_runner import ModelRunner
+from nanovllm.engine.scheduler import Scheduler
 from nanovllm.engine.speculative_routes import (
     DraftRouteAdmission,
     DraftRouteRegistry,
 )
+from nanovllm.layers.sampler import Sampler
 from nanovllm.utils.context import get_context
+from nanovllm.utils.errors import record_cleanup_failure
+
+from _speculative_v3_evidence import (
+    finalize_evidence,
+    path_is_within,
+    prepare_evidence,
+    require_retained_a100_sxm4_40gb,
+    validate_output_paths,
+    write_json_exclusive,
+)
 
 
-SCHEMA = "nano-vllm-speculative-v3-route-compile-v1"
+SCHEMA = "nano-vllm-speculative-v3-route-compile-v2"
+SEED = 20260828
+RETAINED_CONFIGURATION = {
+    "configured_k": 2,
+    "max_num_seqs": 4,
+    "max_num_batched_tokens": 512,
+    "max_model_len": 512,
+    "gpu_memory_utilization": 0.5,
+    "repetitions": 2,
+}
 
 
 def require(condition, message):
@@ -50,26 +76,89 @@ def parse_args(argv=None):
     parser.add_argument("--max-model-len", type=int, default=512)
     parser.add_argument("--gpu-memory-utilization", type=float, default=0.5)
     parser.add_argument("--repetitions", type=int, default=2)
+    parser.add_argument(
+        "--expected-commit",
+        help="full producer commit required by --retained",
+    )
+    parser.add_argument(
+        "--retained",
+        action="store_true",
+        help="enforce clean exact-SHA retained-evidence provenance",
+    )
     parser.add_argument("--output")
     return parser.parse_args(argv)
 
 
-def cache_root(name):
+def cache_root_path(name):
     value = os.environ.get(name)
     require(value, f"{name} must name an initially empty process-unique directory")
-    root = Path(value).resolve()
-    root.mkdir(parents=True, exist_ok=True)
-    require(not any(root.iterdir()), f"{name} is not initially empty: {root}")
+    lexical = Path(value).expanduser()
+    require(not lexical.is_symlink(), f"{name} must not be a symlink")
+    root = lexical.resolve()
     return root
 
 
+def initialize_cache_root(name, root):
+    root.mkdir(parents=True, exist_ok=True)
+    require(root.is_dir() and not root.is_symlink(), f"{name} is not a real directory")
+    require(not any(root.iterdir()), f"{name} is not initially empty: {root}")
+
+
+def validate_cache_root_isolation(
+    inductor_root,
+    triton_root,
+    *,
+    repo_root,
+    model_roots,
+):
+    require(inductor_root != triton_root, "compiler cache roots must be distinct")
+    require(
+        not path_is_within(inductor_root, triton_root)
+        and not path_is_within(triton_root, inductor_root),
+        "compiler cache roots must not be nested",
+    )
+    for name, root in (
+        ("TORCHINDUCTOR_CACHE_DIR", inductor_root),
+        ("TRITON_CACHE_DIR", triton_root),
+    ):
+        require(
+            not path_is_within(root, repo_root),
+            f"{name} must be outside the source checkout",
+        )
+        require(
+            not any(path_is_within(root, model_root) for model_root in model_roots),
+            f"{name} must be outside model directories",
+        )
+
+
 def require_compiler_environment():
+    for name in ("TORCH_COMPILE_DISABLE", "TORCHDYNAMO_DISABLE"):
+        require(
+            os.environ.get(name) in (None, "", "0"),
+            f"{name} must be unset or 0",
+        )
+    require(
+        os.environ.get("TORCHDYNAMO_SUPPRESS_ERRORS") in (None, ""),
+        "TORCHDYNAMO_SUPPRESS_ERRORS must be unset",
+    )
+    from torch._dynamo import config as dynamo_config
+
+    require(
+        dynamo_config.disable is False,
+        "TorchDynamo must be enabled",
+    )
+    require(
+        dynamo_config.suppress_errors is False,
+        "TorchDynamo error suppression must be disabled",
+    )
     disabled_cache_flags = (
         "TORCHINDUCTOR_FX_GRAPH_REMOTE_CACHE",
         "TORCHINDUCTOR_AUTOGRAD_CACHE",
         "TORCHINDUCTOR_AUTOGRAD_REMOTE_CACHE",
         "TORCHINDUCTOR_AUTOTUNE_REMOTE_CACHE",
         "TORCHINDUCTOR_BUNDLED_AUTOTUNE_REMOTE_CACHE",
+        "TORCH_DYNAMO_AUTOMATIC_DYNAMIC_LOCAL_PGO",
+        "TORCH_DYNAMO_AUTOMATIC_DYNAMIC_REMOTE_PGO",
     )
     for name in disabled_cache_flags:
         require(os.environ.get(name) == "0", f"{name} must be 0")
@@ -134,18 +223,6 @@ def cache_manifest_summary(manifest):
     }
 
 
-def compiler_snapshot_summary(snapshot):
-    return {
-        "counters": snapshot["counters"],
-        "guard_failures": snapshot["guard_failures"],
-        "graph_break_reasons": snapshot["graph_break_reasons"],
-        "cache_manifest": cache_manifest_summary(snapshot["cache_manifest"]),
-        "cuda_graph_objects": snapshot["cuda_graph_objects"],
-        "cuda_graph_contexts": snapshot["cuda_graph_contexts"],
-        "snapshot_sha256": payload_sha256(snapshot),
-    }
-
-
 def compiler_delta_summary(before, after):
     summary = {}
     for key in before:
@@ -183,6 +260,31 @@ def compiler_delta(before, after):
         for key in before
         if before[key] != after[key]
     }
+
+
+def require_nonvacuous_compiler_snapshot(snapshot):
+    counters = snapshot.get("counters", {})
+    stats = counters.get("'stats'", {})
+    unique_graphs = stats.get("'unique_graphs'", 0)
+    require(
+        isinstance(unique_graphs, int) and unique_graphs > 0,
+        "constructor pretouch produced no compiled graphs",
+    )
+    manifest = snapshot.get("cache_manifest")
+    require(
+        isinstance(manifest, list)
+        and manifest
+        and sum(item.get("bytes", 0) for item in manifest) > 0,
+        "constructor pretouch produced no compiler-cache artifacts",
+    )
+
+
+def require_retained_configuration(args):
+    for name, expected in RETAINED_CONFIGURATION.items():
+        require(
+            getattr(args, name) == expected,
+            f"retained route evidence requires {name}={expected}",
+        )
 
 
 def rng_hashes():
@@ -255,15 +357,83 @@ def route_dict(key):
     }
 
 
+@contextmanager
+def guarded_draft_interval(interval_label):
+    """Keep fail-on-recompile and stderr sentinels draft-only."""
+
+    torch.compiler.set_stance("fail_on_recompile")
+    try:
+        print(
+            f"V3_DRAFT_INTERVAL_BEGIN {interval_label}",
+            file=sys.stderr,
+            flush=True,
+        )
+        try:
+            yield
+        finally:
+            print(
+                f"V3_DRAFT_INTERVAL_END {interval_label}",
+                file=sys.stderr,
+                flush=True,
+            )
+    finally:
+        torch.compiler.set_stance("default")
+
+
 def force_route_cycle(
     engine,
     *,
     effective_k,
     cache_roots,
     capture_ledger,
+    run_id,
+    record_index,
 ):
     seqs, is_prefill = engine.scheduler.schedule()
     require(seqs and not is_prefill, "forced route cycle did not schedule decode")
+    schedule_rollback = engine.scheduler.capture_decode_schedule_rollback(
+        seqs,
+        is_prefill=is_prefill,
+    )
+    plans = []
+    try:
+        return _force_scheduled_route_cycle(
+            engine,
+            seqs=seqs,
+            effective_k=effective_k,
+            cache_roots=cache_roots,
+            capture_ledger=capture_ledger,
+            plans=plans,
+            run_id=run_id,
+            record_index=record_index,
+        )
+    except BaseException as error:
+        if plans:
+            engine._rollback_failed_draft_state(plans[0], error)
+        try:
+            engine.scheduler.rollback_failed_decode_schedule(
+                schedule_rollback
+            )
+        except BaseException as cleanup_error:
+            record_cleanup_failure(
+                error,
+                "V3 route harness ordinary decode schedule rollback",
+                cleanup_error,
+            )
+        raise
+
+
+def _force_scheduled_route_cycle(
+    engine,
+    *,
+    seqs,
+    effective_k,
+    cache_roots,
+    capture_ledger,
+    plans,
+    run_id,
+    record_index,
+):
     admission = engine.model_runner.resolve_draft_route_admission(seqs)
     require(admission is not None, "ready registry returned a route miss")
     require(
@@ -282,45 +452,38 @@ def force_route_cycle(
         route_admission=forced,
     )
     require(plan.uses_draft, f"forced route fell back: {plan.fallback_reason}")
+    plans.append(plan)
 
+    require(default_context(), "draft interval did not start from default attention context")
     rng_before = rng_hashes()
     compile_before = compiler_snapshot(cache_roots, capture_ledger)
     result = None
     interval_label = (
-        f"batch={len(seqs)},bucket={plan.route_key.batch_bucket},"
+        f"run={run_id},record={record_index},batch={len(seqs)},"
+        f"bucket={plan.route_key.batch_bucket},"
         f"k={effective_k},catchup={plan.draft_catchup_tokens}"
     )
-    print(f"V3_DRAFT_INTERVAL_BEGIN {interval_label}", file=sys.stderr, flush=True)
-    torch.compiler.set_stance("fail_on_recompile")
-    try:
-        try:
-            result = engine.model_runner.run_speculative_discard(plan, seqs)
-        finally:
-            # Target prefill/decode has its own baseline warmup contract. Keep
-            # fail-on-recompile scoped to the draft interval certified here.
-            torch.compiler.set_stance("default")
+    with guarded_draft_interval(interval_label):
+        result = engine.model_runner.run_speculative_discard(plan, seqs)
+        # This synchronizes CUDA while fail-on-recompile remains active.
+        # The matching stderr sentinels therefore bracket only the guarded
+        # draft call and its immediately following compiler snapshot.
         compile_after = compiler_snapshot(cache_roots, capture_ledger)
-        rng_after = rng_hashes()
-        delta = compiler_delta(compile_before, compile_after)
-        require(not delta, f"draft interval changed compiler state: {delta}")
-        require(rng_after == rng_before, "draft interval changed target RNG state")
-        require(default_context(), "draft interval leaked attention context")
-        require(not contains_cuda_tensor(result), "host result retained a CUDA tensor")
-        require(result.route_key == plan.route_key, "result route key drifted")
-
-        vocab_size = engine._admission_limits.vocab_size
-        coverage = engine._validate_draft_discard_result(
-            plan, result, seqs, vocab_size
-        )
-        engine.scheduler.handoff_draft_discard(plan)
-        engine.scheduler.stage_draft_coverage(plan, seqs, coverage)
-        target_tokens = engine.model_runner.run(seqs, False)
-        events = engine.scheduler.postprocess(seqs, target_tokens)
-    except BaseException as error:
-        engine._rollback_failed_draft_state(plan, error)
-        raise
-    finally:
-        print(f"V3_DRAFT_INTERVAL_END {interval_label}", file=sys.stderr, flush=True)
+    rng_after = rng_hashes()
+    delta = compiler_delta(compile_before, compile_after)
+    require(not delta, f"draft interval changed compiler state: {delta}")
+    require(rng_after == rng_before, "draft interval changed target RNG state")
+    require(default_context(), "draft interval leaked attention context")
+    require(not contains_cuda_tensor(result), "host result retained a CUDA tensor")
+    require(result.route_key == plan.route_key, "result route key drifted")
+    vocab_size = engine._admission_limits.vocab_size
+    coverage = engine._validate_draft_discard_result(
+        plan, result, seqs, vocab_size
+    )
+    engine.scheduler.handoff_draft_discard(plan)
+    engine.scheduler.stage_draft_coverage(plan, seqs, coverage)
+    target_tokens = engine.model_runner.run(seqs, False)
+    events = engine.scheduler.postprocess(seqs, target_tokens)
 
     return {
         "route": route_dict(plan.route_key),
@@ -364,24 +527,83 @@ def install_capture_ledger():
 
 
 def main(argv=None):
+    require(
+        sys.flags.optimize == 0,
+        "route certification refuses optimized Python",
+    )
     args = parse_args(argv)
+    require(torch.cuda.is_available(), "CUDA is required")
+    if args.retained:
+        require_retained_a100_sxm4_40gb()
+        require(args.output is not None, "--retained requires --output")
+        require_retained_configuration(args)
     require(args.configured_k >= 1, "configured K must be positive")
     require(args.repetitions >= 2, "at least two repetitions are required")
     require_compiler_environment()
-    inductor_root = cache_root("TORCHINDUCTOR_CACHE_DIR")
-    triton_root = cache_root("TRITON_CACHE_DIR")
+    inductor_root = cache_root_path("TORCHINDUCTOR_CACHE_DIR")
+    triton_root = cache_root_path("TRITON_CACHE_DIR")
+    # Canonicalize the environment consumed later by Torch/Triton so a
+    # symlinked parent cannot be retargeted after path validation.
+    os.environ["TORCHINDUCTOR_CACHE_DIR"] = str(inductor_root)
+    os.environ["TRITON_CACHE_DIR"] = str(triton_root)
+    draft_model = args.draft_model or args.model
+    script_path = Path(__file__).resolve()
+    evidence_context = prepare_evidence(
+        script_path=script_path,
+        retained=args.retained,
+        expected_commit=args.expected_commit,
+        model_arguments={"target": args.model, "draft": draft_model},
+        runtime_imports={
+            "nanovllm": (nanovllm, "nanovllm/__init__.py"),
+            "LLM": (LLM, "nanovllm/llm.py"),
+            "LLMEngine": (LLMEngine, "nanovllm/engine/llm_engine.py"),
+            "ModelRunner": (ModelRunner, "nanovllm/engine/model_runner.py"),
+            "Scheduler": (Scheduler, "nanovllm/engine/scheduler.py"),
+            "Sampler": (Sampler, "nanovllm/layers/sampler.py"),
+            "SamplingParams": (SamplingParams, "nanovllm/sampling_params.py"),
+            "DraftRouteRegistry": (
+                DraftRouteRegistry,
+                "nanovllm/engine/speculative_routes.py",
+            ),
+        },
+    )
+    target_model_path = evidence_context.model_paths["target"]
+    draft_model_path = evidence_context.model_paths["draft"]
+    validate_cache_root_isolation(
+        inductor_root,
+        triton_root,
+        repo_root=evidence_context.repo_root,
+        model_roots=evidence_context.model_paths.values(),
+    )
+    for name, root in (
+        ("TORCHINDUCTOR_CACHE_DIR", inductor_root),
+        ("TRITON_CACHE_DIR", triton_root),
+    ):
+        initialize_cache_root(name, root)
     cache_roots = (
         ("inductor", inductor_root),
         ("triton", triton_root),
     )
+    output_path = None
+    if args.output is not None:
+        output_path = validate_output_paths(
+            (Path(args.output),),
+            repo_root=evidence_context.repo_root,
+            model_roots=evidence_context.model_paths.values(),
+            cache_roots=(inductor_root, triton_root),
+        )[0]
     capture_ledger = install_capture_ledger()
-    torch.manual_seed(20260828)
-    torch.cuda.manual_seed_all(20260828)
+    run_id = uuid.uuid4().hex
+    torch.manual_seed(SEED)
+    torch.cuda.manual_seed_all(SEED)
+    # Reset any sitecustomize/programmatic force-eager stance before the
+    # constructor pretouch.  The post-init non-vacuity gate below proves this
+    # process actually compiled the registered routes.
+    torch.compiler.set_stance("default")
 
-    draft_model = args.draft_model or args.model
     engine = LLM(
-        args.model,
-        draft_model=draft_model,
+        str(target_model_path),
+        draft_model=str(draft_model_path),
         num_speculative_tokens=args.configured_k,
         enforce_eager=args.mode == "eager",
         gpu_memory_utilization=args.gpu_memory_utilization,
@@ -399,6 +621,7 @@ def main(argv=None):
         )
         init_capture_ledger = dict(capture_ledger)
         init_compiler = compiler_snapshot(cache_roots, capture_ledger)
+        require_nonvacuous_compiler_snapshot(init_compiler)
 
         route_batch_cap = max(
             key.batch_bucket for key in registry.ready_keys
@@ -438,12 +661,16 @@ def main(argv=None):
                         effective_k=effective_k,
                         cache_roots=cache_roots,
                         capture_ledger=capture_ledger,
+                        run_id=run_id,
+                        record_index=len(records),
                     )
                     warm = force_route_cycle(
                         engine,
                         effective_k=effective_k,
                         cache_roots=cache_roots,
                         capture_ledger=capture_ledger,
+                        run_id=run_id,
+                        record_index=len(records) + 1,
                     )
                     require(cold["catchup_tokens"] > 0, "cold route lacked catch-up")
                     require(warm["catchup_tokens"] == 0, "warm route repeated catch-up")
@@ -469,11 +696,22 @@ def main(argv=None):
         final_compiler = compiler_snapshot(cache_roots, capture_ledger)
         output = {
             "schema": SCHEMA,
+            "run_id": run_id,
             "generated_at": datetime.now(timezone.utc).isoformat(),
             "mode": args.mode,
-            "model": str(Path(args.model).resolve()),
-            "draft_model": str(Path(draft_model).resolve()),
+            "seed": SEED,
+            "model": str(target_model_path),
+            "draft_model": str(draft_model_path),
             "configured_k": args.configured_k,
+            "configuration": {
+                "max_num_seqs": args.max_num_seqs,
+                "max_num_batched_tokens": args.max_num_batched_tokens,
+                "max_model_len": args.max_model_len,
+                "gpu_memory_utilization": args.gpu_memory_utilization,
+                "repetitions": args.repetitions,
+                "tensor_parallel_size": 1,
+                "top_p_backend": "exact",
+            },
             "registry_cardinality": len(registry.ready_keys),
             "visited_cardinality": len(visited),
             "route_pretouch_peak_bytes": (
@@ -484,7 +722,8 @@ def main(argv=None):
             "all_draft_intervals_compiler_state_unchanged": True,
             "compiler_state_after_init": init_compiler,
             "compiler_state_after_init_sha256": payload_sha256(init_compiler),
-            "compiler_state_after_runtime": compiler_snapshot_summary(
+            "compiler_state_after_runtime": final_compiler,
+            "compiler_state_after_runtime_sha256": payload_sha256(
                 final_compiler
             ),
             "post_init_to_runtime_compiler_delta": compiler_delta_summary(
@@ -495,9 +734,11 @@ def main(argv=None):
     finally:
         engine.exit()
 
-    payload = json.dumps(output, indent=2, sort_keys=True) + "\n"
-    if args.output:
-        Path(args.output).write_text(payload, encoding="utf-8")
+    provenance = finalize_evidence(evidence_context)
+    output["provenance"] = provenance
+    output["retention_eligible"] = provenance["retention_eligible"]
+    if output_path is not None:
+        write_json_exclusive(output_path, output)
         # Retain complete compiler snapshots in the artifact, but keep terminal
         # and CI output bounded even when the cache manifest is large.
         print(
@@ -513,12 +754,14 @@ def main(argv=None):
                     "all_draft_intervals_compiler_state_unchanged": output[
                         "all_draft_intervals_compiler_state_unchanged"
                     ],
-                    "output": str(Path(args.output).resolve()),
+                    "retention_eligible": output["retention_eligible"],
+                    "output": str(output_path),
                 },
                 sort_keys=True,
             )
         )
     else:
+        payload = json.dumps(output, indent=2, sort_keys=True) + "\n"
         print(payload, end="")
 
 

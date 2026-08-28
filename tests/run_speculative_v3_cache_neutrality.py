@@ -18,11 +18,41 @@ from pathlib import Path
 
 import torch
 
+import nanovllm
+
 from nanovllm import LLM, SamplingParams
+from nanovllm.engine.llm_engine import LLMEngine
+from nanovllm.engine.model_runner import ModelRunner
+from nanovllm.engine.scheduler import Scheduler
 from nanovllm.engine.speculative_routes import DraftRouteAdmission
+from nanovllm.layers.sampler import Sampler
+
+from _speculative_v3_evidence import (
+    compiler_cache_roots_from_environment,
+    finalize_evidence,
+    prepare_evidence,
+    require_retained_a100_sxm4_40gb,
+    sha256_file,
+    validate_compiler_cache_root_isolation,
+    validate_output_paths,
+    write_json_exclusive,
+    write_torch_exclusive,
+)
 
 
-SCHEMA = "nano-vllm-speculative-v3-cache-neutrality-v1"
+SCHEMA = "nano-vllm-speculative-v3-cache-neutrality-v2"
+SEED = 20260828
+RECORD_IDS = (
+    "boundary/step-0",
+    "boundary/step-1",
+    "boundary/step-2",
+    "shared-prefix/cold/step-0",
+    "shared-prefix/cold/step-1",
+    "shared-prefix/cold/step-2",
+    "shared-prefix/hit/step-0",
+    "shared-prefix/hit/step-1",
+    "shared-prefix/hit/step-2",
+)
 
 
 def require(condition, message):
@@ -38,20 +68,42 @@ def parse_args(argv=None):
     parser.add_argument(
         "--draft-cache-fill", choices=("zero", "nan"), required=True
     )
+    parser.add_argument(
+        "--expected-commit",
+        help="full producer commit required by --retained",
+    )
+    parser.add_argument(
+        "--retained",
+        action="store_true",
+        help="enforce clean exact-SHA retained-evidence provenance",
+    )
     parser.add_argument("--output", required=True)
     return parser.parse_args(argv)
+
+
+def requested_output_paths(argument):
+    """Derive JSON/tensor siblings without resolving attacker-controlled paths."""
+
+    requested_output = Path(argument).expanduser()
+    requested_tensor = requested_output.with_name(
+        f"{requested_output.stem}.tensors.pt"
+    )
+    return requested_output, requested_tensor
 
 
 def tensor_hash(tensor):
     value = tensor.detach().contiguous().cpu()
     # NumPy cannot expose torch.bfloat16 directly.  Hash the exact underlying
-    # bytes instead of converting and weakening the bitwise oracle.
-    payload = value.view(torch.uint8).numpy().tobytes()
+    # bytes instead of converting and weakening the bitwise oracle.  Domain
+    # separate dtype and shape so equal byte strings cannot alias tensors with
+    # different interpretations.
+    metadata = json.dumps(
+        {"dtype": str(value.dtype), "shape": list(value.shape)},
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    payload = metadata + b"\0" + value.view(torch.uint8).numpy().tobytes()
     return hashlib.sha256(payload).hexdigest()
-
-
-def file_hash(path):
-    return hashlib.sha256(Path(path).read_bytes()).hexdigest()
 
 
 def rng_hashes():
@@ -87,19 +139,30 @@ def install_sampler_recorder(runner):
     tensor_records = []
 
     def recorded(*args, **kwargs):
+        record_index = len(tensor_records)
+        require(record_index < len(RECORD_IDS), "unexpected extra sampler call")
+        record_id = RECORD_IDS[record_index]
         logits = args[0] if args else kwargs["logits"]
         sample = original(*args, **kwargs)
         probabilities = sample.probabilities
+        logits_cpu = logits.detach().contiguous().cpu()
+        probabilities_cpu = probabilities.detach().contiguous().cpu()
         tensor_records.append(
             {
-                "logits": logits.detach().to(torch.float32).contiguous().cpu(),
-                "probabilities": probabilities.detach().contiguous().cpu(),
+                "record_id": record_id,
+                "logits": logits_cpu,
+                "probabilities": probabilities_cpu,
             }
         )
         records.append(
             {
+                "record_id": record_id,
                 "logits_sha256": tensor_hash(logits),
                 "probabilities_sha256": tensor_hash(probabilities),
+                "logits_dtype": str(logits.dtype),
+                "probabilities_dtype": str(probabilities.dtype),
+                "logits_shape": list(logits.shape),
+                "probabilities_shape": list(probabilities.shape),
                 "logits_finite": bool(torch.isfinite(logits).all().item()),
                 "probabilities_finite": bool(
                     torch.isfinite(probabilities).all().item()
@@ -254,6 +317,53 @@ def run_boundary_cell(engine, fill_mode, sampler_records):
     return record
 
 
+def run_neutral_boundary_warmup(engine, sampler_records, tensor_records):
+    """Warm the exact 255/256/257 path before measuring fill sensitivity."""
+
+    prompt = prompt_tokens(255, salt=911)
+    params = SamplingParams(
+        temperature=0.0,
+        top_k=-1,
+        top_p=1.0,
+        max_tokens=5,
+        ignore_eos=True,
+    )
+    seq_id = engine.add_request(prompt, params)
+    prefill = engine._step()
+    require(prefill.num_prefill_tokens == 255, "neutral warmup prefill was not cold")
+    record = execute_forced_cycle(
+        engine,
+        effective_k=3,
+        fill_mode="zero",
+        sampler_records=sampler_records,
+    )
+    engine._cancel_requests([seq_id])
+    require(
+        record["proposal_input_positions"] == [255, 256, 257],
+        "neutral warmup did not cross the target block boundary",
+    )
+    require(record["catchup_tokens"] == 255, "neutral warmup catch-up drifted")
+    require(record["temporary_blocks"] == 1, "neutral warmup reservation drifted")
+    require(
+        len(sampler_records) == len(tensor_records) == 3,
+        "neutral warmup sampler coverage drifted",
+    )
+    summary = {
+        "fill": "zero",
+        "prompt_length": 255,
+        "prompt_salt": 911,
+        "proposal_input_positions": record["proposal_input_positions"],
+        "catchup_tokens": record["catchup_tokens"],
+        "temporary_blocks": record["temporary_blocks"],
+        "proposed_token_ids": record["proposed_token_ids"],
+        "target_token_ids": record["target_token_ids"],
+        "sampler_records_discarded": len(sampler_records),
+    }
+    sampler_records.clear()
+    tensor_records.clear()
+    return summary
+
+
 def run_shared_prefix_cell(engine, fill_mode, sampler_records):
     prompt = prompt_tokens(257, salt=73)
     params = SamplingParams(
@@ -307,11 +417,55 @@ def run_shared_prefix_cell(engine, fill_mode, sampler_records):
 
 def main(argv=None):
     args = parse_args(argv)
-    torch.manual_seed(20260828)
-    torch.cuda.manual_seed_all(20260828)
+    require(torch.cuda.is_available(), "CUDA is required")
+    if args.retained:
+        require_retained_a100_sxm4_40gb()
+    cache_roots = compiler_cache_roots_from_environment(
+        required=args.retained
+    )
+    draft_model = args.draft_model or args.model
+    script_path = Path(__file__).resolve()
+    evidence_context = prepare_evidence(
+        script_path=script_path,
+        retained=args.retained,
+        expected_commit=args.expected_commit,
+        model_arguments={"target": args.model, "draft": draft_model},
+        runtime_imports={
+            "nanovllm": (nanovllm, "nanovllm/__init__.py"),
+            "LLM": (LLM, "nanovllm/llm.py"),
+            "LLMEngine": (LLMEngine, "nanovllm/engine/llm_engine.py"),
+            "ModelRunner": (ModelRunner, "nanovllm/engine/model_runner.py"),
+            "Scheduler": (Scheduler, "nanovllm/engine/scheduler.py"),
+            "Sampler": (Sampler, "nanovllm/layers/sampler.py"),
+            "SamplingParams": (SamplingParams, "nanovllm/sampling_params.py"),
+            "DraftRouteAdmission": (
+                DraftRouteAdmission,
+                "nanovllm/engine/speculative_routes.py",
+            ),
+        },
+    )
+    target_model_path = evidence_context.model_paths["target"]
+    draft_model_path = evidence_context.model_paths["draft"]
+    validate_compiler_cache_root_isolation(
+        cache_roots,
+        repo_root=evidence_context.repo_root,
+        model_roots=evidence_context.model_paths.values(),
+    )
+    # Keep the requested path lexical until the hardened validator has checked
+    # every existing component.  Resolving here would erase a dangling symlink
+    # and could turn the sibling tensor path into an attacker-selected target.
+    requested_output, requested_tensor = requested_output_paths(args.output)
+    output_path, tensor_path = validate_output_paths(
+        (requested_output, requested_tensor),
+        repo_root=evidence_context.repo_root,
+        model_roots=evidence_context.model_paths.values(),
+        cache_roots=cache_roots,
+    )
+    torch.manual_seed(SEED)
+    torch.cuda.manual_seed_all(SEED)
     engine = LLM(
-        args.model,
-        draft_model=args.draft_model or args.model,
+        str(target_model_path),
+        draft_model=str(draft_model_path),
         num_speculative_tokens=3,
         enforce_eager=args.mode == "eager",
         gpu_memory_utilization=0.5,
@@ -323,6 +477,15 @@ def main(argv=None):
         engine.model_runner
     )
     try:
+        measurement_warmup = run_neutral_boundary_warmup(
+            engine,
+            sampler_records,
+            tensor_records,
+        )
+        require(
+            not sampler_records and not tensor_records,
+            "neutral warmup records leaked into measured evidence",
+        )
         boundary = run_boundary_cell(engine, args.draft_cache_fill, sampler_records)
         shared_prefix = run_shared_prefix_cell(
             engine, args.draft_cache_fill, sampler_records
@@ -331,11 +494,45 @@ def main(argv=None):
             "schema": SCHEMA,
             "generated_at": datetime.now(timezone.utc).isoformat(),
             "mode": args.mode,
+            "seed": SEED,
             "draft_cache_fill": args.draft_cache_fill,
-            "model": str(Path(args.model).resolve()),
-            "draft_model": str(
-                Path(args.draft_model or args.model).resolve()
-            ),
+            "model": str(target_model_path),
+            "draft_model": str(draft_model_path),
+            "configuration": {
+                "num_speculative_tokens": 3,
+                "gpu_memory_utilization": 0.5,
+                "max_model_len": 512,
+                "max_num_batched_tokens": 512,
+                "max_num_seqs": 1,
+                "tensor_parallel_size": 1,
+                "top_p_backend": "exact",
+            },
+            "workload": {
+                "neutral_boundary_warmup": {
+                    "length": 255,
+                    "salt": 911,
+                    "fill": "zero",
+                    "proposal_positions": [255, 256, 257],
+                    "sampler_records_discarded": 3,
+                },
+                "boundary_prompt": {
+                    "length": 255,
+                    "salt": 31,
+                    "proposal_positions": [255, 256, 257],
+                },
+                "shared_prefix_prompt": {
+                    "length": 257,
+                    "salt": 73,
+                    "proposal_positions": [257, 258, 259],
+                },
+                "sampling": {
+                    "temperature": 0.0,
+                    "top_k": -1,
+                    "top_p": 1.0,
+                    "ignore_eos": True,
+                },
+            },
+            "measurement_warmup": measurement_warmup,
             "boundary": boundary,
             "shared_prefix": shared_prefix,
             "all_logits_finite": all(
@@ -351,22 +548,30 @@ def main(argv=None):
         )
         engine.exit()
 
-    tensor_path = Path(args.output).with_name(
-        f"{Path(args.output).stem}.tensors.pt"
+    require(
+        [record["record_id"] for record in tensor_records] == list(RECORD_IDS),
+        "cache-neutrality sampler record coverage drifted",
     )
-    torch.save(
+    provenance = finalize_evidence(evidence_context)
+    output["provenance"] = provenance
+    output["retention_eligible"] = provenance["retention_eligible"]
+    write_torch_exclusive(
+        tensor_path,
         {
             "schema": SCHEMA,
             "mode": args.mode,
             "draft_cache_fill": args.draft_cache_fill,
             "records": tensor_records,
         },
-        tensor_path,
     )
-    output["tensor_artifact"] = str(tensor_path.resolve())
-    output["tensor_artifact_sha256"] = file_hash(tensor_path)
-    payload = json.dumps(output, indent=2, sort_keys=True) + "\n"
-    Path(args.output).write_text(payload, encoding="utf-8")
+    output["tensor_artifact"] = {
+        "path": tensor_path.name,
+        "format": "torch-save-weights-only",
+        "size_bytes": tensor_path.stat().st_size,
+        "sha256": sha256_file(tensor_path),
+        "record_count": len(tensor_records),
+    }
+    write_json_exclusive(output_path, output)
     print(
         json.dumps(
             {
@@ -376,7 +581,8 @@ def main(argv=None):
                 "boundary_positions": boundary["proposal_input_positions"],
                 "boundary_proposals": boundary["proposed_token_ids"],
                 "shared_prefix_equal": True,
-                "output": str(Path(args.output).resolve()),
+                "retention_eligible": output["retention_eligible"],
+                "output": str(output_path),
             },
             sort_keys=True,
         )

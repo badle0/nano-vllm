@@ -12,21 +12,32 @@ when the source snapshot taken before engine construction is clean.
 from __future__ import annotations
 
 import argparse
-import hashlib
-import json
-import os
-import platform
-import subprocess
 from pathlib import Path
 
 import torch
 
+import nanovllm
+
 from nanovllm import LLM, SamplingParams
+from nanovllm.engine.llm_engine import LLMEngine
 from nanovllm.engine.model_runner import ModelRunner
+from nanovllm.engine.scheduler import Scheduler
 from nanovllm.engine.speculative_routes import DraftRouteRegistry
+from nanovllm.layers.sampler import Sampler
+
+from _speculative_v3_evidence import (
+    compiler_cache_roots_from_environment,
+    finalize_evidence,
+    prepare_evidence,
+    require_retained_a100_sxm4_40gb,
+    sha256_bytes,
+    validate_compiler_cache_root_isolation,
+    validate_output_paths,
+    write_json_exclusive,
+)
 
 
-SCHEMA = "nano-vllm-speculative-v3-output-control-v1"
+SCHEMA = "nano-vllm-speculative-v3-output-control-v2"
 SEED = 20260828
 DRAFT_PHASES = (
     "_construct_draft_model",
@@ -86,58 +97,17 @@ def parse_args(argv=None):
     parser.add_argument("--max-num-seqs", type=int, default=2)
     parser.add_argument("--gpu-memory-utilization", type=float, default=0.5)
     parser.add_argument("--seed", type=int, default=SEED)
+    parser.add_argument(
+        "--expected-commit",
+        help="full producer commit required by --retained",
+    )
+    parser.add_argument(
+        "--retained",
+        action="store_true",
+        help="enforce clean exact-SHA retained-evidence provenance",
+    )
     parser.add_argument("--output", required=True)
     return parser.parse_args(argv)
-
-
-def sha256_bytes(payload: bytes) -> str:
-    return hashlib.sha256(payload).hexdigest()
-
-
-def file_sha256(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as handle:
-        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
-
-
-def tree_sha256(root: Path) -> str:
-    digest = hashlib.sha256()
-    for path in sorted(root.rglob("*.py")):
-        relative = path.relative_to(root).as_posix().encode("utf-8")
-        payload = path.read_bytes()
-        digest.update(len(relative).to_bytes(8, "little"))
-        digest.update(relative)
-        digest.update(len(payload).to_bytes(8, "little"))
-        digest.update(payload)
-    return digest.hexdigest()
-
-
-def git(repo_root: Path, *args: str) -> str:
-    return subprocess.run(
-        ("git", *args),
-        cwd=repo_root,
-        check=True,
-        capture_output=True,
-        text=True,
-    ).stdout.strip()
-
-
-def source_snapshot(repo_root: Path) -> dict:
-    status = git(
-        repo_root,
-        "status",
-        "--porcelain=v1",
-        "--untracked-files=all",
-    )
-    return {
-        "repo_root": str(repo_root),
-        "head": git(repo_root, "rev-parse", "HEAD"),
-        "clean": not bool(status),
-        "status_sha256": sha256_bytes(status.encode("utf-8")),
-        "nanovllm_python_tree_sha256": tree_sha256(repo_root / "nanovllm"),
-    }
 
 
 def seed_all(seed: int) -> None:
@@ -261,20 +231,17 @@ def draft_owned_instance_attributes(runner: ModelRunner) -> list[str]:
     )
 
 
-def write_once(path: Path, payload: dict) -> None:
-    path = path.expanduser().resolve()
-    path.parent.mkdir(parents=True, exist_ok=True)
-    require(not path.exists(), f"refusing to overwrite output: {path}")
-    encoded = json.dumps(payload, indent=2, sort_keys=True) + "\n"
-    path.write_text(encoded, encoding="utf-8")
-
-
 def main(argv=None):
     args = parse_args(argv)
     require(torch.cuda.is_available(), "CUDA is required")
     require(torch.cuda.device_count() == 1, "control requires exactly one visible GPU")
     device_name = torch.cuda.get_device_name(0)
     require("A100" in device_name, f"control requires an A100, got {device_name!r}")
+    if args.retained:
+        require_retained_a100_sxm4_40gb()
+    cache_roots = compiler_cache_roots_from_environment(
+        required=args.retained
+    )
     require(args.configured_k >= 1, "configured K must be positive")
     require(args.max_num_seqs >= len(PROMPTS), "max_num_seqs is too small")
     require(
@@ -283,8 +250,38 @@ def main(argv=None):
     )
 
     script_path = Path(__file__).resolve()
-    repo_root = script_path.parents[1]
-    source = source_snapshot(repo_root)
+    evidence_context = prepare_evidence(
+        script_path=script_path,
+        retained=args.retained,
+        expected_commit=args.expected_commit,
+        model_arguments={"target": args.model, "draft": args.draft_model},
+        runtime_imports={
+            "nanovllm": (nanovllm, "nanovllm/__init__.py"),
+            "LLM": (LLM, "nanovllm/llm.py"),
+            "LLMEngine": (LLMEngine, "nanovllm/engine/llm_engine.py"),
+            "ModelRunner": (ModelRunner, "nanovllm/engine/model_runner.py"),
+            "Scheduler": (Scheduler, "nanovllm/engine/scheduler.py"),
+            "Sampler": (Sampler, "nanovllm/layers/sampler.py"),
+            "SamplingParams": (SamplingParams, "nanovllm/sampling_params.py"),
+            "DraftRouteRegistry": (
+                DraftRouteRegistry,
+                "nanovllm/engine/speculative_routes.py",
+            ),
+        },
+    )
+    target_model_path = evidence_context.model_paths["target"]
+    draft_model_path = evidence_context.model_paths["draft"]
+    validate_compiler_cache_root_isolation(
+        cache_roots,
+        repo_root=evidence_context.repo_root,
+        model_roots=evidence_context.model_paths.values(),
+    )
+    output_path = validate_output_paths(
+        (Path(args.output),),
+        repo_root=evidence_context.repo_root,
+        model_roots=evidence_context.model_paths.values(),
+        cache_roots=cache_roots,
+    )[0]
     phase_ledger = install_draft_phase_ledger()
     runtime_draft_calls = install_runtime_draft_ledger()
     seed_all(args.seed)
@@ -298,14 +295,14 @@ def main(argv=None):
     )
     if args.side == "on":
         common.update(
-            draft_model=args.draft_model,
+            draft_model=str(draft_model_path),
             num_speculative_tokens=args.configured_k,
         )
 
     engine = None
     output = None
     try:
-        engine = LLM(args.model, **common)
+        engine = LLM(str(target_model_path), **common)
         runner = engine.model_runner
         resource_state = live_draft_resource_state(runner)
         draft_owned_attributes = draft_owned_instance_attributes(runner)
@@ -402,10 +399,8 @@ def main(argv=None):
             "side": args.side,
             "mode": args.mode,
             "seed": args.seed,
-            "model": str(Path(args.model).expanduser().resolve()),
-            "draft_model_argument": str(
-                Path(args.draft_model).expanduser().resolve()
-            ),
+            "model": str(target_model_path),
+            "draft_model_argument": str(draft_model_path),
             "configured_k": args.configured_k,
             "configuration": {
                 "max_model_len": args.max_model_len,
@@ -425,16 +420,6 @@ def main(argv=None):
                     "ignore_eos": True,
                 },
             },
-            "source": source,
-            "runner_script_sha256": file_sha256(script_path),
-            "retention_eligible": source["clean"],
-            "environment": {
-                "python": platform.python_version(),
-                "torch": torch.__version__,
-                "torch_cuda": torch.version.cuda,
-                "device_name": device_name,
-                "cuda_visible_devices": os.environ.get("CUDA_VISIBLE_DEVICES"),
-            },
             "draft_phase_calls": dict(phase_ledger),
             "live_draft_resource_attributes": resource_state,
             "draft_owned_instance_attributes": draft_owned_attributes,
@@ -449,12 +434,15 @@ def main(argv=None):
             engine.exit()
 
     require(output is not None, "control did not produce output")
-    output_path = Path(args.output)
-    write_once(output_path, output)
+    provenance = finalize_evidence(evidence_context)
+    output["provenance"] = provenance
+    output["retention_eligible"] = provenance["retention_eligible"]
+    write_json_exclusive(output_path, output)
     print(
-        f"wrote {output_path.expanduser().resolve()}: side={args.side}, "
+        f"wrote {output_path}: side={args.side}, "
         f"mode={args.mode}, target_events={len(output['authoritative_target_events'])}, "
-        f"draft_intervals={len(output['runtime_draft_calls'])}",
+        f"draft_intervals={len(output['runtime_draft_calls'])}, "
+        f"retention_eligible={output['retention_eligible']}",
         flush=True,
     )
 
