@@ -53,6 +53,17 @@ def main():
     assert Path(nanovllm.__file__).resolve() == source / "nanovllm/__init__.py"
     torch.set_num_threads(1)
     source_hashes = {str(p.relative_to(source)): digest_file(p) for p in sorted((source / "nanovllm").rglob("*.py"))}
+    # Bind even an exported old-runtime control to immutable Git blobs, not a
+    # caller-supplied revision label. The harness always comes from this repo.
+    repo = Path(__file__).resolve().parents[1]
+    def git(*parts):
+        return subprocess.check_output(["git", "-C", str(repo), *parts])
+    revision = git("rev-parse", args.revision).decode().strip()
+    tracked = git("ls-tree", "-r", "--name-only", revision, "nanovllm").decode().splitlines()
+    expected = {name: hashlib.sha256(git("show", f"{revision}:{name}")).hexdigest()
+                for name in tracked if name.endswith(".py")}
+    if source_hashes != expected:
+        raise RuntimeError("benchmark runtime does not match its declared Git revision")
     maximum_batch = 128 if args.suite == "extended" else 8
     config = dict(max_num_seqs=maximum_batch, max_num_batched_tokens=4096,
                   max_model_len=4096, num_kvcache_blocks=64,
@@ -164,6 +175,7 @@ def main():
                            bandwidth_bytes_per_second=bandwidth, matmul_shape=[4096] * 3,
                            matmul_ms=matmul_ms, bf16_flops_per_second=2 * 4096**3 / (matmul_ms / 1000))
         payload = dict(schema="speculative-v7-benchmark-v1", args={**vars(args), "source_root": str(source), "output": str(args.output)},
+                       runtime_revision=revision, harness_sha256=digest_file(Path(__file__)),
                        source_sha256=source_hashes, torch=torch.__version__, cuda=torch.version.cuda,
                        python=platform.python_version(), gpu=torch.cuda.get_device_name(),
                        config=config, initialization_seconds=initialization_seconds,

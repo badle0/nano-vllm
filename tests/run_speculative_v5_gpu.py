@@ -218,19 +218,29 @@ def main():
                         sweep_cells.append(dict(batch=batch, k=cap, sampling=name, cycles=len(cycles) - start))
             finally:
                 runner.resolve_draft_route_admission = original_resolver
-        # Consume prefill then only part of a burst; close must drop pending events.
-        with llm.stream([[42] * 16], SamplingParams(temperature=0., max_tokens=24, ignore_eos=True)) as session:
-            next(session)
-            next(session)
+        # Different models need not accept their first proposal. Find an actual
+        # pending burst rather than assuming the second read produced one.
+        lifecycle_prompt = [42] * 16
+        if args.draft_model and Path(args.draft_model).resolve() != Path(args.model).resolve():
+            phrase = llm.tokenizer.encode("Explain how a computer predicts the next word in a sentence. ")
+            lifecycle_prompt = (phrase * 32)[:32]
+        def consume_partial_burst(session):
+            for _ in range(24 if args.enabled else 2):
+                next(session)
+                if session._pending:
+                    return
+            if args.enabled:
+                raise AssertionError("lifecycle fixture produced no accepted burst")
+        with llm.stream([lifecycle_prompt], SamplingParams(temperature=0., max_tokens=24, ignore_eos=True)) as session:
+            consume_partial_burst(session)
             pending_before_close = len(session._pending)
         assert not session._pending
         check_drained()
         with llm.stream([[42] * 16], SamplingParams(max_tokens=4, ignore_eos=True)):
             pass  # close before first step
         check_drained()
-        abandoned = llm.stream([[42] * 16], SamplingParams(temperature=0., max_tokens=24, ignore_eos=True))
-        next(abandoned)
-        next(abandoned)
+        abandoned = llm.stream([lifecycle_prompt], SamplingParams(temperature=0., max_tokens=24, ignore_eos=True))
+        consume_partial_burst(abandoned)
         abandoned_pending = len(abandoned._pending)
         reference = weakref.ref(abandoned)
         with warnings.catch_warnings(record=True) as caught:
@@ -241,7 +251,7 @@ def main():
         assert any("garbage-collected" in str(w.message) for w in caught)
         check_drained()
         # A fresh session proves finalizer released the exclusive engine lease.
-        with llm.stream([[42] * 16], SamplingParams(temperature=0., max_tokens=9, ignore_eos=True)) as completed:
+        with llm.stream([lifecycle_prompt], SamplingParams(temperature=0., max_tokens=9, ignore_eos=True)) as completed:
             terminal_events = list(completed)
         metrics = next(iter(completed.metrics.values()))
         assert len(terminal_events) == metrics["num_completion_tokens"] == 9
