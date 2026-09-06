@@ -75,17 +75,19 @@ def analyze(archive):
                          median_caller_e2e=median(caller_e2e)))
     calibrations = [run["calibration"] for name, run in runs.items() if name.startswith("primary-")]
     model = runs["primary-p0-on"]
+    ledger = json.loads((archive / "phases-graph.json").read_text())["weight_ledger"]
     cfg = model["target_config"]
     kv_per_token = 2 * cfg["num_hidden_layers"] * cfg["num_key_value_heads"] * cfg["head_dim"] * 2
     bandwidth = median(c["bandwidth_bytes_per_second"] for c in calibrations)
     compute = median(c["bf16_flops_per_second"] for c in calibrations)
     roofs = dict(bandwidth_bytes_per_second=bandwidth, bf16_flops_per_second=compute,
-                 target_parameter_count=model["target_parameter_count"], target_weight_bytes=model["target_weight_bytes"],
-                 draft_weight_bytes=model["draft_weight_bytes"], target_kv_bytes_per_token=kv_per_token,
-                 target_weight_stream_ms=1000 * model["target_weight_bytes"] / bandwidth,
-                 draft_weight_stream_ms=1000 * model["draft_weight_bytes"] / bandwidth,
+                 parameter_objects_count=model["target_parameter_count"], weight_ledger=ledger,
+                 target_weight_bytes=ledger["target"]["unique_storage_bytes"],
+                 draft_weight_bytes=ledger["draft"]["unique_storage_bytes"], target_kv_bytes_per_token=kv_per_token,
+                 target_weight_stream_ms=1000 * ledger["target"]["unique_storage_bytes"] / bandwidth,
+                 draft_weight_stream_ms=1000 * ledger["draft"]["unique_storage_bytes"] / bandwidth,
                  probability_bytes_b4_k4=4 * (4 + 4 + 1) * cfg["vocab_size"] * 4,
-                 target_dense_flops_per_query=2 * model["target_parameter_count"])
+                 target_dense_flops_per_query=2 * ledger["target"]["linear_weight_elements"])
     phases = []
     for mode in ("graph", "eager"):
         value = json.loads((archive / f"phases-{mode}.json").read_text())

@@ -142,6 +142,10 @@ def check_phases(value, role, repo=ROOT):
     require(value["mode"] == role.split("-")[1], "wrong phase mode")
     require(value["source_sha256"] == runtime_hashes(repo, BENCH_PRODUCER) == runtime_hashes(repo, value["revision"]), "phase runtime mismatch")
     require(value["harness_sha256"] == sha(git(repo, "show", f"{value['revision']}:tests/run_speculative_v7_phases.py")), "wrong phase harness")
+    for label, ledger in value["weight_ledger"].items():
+        require(label in ("target", "draft") and ledger["tied_storage"] is True, "wrong tied-weight model")
+        require(ledger["parameter_object_bytes"] - ledger["unique_storage_bytes"] == ledger["embedding_bytes"] > 0, "tied storage counted twice")
+        require(0 < 2 * ledger["linear_weight_elements"] <= ledger["unique_storage_bytes"], "invalid dense weight count")
     expected = {(b, f, w) for b in (1, 4) for f in ("greedy", "plain") for w in ("prose", "code", "repetitive", "adversarial")}
     require(len(value["cells"]) == 16 and {tuple(c["cell"]) for c in value["cells"]} == expected, "incomplete phase matrix")
     require(sum(c["cycles"] for c in value["cells"]) == len(value["cycles"]), "phase cycle counts mismatch")

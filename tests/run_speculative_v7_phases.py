@@ -58,6 +58,16 @@ def main():
     install(llm.model_runner, "run_speculative", "run_speculative")
     install(llm.scheduler, "commit_speculative", "commit")
     original_execute = llm._execute_speculative_verified
+    def weight_ledger(model):
+        # Parameter objects can share storage (tied embedding / LM head). Count
+        # physical storage once; count the LM head, not embedding lookup, as GEMM.
+        storages = {p.untyped_storage().data_ptr(): p.untyped_storage().nbytes() for p in model.parameters()}
+        return dict(parameter_object_bytes=sum(p.numel() * p.element_size() for p in model.parameters()),
+                    unique_storage_bytes=sum(storages.values()),
+                    linear_weight_elements=sum(p.numel() for name, p in model.named_parameters()
+                                               if p.ndim == 2 and name != "model.embed_tokens.weight"),
+                    embedding_bytes=model.model.embed_tokens.weight.numel() * model.model.embed_tokens.weight.element_size(),
+                    tied_storage=model.model.embed_tokens.weight.data_ptr() == model.lm_head.weight.data_ptr())
     current_cell = None
     def observe_cycle(*positional, **keywords):
         nonlocal active
@@ -100,6 +110,8 @@ def main():
             json.dump(dict(schema="speculative-v7-phase-diagnostics-v1", mode=args.mode,
                            revision=revision, source_sha256=source,
                            harness_sha256=hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
+                           weight_ledger={"target": weight_ledger(llm.model_runner.model),
+                                          "draft": weight_ledger(llm.model_runner.draft_model)},
                            synchronized=True, headline=False, cells=cells, cycles=cycles), handle, indent=2, allow_nan=False)
         print("PASS", args.output, "cycles", len(cycles), flush=True)
     finally:
