@@ -144,6 +144,8 @@ def check_phases(value, role, repo=ROOT):
     require(value["schema"] == "speculative-v7-phase-diagnostics-v1", "wrong phase schema")
     require(value["headline"] is False and value["synchronized"] is True, "instrumented phases misrepresented as headline")
     require(value["mode"] == role.split("-")[1], "wrong phase mode")
+    require("A100-SXM4-40GB" in value["gpu"], "wrong phase GPU")
+    check_models(value["models"])
     require(value["source_sha256"] == runtime_hashes(repo, BENCH_PRODUCER) == runtime_hashes(repo, value["revision"]), "phase runtime mismatch")
     require(value["harness_sha256"] == sha(git(repo, "show", f"{value['revision']}:tests/run_speculative_v7_phases.py")), "wrong phase harness")
     for label, ledger in value["weight_ledger"].items():

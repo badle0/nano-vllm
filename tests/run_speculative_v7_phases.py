@@ -10,6 +10,7 @@ import time
 import torch
 from nanovllm import LLM, SamplingParams
 import nanovllm.engine.speculative_execution as execution
+from run_speculative_v7_benchmark import digest_file, hardware
 
 
 def main():
@@ -28,6 +29,7 @@ def main():
               max_num_seqs=8, max_num_batched_tokens=4096, max_model_len=4096,
               num_kvcache_blocks=64, gpu_memory_utilization=.8,
               enforce_eager=args.mode == "eager")
+    hardware_before = hardware()
     active = None
     cells, cycles = [], []
     restores = []
@@ -108,10 +110,17 @@ def main():
         assert source == {str(p): hashlib.sha256(p.read_bytes()).hexdigest() for p in sorted(Path("nanovllm").rglob("*.py"))}
         with args.output.open("x") as handle:
             json.dump(dict(schema="speculative-v7-phase-diagnostics-v1", mode=args.mode,
+                           args={**vars(args), "output": str(args.output)},
+                           gpu=torch.cuda.get_device_name(), torch=torch.__version__, cuda=torch.version.cuda,
+                           hardware_before=hardware_before, hardware_after=hardware(),
                            revision=revision, source_sha256=source,
                            harness_sha256=hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
                            weight_ledger={"target": weight_ledger(llm.model_runner.model),
                                           "draft": weight_ledger(llm.model_runner.draft_model)},
+                           models={label: {p.name: dict(bytes=p.stat().st_size, sha256=digest_file(p))
+                                           for p in sorted(Path(directory).iterdir())
+                                           if p.is_file() and (p.suffix == ".safetensors" or p.name == "config.json")}
+                                   for label, directory in (("target", args.model), ("draft", args.draft_model))},
                            synchronized=True, headline=False, cells=cells, cycles=cycles), handle, indent=2, allow_nan=False)
         print("PASS", args.output, "cycles", len(cycles), flush=True)
     finally:

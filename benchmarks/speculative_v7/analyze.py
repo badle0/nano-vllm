@@ -58,6 +58,7 @@ def analyze(archive):
     for result in primary:
         cell = tuple(result["cell"])
         rows = [row for name, run in runs.items() if name.startswith("primary-") and name.endswith("-on")
+                and run["args"]["pair"] in result["selected_pairs"]
                 for row in run["records"] if key(row) == cell and row["accepted"]]
         totals = {}
         itls, ttfts, caller_e2e = [], [], []
