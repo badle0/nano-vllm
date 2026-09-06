@@ -29,7 +29,10 @@ tensor parallelism greater than one, FlashInfer, or heterogeneous target/draft
 models. Aggregate compiler state outside guarded draft intervals is not claimed
 unchanged. The graph cache-neutrality and output-control runs emitted a Dynamo
 recompile-limit warning outside the route proof, so those artifacts support only
-their stated numerical and output oracles. V4-V7 remain pending.
+their stated numerical and output oracles. V4 planning, reservation and shadow
+integration are implemented as a local checkpoint; its full retained certificate
+and V5-V7 remain pending. See [07_v4_scheduler_transactions.md](07_v4_scheduler_transactions.md)
+for the implementation, test results and explicit unfinished gates.
 
 Design base: `origin/fork-main` at
 `663753b99131945c297c1fbe02341108f422dce7`.
@@ -59,6 +62,8 @@ match `fork-main`.
 6. [06_v2_dual_model_lifecycle.md](06_v2_dual_model_lifecycle.md) records the
    live V2 implementation delta, capacity policy, failure transaction, test
    protocol, evidence status, and the exact boundary to V3 and later work.
+7. [07_v4_scheduler_transactions.md](07_v4_scheduler_transactions.md) records
+   V4's full-cycle planning, shadow transaction integration and remaining gates.
 
 The request's fourth list item was blank. This packet interprets it as the
 implementation, validation, and benchmark rollout plan because that is the

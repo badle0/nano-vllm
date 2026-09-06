@@ -123,3 +123,22 @@ jobs:
           tests/test_speculative_v2_gpu_recovery_harness.py
           tests/test_speculative_v2_retained_evidence.py
           tests/test_speculative_v3_retained_archive.py
+
+      - name: Verify speculative V3/V4 shadow transaction contracts
+        env:
+          CUDA_VISIBLE_DEVICES: ""
+          HF_HUB_OFFLINE: "1"
+          PYTHONDONTWRITEBYTECODE: "1"
+          PYTHONPATH: .github/ci/speculative_v2:.
+          TRANSFORMERS_OFFLINE: "1"
+        run: >-
+          python -m pytest -q -p no:cacheprovider
+          tests/test_speculative_v3_engine.py
+          tests/test_speculative_v3_plan.py
+          tests/test_speculative_v3_runner.py
+          tests/test_speculative_v3_routes.py
+          tests/test_speculative_v4_workspace_plan.py
+          tests/test_speculative_v4_block_finalizer.py
+          tests/test_speculative_v4_integration.py
+          tests/test_scheduler.py
+          tests/test_scheduler_cancel.py

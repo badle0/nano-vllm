@@ -797,6 +797,12 @@ extend the guarded compiler claim.
 
 ### V4: scheduler plan and reservations
 
+Implementation checkpoint (2026-09-06): the planner, physical finalizer and
+engine/runner shadow transaction are implemented on `feat/spec-v2-scheduler-plan`.
+See [07_v4_scheduler_transactions.md](07_v4_scheduler_transactions.md) for local
+tests, the exploratory A100 eager control, and outstanding certification gates.
+This rung is not yet marked fully certified; the hard gates below still apply.
+
 Changes:
 
 - generalize V3's private discard plan into the explicit speculative step plan

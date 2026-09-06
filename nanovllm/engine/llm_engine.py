@@ -32,7 +32,8 @@ import torch.multiprocessing as mp
 from nanovllm.config import Config
 from nanovllm.sampling_params import SamplingParams
 from nanovllm.engine.sequence import Sequence, StreamOutput
-from nanovllm.engine.scheduler import Scheduler
+from nanovllm.engine.scheduler import Scheduler, as_draft_discard_plan
+from nanovllm.engine.speculative_plan import SpecStepPlan
 from nanovllm.engine.speculative_routes import DraftRouteKey
 from nanovllm.engine.model_runner import ModelRunner
 from nanovllm.metrics import compute_metrics
@@ -800,6 +801,9 @@ class LLMEngine:
     def _validate_draft_discard_result(plan, result, seqs, vocab_size: int):
         """Validate host-only draft diagnostics before target state can mutate."""
 
+        if isinstance(plan, SpecStepPlan):
+            plan = as_draft_discard_plan(plan)
+
         if type(vocab_size) is not int or vocab_size < 1:
             raise SpeculativeDiscardResultError(
                 "draft result validation requires a positive integer vocabulary"
@@ -1035,6 +1039,26 @@ class LLMEngine:
             raise
         return plan, coverage
 
+    def _execute_speculative_shadow(self, seqs, schedule_rollback):
+        """Execute V4 planning with the existing proposal/discard kernels."""
+        runner = self.model_runner
+        admission = self._resolve_draft_route_admission(seqs)
+        plan = self.scheduler.plan_speculative_step(
+            seqs,
+            configured_workspace=runner.speculative_memory_plan,
+            route_admission=admission,
+            baseline_decode_rollback=schedule_rollback,
+        )
+        if not plan.uses_speculation:
+            return None
+        result = runner.call("run_speculative_discard", plan, seqs)
+        coverage = self._validate_draft_discard_result(
+            plan, result, seqs, self._admission_limits.vocab_size,
+        )
+        self.scheduler.handoff_draft_discard(plan)
+        self.scheduler.stage_draft_coverage(plan, seqs, coverage)
+        return plan, coverage
+
     def _step(self) -> StepOutput:
         execution_lock = getattr(self, "_execution_lock", None)
         if execution_lock is None:
@@ -1063,10 +1087,21 @@ class LLMEngine:
             )
         draft_cycle = None
         try:
-            draft_cycle = self._execute_draft_discard(seqs, is_prefill)
+            if (not is_prefill
+                    and bool(getattr(runner, "speculation_enabled", False))
+                    and callable(getattr(self.scheduler, "plan_speculative_step", None))):
+                draft_cycle = self._execute_speculative_shadow(seqs, schedule_rollback)
+            else:
+                draft_cycle = self._execute_draft_discard(seqs, is_prefill)
             token_ids = self.model_runner.call("run", seqs, is_prefill)
             events = self.scheduler.postprocess(seqs, token_ids)
         except BaseException as error:
+            if getattr(self.scheduler, "_active_spec_transaction", None) is not None:
+                try:
+                    self.scheduler.abort_speculative_step()
+                except BaseException as cleanup_error:
+                    record_cleanup_failure(error, "V4 speculative transaction rollback", cleanup_error)
+                raise
             if draft_cycle is not None:
                 plan, _ = draft_cycle
                 self._rollback_failed_draft_state(plan, error)

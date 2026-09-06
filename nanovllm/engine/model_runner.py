@@ -11,6 +11,10 @@ from multiprocessing.shared_memory import SharedMemory
 
 from nanovllm.config import Config
 from nanovllm.engine.sequence import Sequence
+from nanovllm.engine.speculative_plan import (
+    SpecPlanRow, SpecStepPlan, build_speculative_step_plan,
+)
+from nanovllm.engine.scheduler import as_draft_discard_plan
 from nanovllm.engine.speculative_memory import (
     SpeculativeMemoryPlan,
     kv_cache_block_bytes,
@@ -1527,12 +1531,54 @@ class ModelRunner:
             "row.committed_tokens", value, minimum=1
         )
 
+    def _validate_speculative_step_plan(self, plan: SpecStepPlan, seqs):
+        """Recompute V4 bytes and full-cycle geometry before draft allocation."""
+        try:
+            SpecStepPlan.__post_init__(plan)
+            for row in plan.rows:
+                SpecPlanRow.__post_init__(row)
+            expected = build_speculative_step_plan(
+                cycle_id=plan.cycle_id, rows=plan.rows,
+                configured_k=self.config.configured_k,
+                workspace_route_cap=plan.workspace_route_cap,
+                effective_k=plan.effective_k,
+                max_num_batched_tokens=self.config.max_num_batched_tokens,
+                configured_workspace=self.speculative_memory_plan,
+                route_key=plan.route_key,
+                bypass_reason=plan.bypass_reason,
+            )
+            if plan != expected:
+                raise ValueError("speculative plan geometry or workspace certificate drifted")
+            if not plan.uses_speculation:
+                raise ValueError("fallback speculative plans cannot execute")
+            cache = getattr(self, "kv_cache", None)
+            if not isinstance(cache, torch.Tensor) or cache.ndim < 3:
+                raise ValueError("target KV cache is unavailable")
+            for row in plan.rows:
+                highest = row.highest_target_write_position
+                if highest >= self.config.max_model_len:
+                    raise ValueError("planned target write exceeds model position limit")
+                if len(row.block_table) < highest // self.block_size + 1:
+                    raise ValueError("planned target write lacks reserved blocks")
+                if len(set(row.block_table)) != len(row.block_table):
+                    raise ValueError("speculative row repeats a physical block")
+                if any(block_id >= cache.size(2) for block_id in row.block_table):
+                    raise ValueError("planned target block exceeds the physical pool")
+        except (TypeError, ValueError) as error:
+            raise SpeculativeDraftPlanError(str(error)) from error
+        # Reuse V3's independent checks of live row order, request bounds,
+        # draft readiness, physical draft IDs, tokens, and cache coverage.
+        return self._validate_draft_discard_plan(as_draft_discard_plan(plan), seqs)
+
     def _validate_draft_discard_plan(
         self,
         plan,
         seqs: list[Sequence],
     ) -> tuple[tuple[DraftCycleRow, ...], int, DraftRouteKey]:
         """Fail closed on stale plan snapshots before CUDA work or RNG use."""
+
+        if isinstance(plan, SpecStepPlan):
+            return self._validate_speculative_step_plan(plan, seqs)
 
         if not self.speculation_enabled:
             raise SpeculativeDraftPlanError(

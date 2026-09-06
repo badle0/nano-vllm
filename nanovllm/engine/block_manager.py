@@ -1,4 +1,5 @@
 from collections import deque
+from collections.abc import Mapping
 from dataclasses import dataclass
 from itertools import count
 from typing import Iterable
@@ -678,6 +679,206 @@ class BlockManager:
             block_states_before=reservation.block_states_before,
         )
         self._unpublish_temporary_reservation(reservation)
+        return True
+
+    def finalize_temporary_append(
+        self,
+        reservation: TemporaryBlockReservation,
+        keep_block_counts_by_seq_id: Mapping[int, int],
+    ) -> bool:
+        """Consume a temporary lease while retaining per-row append prefixes.
+
+        Each mapping value is the number of *newly appended* blocks to retain
+        for that sequence.  The mapping must name every reservation row exactly
+        once.  All request and live-lease state is validated before mutation.
+
+        Retained blocks stay fresh, exclusively owned, unhashed, and allocated;
+        trailing blocks are restored to their exact pre-reservation metadata
+        and their positions in the pre-reservation free-list order.  Logical
+        token and cache coverage remain scheduler-owned and are never changed
+        here.  Like :meth:`rollback_temporary_append`, a lease is consumed at
+        most once and a later finalize/rollback call returns ``False``.
+        """
+
+        if not isinstance(reservation, TemporaryBlockReservation):
+            raise TypeError("reservation must be a TemporaryBlockReservation")
+        active = self._active_temporary_reservations.get(
+            reservation.reservation_id
+        )
+        if active is None:
+            return False
+        if active is not reservation:
+            raise RuntimeError("temporary reservation identity mismatch")
+        self._validate_live_temporary_reservation(reservation)
+
+        if not isinstance(keep_block_counts_by_seq_id, Mapping):
+            raise TypeError(
+                "keep_block_counts_by_seq_id must be a mapping"
+            )
+        requested_counts = tuple(keep_block_counts_by_seq_id.items())
+        expected_seq_ids = tuple(
+            row.sequence.seq_id for row in reservation.rows
+        )
+        if len(requested_counts) != len(expected_seq_ids):
+            raise ValueError(
+                "retained-block counts must name every reservation row"
+            )
+
+        counts_by_seq_id: dict[int, int] = {}
+        for seq_id, keep_count in requested_counts:
+            if type(seq_id) is not int:
+                raise TypeError("retained-block sequence IDs must be integers")
+            if seq_id in counts_by_seq_id:
+                raise ValueError(
+                    "retained-block sequence IDs must be unique"
+                )
+            if type(keep_count) is not int:
+                raise TypeError("retained-block counts must be integers")
+            counts_by_seq_id[seq_id] = keep_count
+        if set(counts_by_seq_id) != set(expected_seq_ids):
+            raise ValueError(
+                "retained-block counts must name every reservation row"
+            )
+
+        desired_rows: list[tuple[_TemporaryReservationRow, tuple[int, ...]]] = []
+        kept_block_ids: set[int] = set()
+        released_block_ids: set[int] = set()
+        for row in reservation.rows:
+            keep_count = counts_by_seq_id[row.sequence.seq_id]
+            if keep_count < 0 or keep_count > len(row.appended_block_ids):
+                raise ValueError(
+                    f"sequence {row.sequence.seq_id} retained-block count "
+                    "is outside its appended suffix"
+                )
+            kept = row.appended_block_ids[:keep_count]
+            released = row.appended_block_ids[keep_count:]
+            kept_block_ids.update(kept)
+            released_block_ids.update(released)
+            desired_rows.append(
+                (row, row.block_table_before + kept)
+            )
+
+        allocation_ids = set(reservation.allocation_order)
+        if kept_block_ids & released_block_ids \
+                or kept_block_ids | released_block_ids != allocation_ids:
+            raise RuntimeError(
+                "temporary reservation retention partition is invalid"
+            )
+
+        desired_free = tuple(
+            block_id
+            for block_id in reservation.free_block_ids_before
+            if block_id not in kept_block_ids
+        )
+        desired_used = set(reservation.used_block_ids_before) | kept_block_ids
+        desired_hashes = {
+            block_hash: block_id
+            for block_hash, block_id
+            in reservation.hash_to_block_id_before
+            if block_id not in kept_block_ids
+        }
+        state_by_id = {
+            state.block_id: state
+            for state in reservation.block_states_before
+        }
+
+        # Snapshot the validated live-lease state, not the pre-reservation
+        # state.  An injected failure must leave the lease active and retryable.
+        live_rows = tuple(
+            (
+                row.sequence,
+                tuple(row.sequence.block_table),
+                row.sequence.num_cached_tokens,
+                row.sequence.num_draft_cached_tokens,
+            )
+            for row in reservation.rows
+        )
+        live_states = self._snapshot_block_states(state_by_id)
+        live_free = tuple(self.free_block_ids)
+        live_used = frozenset(self.used_block_ids)
+        live_hashes = tuple(sorted(self.hash_to_block_id.items()))
+        live_reservations = dict(self._active_temporary_reservations)
+        live_sequence_index = dict(self._temporary_reservation_by_seq_id)
+
+        try:
+            for row, desired_table in desired_rows:
+                row.sequence.block_table[:] = desired_table
+            for block_id in released_block_ids:
+                state = state_by_id[block_id]
+                block = self.blocks[block_id]
+                block.ref_count = state.ref_count
+                block.hash = state.hash
+                block.token_ids = list(state.token_ids)
+            self.free_block_ids = deque(desired_free)
+            self.used_block_ids = desired_used
+            self.hash_to_block_id = desired_hashes
+
+            # Validate the complete physical post-state before consuming the
+            # lease.  Prefix metadata and both logical coverages remain exactly
+            # as validated by _validate_live_temporary_reservation above.
+            if tuple(self.free_block_ids) != desired_free \
+                    or self.used_block_ids != desired_used \
+                    or self.hash_to_block_id != desired_hashes:
+                raise RuntimeError(
+                    "temporary reservation final allocator state drifted"
+                )
+            for row, desired_table in desired_rows:
+                if tuple(row.sequence.block_table) != desired_table:
+                    raise RuntimeError(
+                        "temporary reservation final block table drifted"
+                    )
+                if row.sequence.num_cached_tokens \
+                        != row.num_cached_tokens_before \
+                        or row.sequence.num_draft_cached_tokens \
+                        != row.num_draft_cached_tokens_before:
+                    raise RuntimeError(
+                        "temporary reservation final cache coverage drifted"
+                    )
+            for block_id in kept_block_ids:
+                block = self.blocks[block_id]
+                if block.ref_count != 1 \
+                        or block.hash != -1 \
+                        or block.token_ids:
+                    raise RuntimeError(
+                        "retained temporary block metadata drifted"
+                    )
+            for block_id in released_block_ids:
+                state = state_by_id[block_id]
+                block = self.blocks[block_id]
+                if block.ref_count != state.ref_count \
+                        or block.hash != state.hash \
+                        or tuple(block.token_ids) != state.token_ids:
+                    raise RuntimeError(
+                        "released temporary block metadata was not restored"
+                    )
+
+            self._unpublish_temporary_reservation(reservation)
+            if reservation.reservation_id \
+                    in self._active_temporary_reservations \
+                    or any(
+                        indexed_id == reservation.reservation_id
+                        for indexed_id
+                        in self._temporary_reservation_by_seq_id.values()
+                    ):
+                raise RuntimeError(
+                    "temporary reservation finalization did not consume lease"
+                )
+        except BaseException:
+            for seq, table, target_coverage, draft_coverage in live_rows:
+                seq.block_table[:] = table
+                seq.num_cached_tokens = target_coverage
+                seq.num_draft_cached_tokens = draft_coverage
+            for state in live_states:
+                block = self.blocks[state.block_id]
+                block.ref_count = state.ref_count
+                block.hash = state.hash
+                block.token_ids = list(state.token_ids)
+            self.free_block_ids = deque(live_free)
+            self.used_block_ids = set(live_used)
+            self.hash_to_block_id = dict(live_hashes)
+            self._active_temporary_reservations = live_reservations
+            self._temporary_reservation_by_seq_id = live_sequence_index
+            raise
         return True
 
     def can_append(self, seq: Sequence) -> bool:

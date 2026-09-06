@@ -1,5 +1,5 @@
 from collections import deque
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from itertools import count
 from time import perf_counter
 from typing import Mapping
@@ -13,6 +13,15 @@ from nanovllm.engine.block_manager import (
 from nanovllm.engine.speculative_routes import (
     DraftRouteAdmission,
     DraftRouteKey,
+    speculative_plan_fingerprint,
+)
+from nanovllm.engine.speculative_memory import (
+    SpeculativeMemoryPlan, SpeculativeMemoryPlanningError,
+)
+from nanovllm.engine.speculative_plan import (
+    SpecPlanRow, SpecStepPlan, build_speculative_step_plan,
+    derive_speculative_effective_k, draft_catchup_tokens,
+    speculative_k_budget,
 )
 
 
@@ -72,6 +81,41 @@ class DecodeScheduleRollback:
     rows: tuple[_DecodeScheduleRollbackRow, ...]
 
 
+@dataclass(slots=True)
+class ActiveSpecTransaction:
+    """Scheduler-owned V4 undo state, retained until target commit succeeds."""
+
+    plan: SpecStepPlan
+    reservation: TemporaryBlockReservation
+    baseline_decode_rollback: DecodeScheduleRollback
+
+
+def as_draft_discard_plan(plan: SpecStepPlan) -> DraftDiscardPlan:
+    """Project planned V5 geometry onto the V3 work V4 actually executes."""
+    return DraftDiscardPlan(
+        cycle_id=plan.cycle_id,
+        rows=tuple(DraftDiscardRow(
+            seq_id=row.seq_id,
+            committed_tokens=row.committed_tokens,
+            target_cached_tokens=row.target_cached_tokens,
+            draft_cached_tokens=row.draft_cached_tokens,
+            remaining_completion_tokens=row.remaining_completion_tokens,
+            model_position_headroom=row.model_position_headroom,
+            highest_proposal_input_position=row.highest_draft_write_position,
+            block_table=row.block_table,
+        ) for row in plan.rows),
+        configured_k=plan.configured_k,
+        workspace_route_cap=plan.workspace_route_cap,
+        effective_k=plan.effective_k,
+        draft_catchup_tokens=plan.draft_catchup_tokens,
+        draft_step_token_counts=plan.draft_step_token_counts,
+        target_query_tokens=plan.shadow_target_query_tokens,
+        total_scheduled_tokens=plan.total_scheduled_tokens,
+        fallback_reason=plan.bypass_reason,
+        route_key=plan.route_key,
+    )
+
+
 class SchedulerCapacityError(RuntimeError):
 
     def __init__(self, requested: int, available: int, capacity: int):
@@ -102,10 +146,11 @@ class Scheduler:
         self._configured_k = getattr(config, "configured_k", 0)
         self._max_model_len = getattr(config, "max_model_len", 0)
         self._draft_discard_cycle_ids = count()
+        self._active_spec_transaction: ActiveSpecTransaction | None = None
         self._active_draft_discard: tuple[
-            DraftDiscardPlan, TemporaryBlockReservation
+            DraftDiscardPlan | SpecStepPlan, TemporaryBlockReservation
         ] | None = None
-        self._pending_draft_coverage_plan: DraftDiscardPlan | None = None
+        self._pending_draft_coverage_plan: DraftDiscardPlan | SpecStepPlan | None = None
         self._pending_draft_coverage: tuple[tuple[int, int], ...] | None = None
         self.waiting: deque[Sequence] = deque()
         self.running: deque[Sequence] = deque()
@@ -150,6 +195,8 @@ class Scheduler:
         self.waiting.append(seq)
 
     def schedule(self) -> tuple[list[Sequence], bool]:
+        if self._active_spec_transaction is not None:
+            raise RuntimeError("cannot schedule before speculative transaction completes")
         if self._active_draft_discard is not None:
             raise RuntimeError(
                 "cannot schedule while a draft-discard reservation is active"
@@ -301,6 +348,8 @@ class Scheduler:
         plan before temporary allocator mutation.
         """
 
+        if self._active_spec_transaction is not None:
+            raise RuntimeError("a speculative transaction is already active")
         if self._active_draft_discard is not None:
             raise RuntimeError("a draft-discard reservation is already active")
         if self._pending_draft_coverage_plan is not None:
@@ -464,6 +513,133 @@ class Scheduler:
             self.block_manager.rollback_temporary_append(reservation)
             raise
 
+    def plan_speculative_step(
+        self,
+        seqs: list[Sequence] | tuple[Sequence, ...],
+        *,
+        configured_workspace: SpeculativeMemoryPlan,
+        route_admission: DraftRouteAdmission | None = None,
+        baseline_decode_rollback: DecodeScheduleRollback | None = None,
+    ) -> SpecStepPlan:
+        """Promote an ordinary decode batch to a V4 shadow transaction.
+
+        Admission prices the later full verifier cycle. All modeled checks
+        precede additional block allocation. The existing schedule has already
+        reserved the ordinary target input; this lease reserves only its suffix.
+        """
+        if (self._active_spec_transaction is not None
+                or self._active_draft_discard is not None
+                or self._pending_draft_coverage_plan is not None):
+            raise RuntimeError("a speculative transaction is already active")
+        if not isinstance(configured_workspace, SpeculativeMemoryPlan):
+            raise TypeError("configured_workspace must be a SpeculativeMemoryPlan")
+        selected = tuple(seqs)
+        if any(not isinstance(seq, Sequence) for seq in selected):
+            raise TypeError("speculative rows require Sequence objects")
+        rows = tuple(SpecPlanRow(
+            seq_id=seq.seq_id,
+            committed_tokens=len(seq),
+            target_cached_tokens=seq.num_cached_tokens,
+            draft_cached_tokens=seq.num_draft_cached_tokens,
+            remaining_completion_tokens=max(seq.max_tokens - seq.num_completion_tokens, 0),
+            model_position_headroom=max(self._max_model_len - len(seq), 0),
+            highest_draft_write_position=None,
+            highest_target_write_position=None,
+            block_table=tuple(seq.block_table),
+        ) for seq in selected)
+        cap = 0
+        if route_admission is not None:
+            if not isinstance(route_admission, DraftRouteAdmission):
+                raise TypeError("route_admission must be a DraftRouteAdmission")
+            if route_admission.batch_size != len(rows):
+                raise ValueError("route admission batch size does not match decode rows")
+            if route_admission.plan_fingerprint != speculative_plan_fingerprint(configured_workspace):
+                raise ValueError("route admission workspace fingerprint is stale")
+            cap = route_admission.max_effective_k
+        cycle_id = next(self._draft_discard_cycle_ids)
+
+        def build(k, reason=None, key=None):
+            return build_speculative_step_plan(
+                cycle_id=cycle_id, rows=rows, configured_k=self._configured_k,
+                workspace_route_cap=cap, effective_k=k,
+                max_num_batched_tokens=self.max_num_batched_tokens,
+                configured_workspace=configured_workspace,
+                route_key=key, bypass_reason=reason,
+            )
+
+        if not selected:
+            return build(0, "no_decode_rows")
+        rollback = self.capture_decode_schedule_rollback(selected, is_prefill=False)
+        if rollback is None:
+            return build(0, "not_pure_decode")
+        if baseline_decode_rollback is not None and baseline_decode_rollback != rollback:
+            raise ValueError("baseline decode rollback does not match selected rows")
+        if baseline_decode_rollback is not None:
+            rollback = baseline_decode_rollback
+        if tuple(self.running) != selected:
+            raise ValueError("speculative plan must cover the whole scheduled decode batch")
+        catchup = draft_catchup_tokens(rows)
+        if route_admission is not None and route_admission.catchup_tokens != catchup:
+            raise ValueError("draft-cache coverage changed after route admission")
+        k = derive_speculative_effective_k(
+            rows=rows, configured_k=self._configured_k,
+            max_num_batched_tokens=self.max_num_batched_tokens,
+            workspace_route_cap=cap,
+        )
+        if k == 0:
+            batch = len(rows)
+            budget = self.max_num_batched_tokens
+            bounds = (
+                ("speculation_disabled", self._configured_k),
+                ("request_tail", min(max(row.remaining_completion_tokens - 1, 0) for row in rows)),
+                ("model_position_limit", min(row.model_position_headroom for row in rows)),
+                ("verifier_token_budget", max(budget // batch - 1, 0)),
+                ("draft_catchup_token_budget" if 3 * batch <= budget < catchup + 3 * batch
+                 else "aggregate_token_budget", speculative_k_budget(
+                     max_num_batched_tokens=budget, batch_size=batch,
+                     draft_catchup_tokens=catchup)),
+                ("workspace_route_cap", cap),
+            )
+            return build(0, next(name for name, bound in bounds if bound == 0))
+        key = route_admission.key_for(k)
+        if key is None:
+            return build(0, "route_registry_miss")
+        try:
+            plan = build(k, key=key)
+        except SpeculativeMemoryPlanningError:
+            return build(0, "workspace_route_cap")
+        reservation = self.block_manager.reserve_temporary_append(
+            (seq, row.highest_target_write_position)
+            for seq, row in zip(selected, plan.rows, strict=True)
+        )
+        if reservation is None:
+            return build(0, "insufficient_kv_blocks")
+        try:
+            plan = replace(plan, rows=tuple(
+                replace(row, block_table=tuple(seq.block_table))
+                for seq, row in zip(selected, plan.rows, strict=True)
+            ))
+            transaction = ActiveSpecTransaction(plan, reservation, rollback)
+            self._active_draft_discard = (plan, reservation)
+            self._active_spec_transaction = transaction
+            return plan
+        except BaseException:
+            self._active_draft_discard = None
+            self._active_spec_transaction = None
+            self.block_manager.rollback_temporary_append(reservation)
+            raise
+
+    def abort_speculative_step(self) -> bool:
+        """Undo both reservation layers; retain ownership if cleanup fails."""
+        transaction = getattr(self, "_active_spec_transaction", None)
+        if transaction is None:
+            return False
+        self.rollback_draft_discard(transaction.plan)
+        self.abort_draft_coverage(transaction.plan)
+        self.rollback_failed_decode_schedule(transaction.baseline_decode_rollback)
+        self._active_spec_transaction = None
+        return True
+
     def capture_decode_schedule_rollback(
         self,
         seqs: list[Sequence] | tuple[Sequence, ...],
@@ -499,10 +675,10 @@ class Scheduler:
             )
         return DecodeScheduleRollback(tuple(rows))
 
-    def rollback_draft_discard(self, plan: DraftDiscardPlan) -> bool:
+    def rollback_draft_discard(self, plan: DraftDiscardPlan | SpecStepPlan) -> bool:
         """Release the scheduler-owned lease; repeated calls are harmless."""
 
-        if not isinstance(plan, DraftDiscardPlan):
+        if not isinstance(plan, (DraftDiscardPlan, SpecStepPlan)):
             raise TypeError("plan must be a DraftDiscardPlan")
         active = self._active_draft_discard
         if active is None:
@@ -514,10 +690,10 @@ class Scheduler:
         self._active_draft_discard = None
         return rolled_back
 
-    def handoff_draft_discard(self, plan: DraftDiscardPlan) -> bool:
+    def handoff_draft_discard(self, plan: DraftDiscardPlan | SpecStepPlan) -> bool:
         """Release proposal blocks and arm coverage commit before target run."""
 
-        if not isinstance(plan, DraftDiscardPlan):
+        if not isinstance(plan, (DraftDiscardPlan, SpecStepPlan)):
             raise TypeError("plan must be a DraftDiscardPlan")
         if not plan.uses_draft:
             raise ValueError("cannot hand off a fallback plan")
@@ -533,10 +709,10 @@ class Scheduler:
         self._pending_draft_coverage = None
         return True
 
-    def abort_draft_coverage(self, plan: DraftDiscardPlan) -> bool:
+    def abort_draft_coverage(self, plan: DraftDiscardPlan | SpecStepPlan) -> bool:
         """Clear an exact pre-target handoff after target/postprocess failure."""
 
-        if not isinstance(plan, DraftDiscardPlan):
+        if not isinstance(plan, (DraftDiscardPlan, SpecStepPlan)):
             raise TypeError("plan must be a DraftDiscardPlan")
         pending = getattr(self, "_pending_draft_coverage_plan", None)
         if pending is None:
@@ -596,7 +772,7 @@ class Scheduler:
 
     def stage_draft_coverage(
         self,
-        plan: DraftDiscardPlan,
+        plan: DraftDiscardPlan | SpecStepPlan,
         seqs: list[Sequence] | tuple[Sequence, ...],
         coverage_by_seq_id: Mapping[int, int],
     ) -> None:
@@ -608,7 +784,7 @@ class Scheduler:
         public token has been appended but before its event is returned.
         """
 
-        if not isinstance(plan, DraftDiscardPlan):
+        if not isinstance(plan, (DraftDiscardPlan, SpecStepPlan)):
             raise TypeError("plan must be a DraftDiscardPlan")
         if not plan.uses_draft:
             raise ValueError("cannot commit draft coverage for a fallback plan")
@@ -667,6 +843,7 @@ class Scheduler:
         )
 
     def preempt(self, seq: Sequence):
+        self.abort_speculative_step()
         self._rollback_active_draft_discard()
         pending = getattr(self, "_pending_draft_coverage_plan", None)
         if pending is not None and seq.seq_id in {
@@ -685,6 +862,9 @@ class Scheduler:
         self._check_mid_chunk_invariant()
 
     def postprocess(self, seqs: list[Sequence], token_ids: list[int]) -> list[StreamOutput]:
+        transaction = getattr(self, "_active_spec_transaction", None)
+        if transaction is not None and self._pending_draft_coverage_plan is not transaction.plan:
+            raise RuntimeError("speculative transaction has not handed off to target commit")
         # V3 proposal blocks must have been handed off before target execution,
         # so they can never reach target hashing or ordinary postprocessing.
         if getattr(self, "_active_draft_discard", None) is not None:
@@ -765,6 +945,8 @@ class Scheduler:
                     seq.num_draft_cached_tokens = coverage[seq.seq_id]
             self._pending_draft_coverage_plan = None
             self._pending_draft_coverage = None
+        if transaction is not None:
+            self._active_spec_transaction = None
         return events
 
     def cancel(self, seq_ids) -> list[int]:
@@ -793,6 +975,7 @@ class Scheduler:
         if not queued_targets:
             return []
 
+        self.abort_speculative_step()
         active = getattr(self, "_active_draft_discard", None)
         if active is not None:
             self._rollback_active_draft_discard()
