@@ -105,6 +105,7 @@ def analyze(archive):
             phases.append(dict(mode=mode, cell=cell["cell"], cycles=len(cycles),
                                seconds=elapsed, component_seconds=components,
                                other_seconds=elapsed - sum(components.values()), acceptance_histogram=histogram,
+                               draft_catchup_positions=sum(c["result"]["draft_positions"] - c["batch"] * c["k"] for c in cycles),
                                emitted_per_row_cycle=sum(len(r["committed_token_ids"]) for c in cycles for r in c["result"]["rows"]) / sum(c["batch"] for c in cycles)))
     return dict(primary=primary, off_regression=regression, work=work, roofline=roofs,
                 phases=phases,

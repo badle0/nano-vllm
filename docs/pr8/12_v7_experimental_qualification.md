@@ -181,6 +181,17 @@ adversarial inputs. Its overhead makes those timings unsuitable as headlines.
 The accepted-prefix fraction is not an unbiased per-position acceptance law;
 condition on reaching a position when analyzing the length histogram.
 
+One concrete optimization candidate is visible in the source: draft *decode*
+uses CUDA graphs, but `_run_draft_catchup()` calls eager paged prefill even for a
+one-token catch-up. A full-acceptance bonus leaves one previously proposed token
+to catch up before the next draft cycle. Thus high acceptance can repeatedly pay
+this eager catch-up cost. The retained result's `draft_positions - B*K` counts
+the catch-up work, but the present timer groups catch-up with proposals; it does
+not isolate that time. Separately, the parallel target verifier is eager and
+draft LM-head/probability/sampling operations remain outside the transformer
+decode graph. These are specific follow-up profiling/optimization targets, not
+already measured improvements or a reason to erase the slower results.
+
 ## Operational limits
 
 - Speculation is disabled by default. Opt in with compatible local target/draft
