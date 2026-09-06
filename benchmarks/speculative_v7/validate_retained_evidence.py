@@ -170,7 +170,8 @@ def check_phases(value, role, repo=ROOT):
     for cycle in value["cycles"]:
         verify = "verify_greedy" if cycle["cell"][1] == "greedy" else "verify_parallel"
         require(set(cycle["phases"]) == {"draft", verify, "accept", "bonus", "run_speculative", "commit"}, "missing phase component")
-        require(1 <= cycle["k"] <= 4 and cycle["batch"] == cycle["cell"][0], "invalid phase shape")
+        # Sampled rows can finish in different cycles; the live batch shrinks.
+        require(1 <= cycle["k"] <= 4 and 1 <= cycle["batch"] <= cycle["cell"][0], "invalid phase shape")
         require(math.isfinite(cycle["total_seconds"]) and cycle["total_seconds"] > 0, "invalid phase total")
         require(all(len(times) == 1 and 0 < times[0] <= cycle["total_seconds"] for times in cycle["phases"].values()), "invalid phase timing")
         result = cycle["result"]
