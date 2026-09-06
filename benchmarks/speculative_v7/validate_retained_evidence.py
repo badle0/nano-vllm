@@ -106,6 +106,8 @@ def check_benchmark(value, role, repo=ROOT):
             require(len(metrics["engine_itls"]) == row["completion"] - 1, "wrong token timing count")
             if enabled:
                 require(metrics["spec_residual_numerical_fallbacks"] == 0, "natural residual fallback requires qualified law claim")
+                if row["batch"] <= 4 and row["context"] <= 256 and row["completion"] > 2:
+                    require(metrics["spec_cycles"] > 0, "eligible benchmark silently bypassed speculation")
                 require(0 <= metrics["spec_accepted_draft_tokens"] <= metrics["spec_proposed_draft_tokens"] <= 4 * metrics["spec_cycles"], "invalid proposal/cap counts")
                 require(metrics["spec_target_verification_positions"] == metrics["spec_proposed_draft_tokens"] + metrics["spec_cycles"], "wrong verifier work")
                 if suite == "primary" and row["batch"] == 8:
@@ -170,6 +172,9 @@ def validate(archive, repo=ROOT, *, trusted=TRUSTED_MANIFEST_SHA256):
     require(sha(raw) == trusted, "untrusted archive manifest")
     manifest = load_json(raw)
     require(manifest["schema"] == SCHEMA and set(manifest["runs"]) == set(ROLES), "incomplete archive roles")
+    require(manifest["benchmark_producer"] == BENCH_PRODUCER and manifest["cold_producer"] == COLD_PRODUCER
+            and manifest["old_revision"] == OLD_REVISION, "manifest producer mismatch")
+    require(manifest["target_hf_revision"] == "1cfa9a7208912126459214e8b04321603b3df60c", "wrong target checkpoint revision")
     values = {}
     for role, record in manifest["runs"].items():
         for extension in ("json", "log"):
