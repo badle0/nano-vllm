@@ -37,12 +37,16 @@ def file_sha256(path):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--model", default="/workspace/models/Qwen3-0.6B")
+    parser.add_argument("--draft-model")
     parser.add_argument("--mode", choices=("eager", "graph"), required=True)
     parser.add_argument("--enabled", action="store_true")
     parser.add_argument("--auto-kv", action="store_true")
     parser.add_argument("--logit-trace", action="store_true")
     parser.add_argument("--max-batch", type=int, default=4)
     parser.add_argument("--configured-k", type=int, default=4)
+    parser.add_argument("--model-length", type=int, default=512)
+    parser.add_argument("--token-budget", type=int, default=1024)
+    parser.add_argument("--memory-utilization", type=float, default=.5)
     parser.add_argument("--sweep", action="store_true")
     parser.add_argument("--retained", action="store_true")
     parser.add_argument("--expected-commit")
@@ -66,16 +70,16 @@ def main():
         require_compiler_environment()
         roots = tuple((name, cache_root_path(name)) for name in ("TORCHINDUCTOR_CACHE_DIR", "TRITON_CACHE_DIR"))
         validate_cache_root_isolation(roots[0][1], roots[1][1], repo_root=Path.cwd(),
-                                      model_roots=(Path(args.model).resolve(),))
+                                      model_roots=(Path(args.model).resolve(), Path(args.draft_model or args.model).resolve()))
         for name, root in roots:
             initialize_cache_root(name, root)
         captures = install_capture_ledger()
-    config = dict(max_num_seqs=args.max_batch, max_num_batched_tokens=1024, max_model_len=512,
-                  gpu_memory_utilization=0.5, enforce_eager=args.mode == "eager")
+    config = dict(max_num_seqs=args.max_batch, max_num_batched_tokens=args.token_budget, max_model_len=args.model_length,
+                  gpu_memory_utilization=args.memory_utilization, enforce_eager=args.mode == "eager")
     if not args.auto_kv:
         config["num_kvcache_blocks"] = 64
     if args.enabled:
-        config.update(draft_model=args.model, num_speculative_tokens=args.configured_k)
+        config.update(draft_model=args.draft_model or args.model, num_speculative_tokens=args.configured_k)
     torch.manual_seed(20260906)
     started = time.perf_counter()
     llm = LLM(args.model, **config)
@@ -359,6 +363,9 @@ def main():
                        model_files={p.name: dict(bytes=p.stat().st_size, sha256=file_sha256(p))
                                     for p in sorted(Path(args.model).iterdir())
                                     if p.is_file() and (p.suffix == ".safetensors" or p.name == "config.json")},
+                       draft_model_files={p.name: dict(bytes=p.stat().st_size, sha256=file_sha256(p))
+                                          for p in sorted(Path(args.draft_model or args.model).iterdir())
+                                          if p.is_file() and (p.suffix == ".safetensors" or p.name == "config.json")},
                        compiler_environment={name: value for name, value in os.environ.items()
                                              if name.startswith(("TORCHINDUCTOR_", "TORCH_DYNAMO_", "TRITON_CACHE")) or name == "TORCH_LOGS"},
                        results=results, cycles=cycles, mixed_sample_lengths=[len(r["token_ids"]) for r in sampled],
