@@ -241,3 +241,49 @@ passed on local Python 3.12/Torch 2.10: 992 passed, 26 skipped, 14 existing
 TorchScript deprecation warnings. This includes the missing-UTC simulation,
 not an actual local Python 3.10 execution. A successful rerun of the remote
 dependency matrix is still required before merging.
+
+### Second remote CI follow-up: fixture and compiler environment
+
+[Run 34049297973](https://github.com/badle0/nano-vllm/actions/runs/34049297973)
+passed syntax/evidence on both Python versions and got past the previous UTC
+import failure. Each CPU-contract lane then reported 979 passed, 26 skipped,
+four failures and nine setup errors:
+
+- Nine real-tokenizer detokenizer cases tried the instance-specific path
+  `/workspace/models/Qwen3-0.6B`, absent on hosted runners. The earlier shallow
+  clone was isolated from Git history, not from that model directory.
+- Four ordinary sampler tests hit Torch 2.4.1 CPU Inductor's
+  `Tried to erase Node div but it still had 1 users ... copy_` failure. They are
+  top-k boundary ties, top-k=1 ties, top-p crossing and peaked-row collapse.
+  This is a compiler failure, not a sampled-support assertion failure.
+
+The follow-up changes the CPU job to Torch 2.10.0, aligning its release with the
+validated runtime stack. Official CPU wheels are available for both Python 3.10
+and 3.12 in the [PyTorch CPU index](https://download.pytorch.org/whl/cpu/torch/).
+Both Python versions, all four sampler tests and compilation remain enabled;
+there is no `suppress_errors`, eager replacement or newly excluded test module.
+This change does not fix Torch 2.4.1, qualify that older CPU compiler, change the
+package's broad dependency declaration, or establish GPU compatibility for 2.4.1.
+
+CI now downloads exactly `config.json`, `tokenizer_config.json` and
+`tokenizer.json` from Qwen/Qwen3-0.6B at immutable revision
+`c1899de289a04d12100db370d81485cdf75e47ca`, into the runner's temporary directory.
+The test fixture takes `NANOVLLM_TEST_TOKENIZER_PATH`, requires a local directory
+and uses `local_files_only=True`. Fixture setup may use the network; tests remain
+offline. No model weights or tokenizer payloads are committed. Added regression
+tests check the pinned three-file download, missing-file failure, configured
+fixture path and explicit missing-directory failure.
+
+Validation uses a temporary environment with Transformers 4.51.3, tokenizers
+0.21.4, NumPy 1.26.4, safetensors 0.5.3 and the downloaded tokenizer, without
+changing the main venv. It inherits the installed Torch 2.10.0+cu128 and runs
+with CUDA hidden. It is therefore a closer local CPU-contract check, **not** an
+exact test of GitHub's CPU-only wheel or its Python 3.10 interpreter. Remote CI
+still must pass after pushing. The `nanovllm` runtime remains unchanged.
+
+The full CPU-CI selection in that environment passed: **996 passed, 26 skipped,
+14 existing TorchScript deprecation warnings** (131.91 seconds). This includes
+all nine formerly missing-tokenizer cases, all four formerly failing compiled
+sampler cases, and four new fixture/download regression tests. The new scripts
+also parse under the Python 3.10 grammar. No inference runtime, benchmark code,
+retained evidence or package metadata changed in this second follow-up.

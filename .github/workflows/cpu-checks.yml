@@ -70,14 +70,21 @@ jobs:
 
       - name: Install standalone CPU test dependencies
         run: |
-          python -m pip install "torch==2.4.1" --index-url https://download.pytorch.org/whl/cpu
+          python -m pip install "torch==2.10.0" --index-url https://download.pytorch.org/whl/cpu
           python -m pip install \
             "pytest>=8,<9" \
             "transformers==4.51.3" \
+            "tokenizers==0.21.4" \
+            "huggingface-hub==0.36.2" \
             "safetensors==0.5.3" \
             "numpy==1.26.4" \
             "xxhash==3.5.0" \
             "tqdm==4.67.1"
+
+      - name: Prepare pinned tokenizer fixture (no model weights)
+        run: >-
+          python .github/ci/prepare_tokenizer.py
+          --output "${{ runner.temp }}/nano-vllm-tokenizer"
 
       - name: Verify maintained CPU contracts
         env:
@@ -86,6 +93,7 @@ jobs:
           PYTHONDONTWRITEBYTECODE: "1"
           PYTHONPATH: .github/ci/speculative_v2:.
           TRANSFORMERS_OFFLINE: "1"
+          NANOVLLM_TEST_TOKENIZER_PATH: ${{ runner.temp }}/nano-vllm-tokenizer
         # The fail-on-construction Qwen shim makes this a CPU contract suite,
         # not a model/GPU certification. Historical speculative archive tests
         # live on the frozen experiment branch; no archive ancestry is needed.

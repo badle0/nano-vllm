@@ -145,6 +145,20 @@ and excludes the CUDA-only histogram module (which imports Triton at collection)
 that job cannot certify attention kernels or model execution. The full GPU test
 invocation retains the histogram tests.
 
+The maintained CPU job uses Torch 2.10.0 and downloads only three files for a
+pinned Qwen3-0.6B tokenizer before running tests offline. For a machine without
+the local checkpoint, prepare those files with
+`python .github/ci/prepare_tokenizer.py --output /tmp/nano-vllm-tokenizer`, then
+set `NANOVLLM_TEST_TOKENIZER_PATH=/tmp/nano-vllm-tokenizer` when running pytest.
+Missing tokenizer fixtures fail explicitly rather than silently skipping the
+real-tokenizer tests. No model weights are required for the CPU contract suite.
+
+Torch 2.4.1 CPU is not a passing compiled-sampler lane: remote CI hit an Inductor
+graph-rewrite error in four ordinary sampler tests. Selecting Torch 2.10 for CI
+does not repair or certify the older compiler; see the
+[CI follow-up record](SPECULATIVE_BENCHMARKS.md). Compilation remains enabled,
+with neither error suppression nor an eager-test substitution.
+
 The GPU integration tool is `tests/run_speculative_v5_gpu.py`. Its compiler/cache
 instrumentation still imports `run_speculative_v3_route_compile.py` and
 `_speculative_v3_evidence.py`; these are retained dependencies, not disposable
