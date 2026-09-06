@@ -1,0 +1,68 @@
+{
+  "harness_sha256": "54c90321434281dc68189bb7f67c40ad371c5294b9b33a12ec1d03727405392b",
+  "producer": "a165b654660e60ca60cecd47b89c95de1d65735b",
+  "runs": {
+    "eager-off": {
+      "json": {
+        "bytes": 104787,
+        "file": "eager-off.json",
+        "sha256": "cec36cb05ee6ef2aa9c74528d58ac46f91f4a21e6d2485d622d124a17ba252c5"
+      },
+      "log": {
+        "bytes": 13329,
+        "file": "eager-off.log",
+        "sha256": "8d05b2e91d16f8efa69dd08cf2feb79d991cbcb5c9c85d5c389ef7ce6343696f"
+      }
+    },
+    "eager-on": {
+      "json": {
+        "bytes": 373915,
+        "file": "eager-on.json",
+        "sha256": "5e34105b217db709c6099b6bb71a949cc0fc423bfb0ee26ee0b24e797e8fd01f"
+      },
+      "log": {
+        "bytes": 15334,
+        "file": "eager-on.log",
+        "sha256": "8b580f318ac39857dcfe7c93051f160efb591efaec99c03ea0ebd8da69434c8f"
+      }
+    },
+    "graph-auto-k2": {
+      "json": {
+        "bytes": 268673,
+        "file": "graph-auto-k2.json",
+        "sha256": "3dd999b8c624a0f61673761959605edb5f214ea6acb2e3a8cf28f901d553e15f"
+      },
+      "log": {
+        "bytes": 26848,
+        "file": "graph-auto-k2.log",
+        "sha256": "725b970bcb8e27fe02292f29afb5bff2b2e59db54777e2b3a3a2f955651b9394"
+      }
+    },
+    "graph-off": {
+      "json": {
+        "bytes": 162676,
+        "file": "graph-off.json",
+        "sha256": "62cef36468f9a1c8ca21d2250d11b224794c44085e587a7010ba1da89b4796bc"
+      },
+      "log": {
+        "bytes": 17175,
+        "file": "graph-off.log",
+        "sha256": "c168a343d2157657e59a60cdb4e579b651e473c9fcc1e9ec61f3203087d4024b"
+      }
+    },
+    "graph-on": {
+      "json": {
+        "bytes": 385595,
+        "file": "graph-on.json",
+        "sha256": "47e855dc3a39efa68055f2483f3855d81a1f0b0e1c8f13af7e113cda8c92956a"
+      },
+      "log": {
+        "bytes": 26844,
+        "file": "graph-on.log",
+        "sha256": "00fc22f46cd781ee6d3d5b8acafe1211df1197a04e6d6fd9b7aa333595193176"
+      }
+    }
+  },
+  "runtime_tree": "c2c9fbce937217ad2227955fbb4451441a721dd3",
+  "schema": "nano-vllm-speculative-v5-v6-retained-v1"
+}

@@ -14,7 +14,7 @@ _spec.loader.exec_module(_helpers)
 require, regular, load_json, git = (_helpers.require, _helpers.regular, _helpers.load_json, _helpers.git)
 SCHEMA = "nano-vllm-speculative-v5-v6-retained-v1"
 ROLES = ("eager-off", "eager-on", "graph-off", "graph-on", "graph-auto-k2")
-TRUSTED_MANIFEST_SHA256 = None  # filled only after successful exclusive sealing
+TRUSTED_MANIFEST_SHA256 = "1c8e3b81f18e74a1d2f6b89601213c5d239f75b771646e88ef13f6b06f79a302"
 MODEL_SHA256 = "f47f71177f32bcd101b7573ec9171e6a57f4f4d31148d38e382306f42996874b"
 
 
@@ -132,6 +132,8 @@ def validate(archive, repo=ROOT, *, trusted=TRUSTED_MANIFEST_SHA256):
 
 
 def seal(source, destination, producer, repo=ROOT):
+    for component in (destination, *destination.parents):
+        require(not component.is_symlink(), "archive path must not traverse symlinks")
     require(not destination.exists() and not destination.is_symlink(), "archive destination already exists")
     require(re.fullmatch(r"[0-9a-f]{40}", producer), "invalid producer")
     files, runs = {}, {}
