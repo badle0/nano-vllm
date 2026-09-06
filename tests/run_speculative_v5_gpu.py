@@ -6,6 +6,10 @@ import hashlib
 import gc
 import json
 import math
+import os
+import platform
+import sys
+from importlib.metadata import version
 from pathlib import Path
 import subprocess
 import time
@@ -18,7 +22,16 @@ from run_speculative_v3_route_compile import (
     cache_root_path, initialize_cache_root, require_compiler_environment,
     install_capture_ledger, compiler_snapshot, compiler_delta_summary,
     require_nonvacuous_compiler_snapshot, payload_sha256,
+    validate_cache_root_isolation,
 )
+
+
+def file_sha256(path):
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
 
 
 def main():
@@ -35,6 +48,11 @@ def main():
     parser.add_argument("--expected-commit")
     parser.add_argument("--output", required=True)
     args = parser.parse_args()
+    if sys.flags.optimize:
+        raise RuntimeError("GPU validation requires assertions enabled (no python -O)")
+    import nanovllm
+    if Path(nanovllm.__file__).resolve() != Path("nanovllm/__init__.py").resolve():
+        raise RuntimeError("validation imported nano-vLLM outside the checkout")
     output = Path(args.output)
     if output.exists():
         raise FileExistsError(output)
@@ -47,6 +65,8 @@ def main():
         assert not subprocess.check_output(["git", "status", "--porcelain"], text=True).strip()
         require_compiler_environment()
         roots = tuple((name, cache_root_path(name)) for name in ("TORCHINDUCTOR_CACHE_DIR", "TRITON_CACHE_DIR"))
+        validate_cache_root_isolation(roots[0][1], roots[1][1], repo_root=Path.cwd(),
+                                      model_roots=(Path(args.model).resolve(),))
         for name, root in roots:
             initialize_cache_root(name, root)
         captures = install_capture_ledger()
@@ -310,6 +330,14 @@ def main():
                        revision=revision, source_sha256=source_hashes,
                        torch=torch.__version__, cuda=torch.version.cuda,
                        gpu=torch.cuda.get_device_name(), init_seconds=init_seconds,
+                       python=platform.python_version(),
+                       packages={name: version(name) for name in ("torch", "transformers", "triton", "flash-attn")},
+                       driver=subprocess.check_output(["nvidia-smi", "--query-gpu=driver_version", "--format=csv,noheader"], text=True).strip(),
+                       model_files={p.name: dict(bytes=p.stat().st_size, sha256=file_sha256(p))
+                                    for p in sorted(Path(args.model).iterdir())
+                                    if p.is_file() and (p.suffix == ".safetensors" or p.name == "config.json")},
+                       compiler_environment={name: value for name, value in os.environ.items()
+                                             if name.startswith(("TORCHINDUCTOR_", "TORCH_DYNAMO_", "TRITON_CACHE")) or name == "TORCH_LOGS"},
                        results=results, cycles=cycles, mixed_sample_lengths=[len(r["token_ids"]) for r in sampled],
                        pending_before_close=pending_before_close,
                        abandoned_pending=abandoned_pending, completed_metrics=metrics,
