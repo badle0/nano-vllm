@@ -29,6 +29,7 @@ See [the branch policy](docs/BRANCHES.md) for the relationship between
 -  **Request metrics** — Queue, first-token, inter-token, engine, and caller latency measurements
 -  **Token streaming** — Synchronously backpressured, request-scoped streaming
 -  **Chunked prefill** — Bounded admission, mixed-step scheduling, and ragged CUDA-graph routing
+-  **Experimental speculative decoding** — Exact-backend draft/verify/reject decoding with transactional burst commit. Disabled by default; the measured active routes are slower than ordinary decoding. See [usage and limitations](docs/SPECULATIVE_DECODING.md) and [benchmark results](docs/SPECULATIVE_BENCHMARKS.md).
 
 ## Installation
 

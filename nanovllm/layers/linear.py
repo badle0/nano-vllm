@@ -3,6 +3,11 @@ from torch import nn
 import torch.nn.functional as F
 import torch.distributed as dist
 
+from nanovllm.utils.loader import (
+    require_exact_global_weight_shape,
+    require_exact_weight_shape,
+)
+
 
 def divide(numerator, denominator):
     assert numerator % denominator == 0
@@ -45,6 +50,7 @@ class ReplicatedLinear(LinearBase):
         super().__init__(input_size, output_size, bias)
 
     def weight_loader(self, param: nn.Parameter, loaded_weight: torch.Tensor):
+        require_exact_weight_shape(param.data, loaded_weight)
         param.data.copy_(loaded_weight)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -64,9 +70,16 @@ class ColumnParallelLinear(LinearBase):
 
     def weight_loader(self, param: nn.Parameter, loaded_weight: torch.Tensor):
         param_data = param.data
+        require_exact_global_weight_shape(
+            param_data,
+            loaded_weight,
+            shard_dim=self.tp_dim,
+            num_shards=self.tp_size,
+        )
         shard_size = param_data.size(self.tp_dim)
         start_idx = self.tp_rank * shard_size
         loaded_weight = loaded_weight.narrow(self.tp_dim, start_idx, shard_size)
+        require_exact_weight_shape(param_data, loaded_weight)
         param_data.copy_(loaded_weight)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -89,7 +102,14 @@ class MergedColumnParallelLinear(ColumnParallelLinear):
         shard_offset = sum(self.output_sizes[:loaded_shard_id]) // self.tp_size
         shard_size = self.output_sizes[loaded_shard_id] // self.tp_size
         param_data = param_data.narrow(self.tp_dim, shard_offset, shard_size)
+        require_exact_global_weight_shape(
+            param_data,
+            loaded_weight,
+            shard_dim=self.tp_dim,
+            num_shards=self.tp_size,
+        )
         loaded_weight = loaded_weight.chunk(self.tp_size, self.tp_dim)[self.tp_rank]
+        require_exact_weight_shape(param_data, loaded_weight)
         param_data.copy_(loaded_weight)
 
 
@@ -124,7 +144,14 @@ class QKVParallelLinear(ColumnParallelLinear):
             shard_size = self.num_kv_heads * self.head_size
             shard_offset = self.num_heads * self.head_size + self.num_kv_heads * self.head_size
         param_data = param_data.narrow(self.tp_dim, shard_offset, shard_size)
+        require_exact_global_weight_shape(
+            param_data,
+            loaded_weight,
+            shard_dim=self.tp_dim,
+            num_shards=self.tp_size,
+        )
         loaded_weight = loaded_weight.chunk(self.tp_size, self.tp_dim)[self.tp_rank]
+        require_exact_weight_shape(param_data, loaded_weight)
         param_data.copy_(loaded_weight)
 
 
@@ -142,11 +169,19 @@ class RowParallelLinear(LinearBase):
     def weight_loader(self, param: nn.Parameter, loaded_weight: torch.Tensor):
         param_data = param.data
         if param_data.ndim == 1:
+            require_exact_weight_shape(param_data, loaded_weight)
             param_data.copy_(loaded_weight)
             return
+        require_exact_global_weight_shape(
+            param_data,
+            loaded_weight,
+            shard_dim=self.tp_dim,
+            num_shards=self.tp_size,
+        )
         shard_size = param_data.size(self.tp_dim)
         start_idx = self.tp_rank * shard_size
         loaded_weight = loaded_weight.narrow(self.tp_dim, start_idx, shard_size)
+        require_exact_weight_shape(param_data, loaded_weight)
         param_data.copy_(loaded_weight)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:

@@ -4,6 +4,10 @@ import torch.nn.functional as F
 import torch.distributed as dist
 
 from nanovllm.utils.context import get_context
+from nanovllm.utils.loader import (
+    require_exact_global_weight_shape,
+    require_exact_weight_shape,
+)
 
 
 class VocabParallelEmbedding(nn.Module):
@@ -26,9 +30,16 @@ class VocabParallelEmbedding(nn.Module):
 
     def weight_loader(self, param: nn.Parameter, loaded_weight: torch.Tensor):
         param_data = param.data
+        require_exact_global_weight_shape(
+            param_data,
+            loaded_weight,
+            shard_dim=0,
+            num_shards=self.tp_size,
+        )
         shard_size = param_data.size(0)
         start_idx = self.tp_rank * shard_size
         loaded_weight = loaded_weight.narrow(0, start_idx, shard_size)
+        require_exact_weight_shape(param_data, loaded_weight)
         param_data.copy_(loaded_weight)
 
     def forward(self, x: torch.Tensor):
@@ -53,9 +64,9 @@ class ParallelLMHead(VocabParallelEmbedding):
         assert not bias
         super().__init__(num_embeddings, embedding_dim)
 
-    def forward(self, x: torch.Tensor):
+    def forward(self, x: torch.Tensor, *, all_positions: bool = False):
         context = get_context()
-        if context.is_prefill:
+        if context.is_prefill and not all_positions:
             last_indices = context.cu_seqlens_q[1:] - 1
             x = x[last_indices].contiguous()
         logits = F.linear(x, self.weight)

@@ -214,3 +214,7 @@ class Qwen3ForCausalLM(nn.Module):
         hidden_states: torch.Tensor,
     ) -> torch.Tensor:
         return self.lm_head(hidden_states)
+
+    def compute_logits_all(self, hidden_states: torch.Tensor) -> torch.Tensor:
+        """Explicit verifier seam: keep every live ragged query row."""
+        return self.lm_head(hidden_states, all_positions=True)

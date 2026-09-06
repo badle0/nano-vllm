@@ -16,6 +16,7 @@ Fork-specific development remains entirely within
 | `release/*` | Short-lived branches used to prepare release candidates |
 | `fix/*` | Focused repair, certification, evidence, or diagnostic branches |
 | `feat/*` | Original feature-contribution branches retained for history |
+| `integrate/*` | Curated integration branches reviewed through fork-local PRs |
 
 New fork releases are prepared through pull requests targeting `fork-main`.
 Release candidates are identified by annotated tags such as
@@ -109,6 +110,32 @@ preparation point.
 
 ## Branch Retention
 
+### Speculative decoding
+
+`integrate/speculative-decoding` is the slim integration candidate based on
+`fork-main` at `663753b99131945c297c1fbe02341108f422dce7`. It imports the final
+runtime and maintained tests without merging the experimental ancestry.
+Creating this branch does not itself merge or release the feature.
+
+The full experiment is preserved on `feat/spec-v2-performance`, pinned at
+`fae471785e72c20f9e17b4329d1ff10dbf429b31`. Preserve that commit before deleting
+local experiment worktrees; publish the archive branch to **this fork only**
+before relying on its GitHub links. The slim branch alone does not publish it.
+The earlier `feat/spec-v2-*` milestones are not newer release candidates.
+
+The maintained [feature guide](SPECULATIVE_DECODING.md) and
+[benchmark report](SPECULATIVE_BENCHMARKS.md) replace the chronological `docs/pr8`
+bundle on the slim branch. Raw speculative evidence, its provenance validators,
+and tests specific to historical artifacts remain on the experiment branch.
+Older sampling, streaming, metrics and chunked-prefill evidence is unchanged.
+
+Do not merge the archive branch later merely to make historical evidence
+available: that would reintroduce its large history. Do not force-push or
+rewrite `fork-main` for cleanup. Deleting raw files in a later commit does not
+remove their blobs from Git history. Keeping the archive in the same remote
+still uses remote storage, and a default all-branch clone can fetch that history;
+use a single-branch clone when only the integration history is needed.
+
 Focused `fix/*` branches are retained because they provide:
 
 - Reviewable contribution-specific diffs
@@ -186,5 +213,4 @@ disable its push URL.
 Updating `main` from upstream and updating `fork-main` are separate maintenance
 operations. Upstream changes should first be reviewed on a temporary integration
 branch before being merged into `fork-main`.
-
 
