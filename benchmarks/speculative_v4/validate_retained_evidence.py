@@ -23,7 +23,7 @@ CONFIG = dict(max_num_seqs=4, max_num_batched_tokens=1024, max_model_len=512,
               gpu_memory_utilization=0.5, num_kvcache_blocks=64, configured_k=2, seed=20260906,
               top_p_backend="exact", tensor_parallel_size=1)
 NAMES = tuple(f"{mode}-{side}" for mode in ("eager", "graph") for side in ("off", "zero", "nan"))
-TRUSTED_MANIFEST_SHA256 = None  # populated only after six clean-SHA runs pass
+TRUSTED_MANIFEST_SHA256 = "582e1e112213b2b5bdd796febce683af5d1530ee6cc45678dd374859b7e6bc1e"
 HEX64 = re.compile(r"[0-9a-f]{64}")
 
 
@@ -45,7 +45,11 @@ def load_json(payload):
         return result
     def invalid(value):
         raise ValueError(f"non-finite JSON value: {value}")
-    return json.loads(payload, object_pairs_hook=pairs, parse_constant=invalid)
+    def finite_float(value):
+        parsed = float(value)
+        require(math.isfinite(parsed), f"non-finite JSON value: {value}")
+        return parsed
+    return json.loads(payload, object_pairs_hook=pairs, parse_constant=invalid, parse_float=finite_float)
 
 
 def regular(path):
@@ -150,6 +154,11 @@ def check_raw(value, name, log, repo):
         require(value["captures_after_init"]["cuda_graph_objects"] > 0, "graph mode captured no graph")
     control = value["control"]
     require(len(control["events"]) == 6 and all(len(step) == 2 for step in control["events"]), "incomplete output control")
+    require(len(control["ids"]) == len(set(control["ids"])) == 2, "invalid control request IDs")
+    for index, step in enumerate(control["events"]):
+        require([event[0] for event in step] == control["ids"], "control event order drifted")
+        require(all(type(event[1]) is int and 0 <= event[1] < 151936
+                    and event[2] is (index == 5) for event in step), "invalid control token/finish flags")
     require(len(control["rng"]) == 7, "incomplete RNG checkpoints")
     records = value.get("records", [])
     if side == "off":
@@ -162,6 +171,10 @@ def check_raw(value, name, log, repo):
         visited = {json.dumps(r["plan"]["route_key"], sort_keys=True) for r in route_records}
         require(visited == {json.dumps(key, sort_keys=True) for key in value["registry"]}, "unvisited ready key")
         require(len(records) == 46, "incomplete enabled interval workload")
+        all_labels = (expected_labels | {f"control/{i}" for i in range(1,5)}
+                      | {f"{phase}/{length}" for phase in ("boundary", "failure") for length in (254,255,256,257)}
+                      | {"prefix/cold", "prefix/hit"})
+        require({record["label"] for record in records} == all_labels, "incomplete control/boundary/prefix intervals")
         for record in records:
             plan = record["plan"]
             check_plan(plan)
@@ -172,9 +185,13 @@ def check_raw(value, name, log, repo):
             require(record["graph_steps"] == (k if mode == "graph" else 0), "graph replay count drifted")
             require(record["eager_steps"] == (k if mode == "eager" else 0), "eager count drifted")
             require(len(record["samples"]) == k and len(record["proposals"]) == batch, "incomplete proposals")
-            for sample in record["samples"]:
+            require(all(len(row) == k for row in record["proposals"]), "incomplete per-row proposals")
+            for step, sample in enumerate(record["samples"]):
                 require(sample["shape"] == [batch,151936], "probability geometry drifted")
+                require(len(sample["sums"]) == len(sample["token_ids"]) == batch, "incomplete probability observations")
                 require(all(math.isfinite(x) and abs(x-1) <= 2e-6 for x in sample["sums"]), "invalid probability sums")
+                require(all(type(token) is int and 0 <= token < 151936 for token in sample["token_ids"]), "invalid proposal token")
+                require(sample["token_ids"] == [row[step] for row in record["proposals"]], "sampler/proposal tokens disagree")
                 require(HEX64.fullmatch(sample["q_sha256"]) and HEX64.fullmatch(sample["logits_sha256"]), "missing numerical observation")
             if record["label"].startswith("route/"):
                 _, b, expected_k, _, phase = record["label"].split("/")

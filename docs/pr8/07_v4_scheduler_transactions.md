@@ -3,6 +3,10 @@
 Date: 2026-09-06. Branch: `feat/spec-v2-scheduler-plan`.
 Runtime checkpoint: `22b63e8`.
 
+Update: the V4-specific fixed-pool eager/graph GPU archive is now retained and
+validated. See [08_v4_retained_gpu_validation.md](08_v4_retained_gpu_validation.md).
+The exploratory runs below are historical; they are not the new certificate.
+
 This checkpoint resumes the four unfinished V4 planning/allocator files left
 after V3's retained-evidence commit `d760c1c2`. It adds engine/runner integration,
 failure-path tests, and CPU CI. It does not change `fork-main`, emit accepted
@@ -142,9 +146,10 @@ CPU matrix. Local success is not a claim that remote CI has run.
 
 ## Unfinished gates / next work
 
-1. Produce V4-specific clean-SHA retained GPU controls, including graph mode,
-   boundary/cache-fill cases and admitted-route coverage; do not relabel the
-   frozen V3 archive or this dirty-source eager smoke as that certificate.
+1. Completed for the registered B<=4/K<=2/64-block configuration: V4-specific
+   clean-SHA eager/graph controls, boundary/cache-fill cases and admitted-route
+   coverage. Automatic KV sizing failed one startup experiment and remains
+   uncertified; investigate it separately (document 08).
 2. Review coverage against every V4 hard gate in document 04 before marking the
    rung complete. In particular, expand joint queue/pool/route-cap boundary
    coverage beyond the separate tests above.

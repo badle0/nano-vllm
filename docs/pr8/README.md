@@ -30,9 +30,12 @@ models. Aggregate compiler state outside guarded draft intervals is not claimed
 unchanged. The graph cache-neutrality and output-control runs emitted a Dynamo
 recompile-limit warning outside the route proof, so those artifacts support only
 their stated numerical and output oracles. V4 planning, reservation and shadow
-integration are implemented as a local checkpoint; its full retained certificate
-and V5-V7 remain pending. See [07_v4_scheduler_transactions.md](07_v4_scheduler_transactions.md)
-for the implementation, test results and explicit unfinished gates.
+integration now have a narrow retained eager/graph GPU certificate at B<=4,
+K<=2 and an explicit 64-block pool. Automatic KV sizing and wider joint gate
+coverage remain open; V5-V7 are not implemented. See
+[07_v4_scheduler_transactions.md](07_v4_scheduler_transactions.md) and
+[08_v4_retained_gpu_validation.md](08_v4_retained_gpu_validation.md) for the
+implementation, evidence, a failed auto-sizing experiment and remaining gates.
 
 Design base: `origin/fork-main` at
 `663753b99131945c297c1fbe02341108f422dce7`.
@@ -64,6 +67,8 @@ match `fork-main`.
    protocol, evidence status, and the exact boundary to V3 and later work.
 7. [07_v4_scheduler_transactions.md](07_v4_scheduler_transactions.md) records
    V4's full-cycle planning, shadow transaction integration and remaining gates.
+8. [08_v4_retained_gpu_validation.md](08_v4_retained_gpu_validation.md) records
+   the frozen V4 eager/graph GPU archive and its precise claim boundary.
 
 The request's fourth list item was blank. This packet interprets it as the
 implementation, validation, and benchmark rollout plan because that is the

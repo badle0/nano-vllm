@@ -2,3 +2,5 @@
 # reinterpret its framework-emitted trailing spaces as source whitespace errors.
 benchmarks/speculative_v3/evidence/2026-08-28-a100-v3-e8e0452/raw/route-eager.log -text -whitespace
 benchmarks/speculative_v3/evidence/2026-08-28-a100-v3-e8e0452/raw/route-graph.log -text -whitespace
+benchmarks/speculative_v4/evidence/2026-09-06-a100-v4-6ca56b4/*.log -text -whitespace
+benchmarks/speculative_v4/diagnostics/2026-09-06-auto-kv-init-failure.log -text -whitespace

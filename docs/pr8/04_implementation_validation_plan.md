@@ -800,8 +800,11 @@ extend the guarded compiler claim.
 Implementation checkpoint (2026-09-06): the planner, physical finalizer and
 engine/runner shadow transaction are implemented on `feat/spec-v2-scheduler-plan`.
 See [07_v4_scheduler_transactions.md](07_v4_scheduler_transactions.md) for local
-tests, the exploratory A100 eager control, and outstanding certification gates.
-This rung is not yet marked fully certified; the hard gates below still apply.
+tests and [08_v4_retained_gpu_validation.md](08_v4_retained_gpu_validation.md) for
+the retained A100 eager/graph certificate at B<=4/K<=2 with 64 fixed KV blocks.
+An automatic-sizing startup failure and broader joint hard-gate coverage remain
+open. This rung is not fully certified across configurations; the gates below
+still apply.
 
 Changes:
 

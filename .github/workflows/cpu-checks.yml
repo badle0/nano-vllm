@@ -66,6 +66,11 @@ jobs:
           python benchmarks/speculative_v3/validate_retained_evidence.py
           benchmarks/speculative_v3/evidence/2026-08-28-a100-v3-e8e0452
 
+      - name: Validate retained speculative V4 GPU evidence
+        run: >-
+          python benchmarks/speculative_v4/validate_retained_evidence.py
+          benchmarks/speculative_v4/evidence/2026-09-06-a100-v4-6ca56b4
+
   speculative-contracts:
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -140,5 +145,6 @@ jobs:
           tests/test_speculative_v4_workspace_plan.py
           tests/test_speculative_v4_block_finalizer.py
           tests/test_speculative_v4_integration.py
+          tests/test_speculative_v4_retained_evidence.py
           tests/test_scheduler.py
           tests/test_scheduler_cancel.py

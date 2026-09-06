@@ -1,0 +1,67 @@
+{
+  "claims": {
+    "accepted_tokens": false,
+    "all_intervals_per_enabled_run": 46,
+    "draft_route_intervals_per_enabled_run": 32,
+    "modes": [
+      "eager",
+      "graph"
+    ],
+    "performance_certified": false,
+    "verifier_memory_peak_certified": false
+  },
+  "files": {
+    "eager-nan.json": {
+      "bytes": 14965129,
+      "sha256": "be3fd5a3f2db3f2cc26b3cd9bc1941064e151d2771936f44d9fd86193fa3abe1"
+    },
+    "eager-nan.log": {
+      "bytes": 19916,
+      "sha256": "8aeeae7fdeaa24a127ed22e9abb6af463afddf7a2cd852989f1f61628ac9cece"
+    },
+    "eager-off.json": {
+      "bytes": 110333,
+      "sha256": "dba2bab9e038c74962add5dd10a9a28897921b5d8e21cb9ae3b0136ac5f9591c"
+    },
+    "eager-off.log": {
+      "bytes": 6259,
+      "sha256": "db23310ef2005636f7ede1608b5d1f039658c313f839cd6cdd9d3a290f45224f"
+    },
+    "eager-zero.json": {
+      "bytes": 14965136,
+      "sha256": "be47109d1aa266ca7fdbb2fbd10e2cb13221f1de1fda704ebcdb14e7b74ce712"
+    },
+    "eager-zero.log": {
+      "bytes": 19917,
+      "sha256": "6da565d8b3cfb8b6b4ce7e2db9fd80d08250deaecb132cc678daed1a9309afac"
+    },
+    "graph-nan.json": {
+      "bytes": 16517179,
+      "sha256": "946a305d8c4efb4dec8125d62893b2c0c65b21154a2d7432cea1a36ddbc6d6a2"
+    },
+    "graph-nan.log": {
+      "bytes": 32270,
+      "sha256": "c39cb82c3f918c866f7b0f86802ae3e4c934fb78785e60ebb09c7051414a08d5"
+    },
+    "graph-off.json": {
+      "bytes": 166041,
+      "sha256": "ebb2d3ac6654619c79c75521c316945cc668a0dac005162d98f3a82f127d7035"
+    },
+    "graph-off.log": {
+      "bytes": 15708,
+      "sha256": "fd3b1b516a37e1a8e9cec4aee1f828f84c0a02fc51fed7d78bde61d3c856c3b7"
+    },
+    "graph-zero.json": {
+      "bytes": 16517186,
+      "sha256": "fcb4cb01ea33296fae61050a55562b081d4f50693a20919dbbaddefae4cf5e2d"
+    },
+    "graph-zero.log": {
+      "bytes": 32271,
+      "sha256": "1729032692d64e0f8d0e73fef03d860748b9eab8126313b1812f2bc7d191b3d5"
+    }
+  },
+  "implementation_commit": "22b63e8e24db3c7bc9c24b61aedd93b25d76d289",
+  "producer_commit": "6ca56b43541237a9c0e588fa8101b7fa08c9409d",
+  "runtime_tree": "922d81417cf72ec912da13267fbb024c145a6a15",
+  "schema": "nano-vllm-speculative-v4-archive-v1"
+}
