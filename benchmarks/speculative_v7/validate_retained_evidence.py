@@ -18,7 +18,7 @@ BENCH_PRODUCER = "89829e6052c17e0ef4fcd65e294d0f1e78139184"
 COLD_PRODUCER = "a715a199d413a67ba563271f1b4fa8fe87f00eaa"
 OLD_REVISION = "2678d764ad0341bbfbdd2a93ac0e5528959058a4"
 ROLES = tuple(f"primary-p{i}-{s}" for i in range(6) for s in ("off", "on"))
-ROLES += tuple(f"regression-p{i}-{s}" for i in range(5) for s in ("old", "new"))
+ROLES += tuple(f"regression-p{i}-{s}" for i in range(6) for s in ("old", "new"))
 ROLES += ("extended-off", "extended-on", "cap5-on", "cap6-on", "graph-off", "graph-on", "phases-graph", "phases-eager")
 TARGET_WEIGHTS = {
     "model-00001-of-00003.safetensors": "328a91d3122359d5547f9d79521205bc0a46e1f79a792dfe650e99fc2d651223",
@@ -127,7 +127,7 @@ def cross_checks(values):
     require([r["tokens"] for r in values["graph-on"]["results"]] == [r["tokens"] for r in values["graph-off"]["results"]], "cold greedy divergence")
     for prefix, sides in (("primary", ("off", "on")), ("regression", ("old", "new"))):
         previous_end = 0
-        for pair in range(6 if prefix == "primary" else 5):
+        for pair in range(6):
             a, b = (values[f"{prefix}-p{pair}-{side}"] for side in sides)
             first, second = (a, b) if pair % 2 == 0 else (b, a)
             require(previous_end < first["process_started_ns"] < first["samples_finished_ns"] < second["process_started_ns"], "paired AB/BA ordering violation")
@@ -138,6 +138,14 @@ def cross_checks(values):
             for key in left:
                 if key[2] == "greedy" or prefix == "regression":
                     require([r["token_ids"] for r in left[key]["outputs"]] == [r["token_ids"] for r in right[key]["outputs"]], "baseline output divergence")
+        cells = expected_cells("primary" if prefix == "primary" else "off-regression")
+        for cell in cells:
+            valid_pairs = 0
+            for pair in range(6):
+                rows = [r for side in sides for r in values[f"{prefix}-p{pair}-{side}"]["records"]
+                        if row_key(r)[:-1] == cell]
+                valid_pairs += len(rows) == 6 and all(r["accepted"] for r in rows)
+            require(valid_pairs >= 5, "fewer than five valid independent pairs")
 
 
 def check_phases(value, role, repo=ROOT):

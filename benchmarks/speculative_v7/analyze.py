@@ -25,7 +25,7 @@ def paired(runs, prefix, old="off", new="on"):
     for cell in cells:
         ratios, old_seconds, new_seconds = [], [], []
         selected_pairs = []
-        for pair in range(6 if prefix == "primary" else 5):
+        for pair in range(6):
             a = {r["seed"]: r for r in runs[f"{prefix}-p{pair}-{old}"]["records"] if key(r) == cell}
             b = {r["seed"]: r for r in runs[f"{prefix}-p{pair}-{new}"]["records"] if key(r) == cell}
             if not a and not b:

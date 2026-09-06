@@ -92,3 +92,9 @@ first five complete, valid process pairs in chronological pair-ID order; keep
 all extra samples, including unused valid pairs. This rule is fixed before the
 additional run and does not select by latency or acceptance. If a cell still
 lacks five valid pairs, do not claim it meets the headline repetition gate.
+
+The same occupancy rule also excluded the three B8 samples in off-regression
+pair 2/new. Before collecting off-regression pair 5, register the same complete
+BA replacement pair (new then old), retaining the original samples and taking
+the first five valid pairs by ID for each cell. This does not relax the ±5%
+off-regression noise band or any correctness gate.

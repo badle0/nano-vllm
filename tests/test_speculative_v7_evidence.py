@@ -22,8 +22,8 @@ ANALYSIS = module("v7_analysis", "analyze.py")
 
 def test_archive_passes_without_gpu_or_model():
     result = V7.validate(EVIDENCE)
-    assert result["runs"] == 30
-    assert result["samples"] == 1290
+    assert result["runs"] == 32
+    assert result["samples"] == 1308
     assert result["cold_cycles"] == 271
 
 
