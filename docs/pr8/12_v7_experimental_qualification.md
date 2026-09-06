@@ -63,6 +63,14 @@ length fixed. Different sampled output IDs are expected; greedy controls must
 match. CPU/GPU contention, temperature, and timed compilation exclusions were
 declared before the runs, not chosen after seeing latency.
 
+Prompts repeat a fixed prose/code phrase to the requested token length; this is
+a controlled synthetic workload, not a production request trace. Warmups and
+samples reuse those prompts, so full target-prefix blocks may be cached. Draft
+catch-up still obeys its independent coverage contract. Reported TTFT is therefore
+for this warmed workload, **not cold-request TTFT**. Cold compiler/first-eligible
+route checks are a separate correctness experiment, not a cold-serving latency
+benchmark. No quality, production-tail-latency, or arrival-process claim is made.
+
 `speed ratio = speculation-off wall seconds / speculation-on wall seconds`.
 Values below one mean speculation is slower. Each process-pair contributes the
 median of its three same-seed ratios. The reported median and exact bootstrap
