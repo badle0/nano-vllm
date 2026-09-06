@@ -81,3 +81,14 @@ default performance claim**. Do not waive the required 4B pair or reinterpret
 same-model correctness controls as proof of acceleration. A broader Cartesian
 matrix/model fleet remains future qualification, not a claim of this initial
 bounded experimental implementation.
+
+## Exclusion repair amendment (before collecting pair 5)
+
+The original five primary pairs retained nine samples with a second visible GPU
+process: pair 2/on B1-C32-combined, and pair 4/off B1-C256 greedy/plain/top-k.
+They remain excluded under the original occupancy rule and remain in the archive.
+Append one complete fresh-process pair 5 in **BA** order. For each cell, use the
+first five complete, valid process pairs in chronological pair-ID order; keep
+all extra samples, including unused valid pairs. This rule is fixed before the
+additional run and does not select by latency or acceptance. If a cell still
+lacks five valid pairs, do not claim it meets the headline repetition gate.

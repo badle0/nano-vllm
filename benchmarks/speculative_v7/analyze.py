@@ -24,7 +24,8 @@ def paired(runs, prefix, old="off", new="on"):
     results = []
     for cell in cells:
         ratios, old_seconds, new_seconds = [], [], []
-        for pair in range(5):
+        selected_pairs = []
+        for pair in range(6 if prefix == "primary" else 5):
             a = {r["seed"]: r for r in runs[f"{prefix}-p{pair}-{old}"]["records"] if key(r) == cell}
             b = {r["seed"]: r for r in runs[f"{prefix}-p{pair}-{new}"]["records"] if key(r) == cell}
             if not a and not b:
@@ -34,11 +35,14 @@ def paired(runs, prefix, old="off", new="on"):
             if len(accepted) != 3:
                 continue  # no headline for an incomplete process pair
             ratios.append(median(a[s]["seconds"] / b[s]["seconds"] for s in accepted))
+            selected_pairs.append(pair)
             old_seconds.extend(a[s]["seconds"] for s in accepted)
             new_seconds.extend(b[s]["seconds"] for s in accepted)
+            if len(ratios) == 5:
+                break
         if not ratios:
             continue
-        results.append(dict(cell=list(cell), pairs=len(ratios), pair_ratios=ratios,
+        results.append(dict(cell=list(cell), pairs=len(ratios), selected_pairs=selected_pairs, pair_ratios=ratios,
                             speed_ratio=median(ratios), bootstrap_95=interval(ratios),
                             control_seconds=median(old_seconds), candidate_seconds=median(new_seconds)))
     return results
