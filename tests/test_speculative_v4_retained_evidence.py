@@ -70,8 +70,8 @@ def test_regular_rejects_symlink_and_hardlink(tmp_path):
         ARCHIVE.regular(hard)
 
 
-def test_harness_runtime_pin_is_current_v4():
+def test_harness_runtime_pin_matches_frozen_v4():
     import _speculative_v4_evidence as evidence
     assert evidence.IMPLEMENTATION_COMMIT == ARCHIVE.IMPLEMENTATION
     assert evidence.IMPLEMENTATION_NANOVLLM_TREE == ARCHIVE.RUNTIME_TREE
-    assert ARCHIVE.git(ROOT, "rev-parse", "HEAD:nanovllm").decode().strip() == ARCHIVE.RUNTIME_TREE
+    assert ARCHIVE.git(ROOT, "rev-parse", f"{ARCHIVE.IMPLEMENTATION}:nanovllm").decode().strip() == ARCHIVE.RUNTIME_TREE

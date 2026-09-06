@@ -34,7 +34,7 @@ from run_speculative_v3_route_compile import (
 SCHEMA = "nano-vllm-speculative-v4-gpu-v1"
 SEED = 20260906
 CONFIG = dict(max_num_seqs=4, max_num_batched_tokens=1024, max_model_len=512,
-              gpu_memory_utilization=0.5)
+              gpu_memory_utilization=0.5, num_kvcache_blocks=64)
 IMPORTS = {
     "nanovllm": (nanovllm, "nanovllm/__init__.py"),
     "LLM": (LLM, "nanovllm/llm.py"),

@@ -20,7 +20,7 @@ SCHEMA = "nano-vllm-speculative-v4-gpu-v1"
 IMPLEMENTATION = "22b63e8e24db3c7bc9c24b61aedd93b25d76d289"
 RUNTIME_TREE = "922d81417cf72ec912da13267fbb024c145a6a15"
 CONFIG = dict(max_num_seqs=4, max_num_batched_tokens=1024, max_model_len=512,
-              gpu_memory_utilization=0.5, configured_k=2, seed=20260906,
+              gpu_memory_utilization=0.5, num_kvcache_blocks=64, configured_k=2, seed=20260906,
               top_p_backend="exact", tensor_parallel_size=1)
 NAMES = tuple(f"{mode}-{side}" for mode in ("eager", "graph") for side in ("off", "zero", "nan"))
 TRUSTED_MANIFEST_SHA256 = None  # populated only after six clean-SHA runs pass
