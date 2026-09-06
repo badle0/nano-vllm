@@ -29,6 +29,7 @@ See [the branch policy](docs/BRANCHES.md) for the relationship between
 -  **Request metrics** — Queue, first-token, inter-token, engine, and caller latency measurements
 -  **Token streaming** — Synchronously backpressured, request-scoped streaming
 -  **Chunked prefill** — Bounded admission, mixed-step scheduling, and ragged CUDA-graph routing
+-  **Experimental speculative decoding (feature branch)** — Exact proposal/verification/rejection and burst commit; see [scope and opt-in](docs/pr8/09_v5_verified_execution.md). Not a default speedup claim or a feature already merged into `fork-main`.
 
 ## Installation
 

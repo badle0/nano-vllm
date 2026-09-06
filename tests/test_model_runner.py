@@ -253,6 +253,7 @@ def test_draft_model_construction_uses_and_restores_explicit_dtype(
         "draft_graph",
         "draft_pretouch",
         "route_pretouch",
+        "verifier_pretouch",
         "memory_finalize",
     ),
 )
@@ -423,6 +424,14 @@ def test_each_draft_constructor_phase_rolls_back_one_runner_transaction(
         ModelRunner,
         "_pretouch_draft_routes",
         pretouch_routes,
+    )
+    monkeypatch.setattr(
+        ModelRunner,
+        "_pretouch_speculative_verifier",
+        lambda self: (
+            (_ for _ in ()).throw(InjectedError("verifier_pretouch"))
+            if failure_phase == "verifier_pretouch" else None
+        ),
     )
     monkeypatch.setattr(
         ModelRunner,

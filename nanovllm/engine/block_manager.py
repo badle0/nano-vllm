@@ -1,6 +1,6 @@
 from collections import deque
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from itertools import count
 from typing import Iterable
 import xxhash
@@ -880,6 +880,30 @@ class BlockManager:
             self._temporary_reservation_by_seq_id = live_sequence_index
             raise
         return True
+
+    def prepare_temporary_target_writes(self, reservation):
+        """Evict recycled target-cache entries before their physical overwrite.
+
+        V3/V4 wrote only draft KV and could restore old free-block hashes. V5
+        writes target KV too, so those cached contents cannot be resurrected on
+        failure or trim. This is a conservative cache eviction, not a mutation
+        of any live committed prefix. Rollback still restores exact ownership
+        and order, but deliberately keeps these stale free-cache hashes evicted.
+        """
+        self._validate_live_temporary_reservation(reservation)
+        if self._active_temporary_reservations.get(reservation.reservation_id) is not reservation:
+            raise RuntimeError("target write lease identity mismatch")
+        overwritten = set(reservation.allocation_order)
+        updated = replace(
+            reservation,
+            hash_to_block_id_before=tuple((h, b) for h, b in reservation.hash_to_block_id_before if b not in overwritten),
+            block_states_before=tuple(
+                replace(state, hash=-1, token_ids=()) if state.block_id in overwritten else state
+                for state in reservation.block_states_before
+            ),
+        )
+        self._active_temporary_reservations[reservation.reservation_id] = updated
+        return updated
 
     def can_append(self, seq: Sequence) -> bool:
         return len(self.free_block_ids) >= (len(seq) % self.block_size == 1)

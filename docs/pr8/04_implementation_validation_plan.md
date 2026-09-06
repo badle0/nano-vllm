@@ -1,5 +1,15 @@
 # PR8 speculative decoding v2: implementation and validation plan
 
+Implementation amendment (2026-09-06): real V5 verification/acceptance/commit is
+implemented on `feat/spec-v2-verify-commit`; see
+[09_v5_verified_execution.md](09_v5_verified_execution.md). A conservative
+ordinary-kernel lane supersedes parallel greedy verification after a non-tied
+matching-mode discrepancy. The stochastic lane remains parallel. This changes
+the execution-cost model, not the acceptance/bonus/rollback gates. Initial
+B<=4/K<=4 route caps are validation limits, not a measured crossover. Final
+retained and performance results must be recorded separately before claiming
+the release criteria below are satisfied.
+
 Status: **V0 is frozen at `480a3b2`; V1 sampling-law implementation is locally
 certified through `8989e44`; V2 inert dual-model lifecycle code at `d87f168` is
 retained-certified on A100; and V3 is narrowly retained-certified for

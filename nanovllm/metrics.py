@@ -23,6 +23,7 @@ def compute_metrics(
         "num_prompt_tokens": seq.num_prompt_tokens,
         "num_completion_tokens": seq.num_completion_tokens,
     }
+    metrics.update(getattr(seq, "spec_metrics", {}))
     if first_delivery_time is None:
         first_delivery_time = getattr(seq, "first_delivery_time", None)
     if delivery_time is None:

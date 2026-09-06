@@ -1039,6 +1039,33 @@ class LLMEngine:
             raise
         return plan, coverage
 
+    def _execute_speculative_verified(self, seqs, schedule_rollback):
+        from dataclasses import replace
+        runner = self.model_runner
+        admission = self._resolve_draft_route_admission(seqs)
+        if admission is not None:
+            admission = replace(admission, route_keys=tuple(
+                key for key in admission.route_keys
+                if (len(seqs), key.effective_k) in runner.speculative_verifier_shapes
+            ))
+        plan = self.scheduler.plan_speculative_step(
+            seqs, configured_workspace=runner.speculative_memory_plan,
+            route_admission=admission, baseline_decode_rollback=schedule_rollback,
+        )
+        if not plan.uses_speculation:
+            return None
+        self.scheduler.prepare_speculative_target_writes(plan)
+        rng = runner.snapshot_speculative_rng()
+        try:
+            result = runner.call("run_speculative", plan, seqs)
+            return self.scheduler.commit_speculative(plan, result)
+        except BaseException as error:
+            try:
+                runner.restore_speculative_rng(rng)
+            except BaseException as cleanup_error:
+                record_cleanup_failure(error, "speculative RNG rollback", cleanup_error)
+            raise
+
     def _execute_speculative_shadow(self, seqs, schedule_rollback):
         """Execute V4 planning with the existing proposal/discard kernels."""
         runner = self.model_runner
@@ -1087,14 +1114,18 @@ class LLMEngine:
             )
         draft_cycle = None
         try:
-            if (not is_prefill
+            events = None
+            if (not is_prefill and bool(getattr(runner, "speculative_verifier_ready", False))):
+                events = self._execute_speculative_verified(seqs, schedule_rollback)
+            elif (not is_prefill
                     and bool(getattr(runner, "speculation_enabled", False))
                     and callable(getattr(self.scheduler, "plan_speculative_step", None))):
                 draft_cycle = self._execute_speculative_shadow(seqs, schedule_rollback)
             else:
                 draft_cycle = self._execute_draft_discard(seqs, is_prefill)
-            token_ids = self.model_runner.call("run", seqs, is_prefill)
-            events = self.scheduler.postprocess(seqs, token_ids)
+            if events is None:
+                token_ids = self.model_runner.call("run", seqs, is_prefill)
+                events = self.scheduler.postprocess(seqs, token_ids)
         except BaseException as error:
             if getattr(self.scheduler, "_active_spec_transaction", None) is not None:
                 try:
@@ -1216,7 +1247,11 @@ class LLMEngine:
                 if step_output.num_prefill_tokens:
                     prefill_throughput = step_output.num_prefill_tokens / dt
                 if step_output.num_decode_tokens:
-                    decode_throughput = step_output.num_decode_tokens / dt
+                    # Pure decode may commit several tokens per row. In mixed
+                    # steps preserve the ordinary decode-row count (one each).
+                    emitted = (len(step_output.events) if not step_output.num_prefill_tokens
+                               else step_output.num_decode_tokens)
+                    decode_throughput = emitted / dt
                 pbar.set_postfix({
                     "Prefill": f"{int(prefill_throughput)}tok/s",
                     "Decode": f"{int(decode_throughput)}tok/s",

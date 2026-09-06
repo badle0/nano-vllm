@@ -247,6 +247,17 @@ def tensor_parallel_shm_size(config: Config) -> int:
 class ModelRunner:
 
     def __init__(self, config: Config, rank: int, event: Event | list[Event]):
+        if bool(getattr(config, "speculation_enabled", False)):
+            # Two model instances, capture/default-dtype variants, and all-query
+            # verifier shapes need more than the default eight specializations.
+            # Scope this finite construction budget; do not globally disable
+            # compilation or suppress failures, and leave speculation-off alone.
+            with torch._dynamo.config.patch(recompile_limit=32):
+                self._initialize(config, rank, event)
+        else:
+            self._initialize(config, rank, event)
+
+    def _initialize(self, config: Config, rank: int, event: Event | list[Event]):
         self._closed = False
         self._owns_process_group = False
         self.shm = None
@@ -276,6 +287,8 @@ class ModelRunner:
             self.speculative_memory_plan = None
             self.speculative_memory_audit = None
             self.draft_route_registry = None
+            self.speculative_verifier_ready = False
+            self.speculative_verifier_shapes = frozenset()
             self._speculative_memory_audit_inputs = None
             self._profiled_graph_allocated_bytes = 0
             self._profiled_graph_reserved_bytes = 0
@@ -382,6 +395,7 @@ class ModelRunner:
                     "V3 draft route pretouch",
                     self._pretouch_draft_routes,
                 )
+                self._run_draft_phase("target verifier pretouch", self._pretouch_speculative_verifier)
                 self._finalize_speculative_memory_audit()
 
             if self.world_size > 1:
@@ -575,6 +589,8 @@ class ModelRunner:
             "speculative_memory_plan",
             "speculative_memory_audit",
             "draft_route_registry",
+            "speculative_rejection_sampler",
+            "speculative_verifier_shapes",
             "_speculative_memory_audit_inputs",
         ):
             if hasattr(self, name):
@@ -2311,6 +2327,38 @@ class ModelRunner:
                 == q_storage.untyped_storage().data_ptr()
             ),
         )
+
+    def _pretouch_speculative_verifier(self):
+        from nanovllm.engine.speculative_execution import warm_verifier
+        from nanovllm.layers.sampler import ModifiedRejectionSampler
+        self.speculative_rejection_sampler = ModifiedRejectionSampler()
+        warm_verifier(self)
+
+    def snapshot_speculative_rng(self):
+        device = self.kv_cache.device
+        return (torch.get_rng_state(),
+                torch.cuda.get_rng_state(device) if device.type == "cuda" else None)
+
+    def restore_speculative_rng(self, snapshot):
+        torch.set_rng_state(snapshot[0])
+        if snapshot[1] is not None:
+            torch.cuda.set_rng_state(snapshot[1], self.kv_cache.device)
+
+    def run_speculative(self, plan, seqs):
+        from nanovllm.engine.speculative_execution import execute
+        failure = None
+        try:
+            return execute(self, plan, seqs)
+        except Exception as error:
+            failure = (type(error).__name__, str(error), tuple(getattr(error, "__notes__", ())))
+            error.__traceback__ = None
+        finally:
+            reset_context()
+        name, message, notes = failure
+        error = SpeculativeDraftExecutionError(f"speculative verification failed ({name}): {message}")
+        for note in notes:
+            error.add_note(note)
+        raise error from None
 
     def run_speculative_discard(
         self,

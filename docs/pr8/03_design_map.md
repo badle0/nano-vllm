@@ -1,5 +1,14 @@
 # PR 8 — 03: speculative decoding v2 design map
 
+Implementation amendment (2026-09-06): V5 now executes verification and atomic
+burst commit. Pure stochastic batches use parallel paged verification; batches
+containing greedy rows use the ordinary one-token target path to preserve
+matching-mode numerical behavior. The initial router is capped at B<=4/K<=4.
+See [09_v5_verified_execution.md](09_v5_verified_execution.md) for rationale,
+contracts, metrics, validation status, and experimental limitations. The frozen
+architecture below remains a historical decision ledger, not an assertion that
+every optimization has been certified.
+
 This document records the architecture as frozen before implementation. It is a
 decision ledger, not a claim that the complete feature exists. The design base is
 `origin/fork-main` at `663753b99131945c297c1fbe02341108f422dce7`.

@@ -23,6 +23,7 @@ from nanovllm.engine.speculative_plan import (
     derive_speculative_effective_k, draft_catchup_tokens,
     speculative_k_budget,
 )
+from nanovllm.engine.speculative_result import SPEC_METRIC_KEYS, validate_result
 
 
 @dataclass(frozen=True, slots=True)
@@ -88,6 +89,7 @@ class ActiveSpecTransaction:
     plan: SpecStepPlan
     reservation: TemporaryBlockReservation
     baseline_decode_rollback: DecodeScheduleRollback
+    target_writes_prepared: bool = False
 
 
 def as_draft_discard_plan(plan: SpecStepPlan) -> DraftDiscardPlan:
@@ -192,6 +194,8 @@ class Scheduler:
 
     def add(self, seq: Sequence):
         self.require_capacity()
+        if self._configured_k > 0:
+            seq.spec_metrics = dict.fromkeys(SPEC_METRIC_KEYS, 0)
         self.waiting.append(seq)
 
     def schedule(self) -> tuple[list[Sequence], bool]:
@@ -639,6 +643,110 @@ class Scheduler:
         self.rollback_failed_decode_schedule(transaction.baseline_decode_rollback)
         self._active_spec_transaction = None
         return True
+
+    def prepare_speculative_target_writes(self, plan):
+        transaction = self._active_spec_transaction
+        if transaction is None or transaction.plan is not plan:
+            raise RuntimeError("speculative target writes require the active transaction")
+        if not transaction.target_writes_prepared:
+            transaction.reservation = self.block_manager.prepare_temporary_target_writes(transaction.reservation)
+            self._active_draft_discard = (plan, transaction.reservation)
+            transaction.target_writes_prepared = True
+
+    def commit_speculative(self, plan, result):
+        """Atomic batch commit: physical trim, logical state, hashes, then events.
+
+        The live lease/undo record is restored on every failure so the engine's
+        ordinary abort path can release both reservation layers. Recycled free
+        cache entries were already evicted before target writes and stay evicted.
+        """
+        transaction = self._active_spec_transaction
+        if transaction is None or transaction.plan is not plan or not transaction.target_writes_prepared:
+            raise RuntimeError("speculative commit requires a prepared target-write transaction")
+        seqs = [row.sequence for row in transaction.reservation.rows]
+        if tuple(seqs) != tuple(self.running):
+            raise ValueError("speculative commit must cover the scheduled running batch")
+        validate_result(plan, result, seqs, self.vocab_size)
+        prepared = []
+        for seq, row, snapshot in zip(seqs, result.rows, plan.rows, strict=True):
+            tokens = []
+            for token in row.committed_token_ids:
+                if seq.num_completion_tokens + len(tokens) >= seq.max_tokens:
+                    break
+                tokens.append(token)
+                if not seq.ignore_eos and token == self.eos:
+                    break
+            if not tokens:
+                raise ValueError("speculative commit has no completion headroom")
+            cached = len(seq) + len(tokens) - 1
+            draft_cached = min(cached, len(seq) + plan.effective_k - 1)
+            prepared.append((seq, row, snapshot, tokens, cached, draft_cached))
+
+        manager = self.block_manager
+        # Host metadata only: never clone model weights or GPU caches here.
+        sequence_states = [(seq, {key: value.copy() if isinstance(value, (list, dict)) else value
+                                  for key, value in seq.__dict__.items()}) for seq in seqs]
+        allocator_state = (
+            tuple(manager.free_block_ids), set(manager.used_block_ids), dict(manager.hash_to_block_id),
+            [(b.ref_count, b.hash, b.token_ids[:]) for b in manager.blocks],
+            dict(manager._active_temporary_reservations), dict(manager._temporary_reservation_by_seq_id),
+        )
+        running_before, waiting_before = tuple(self.running), tuple(self.waiting)
+        now = self._clock()
+        try:
+            keep = {
+                seq.seq_id: (cached + self.block_size - 1) // self.block_size - len(lease_row.block_table_before)
+                for (seq, _, _, _, cached, _), lease_row in zip(prepared, transaction.reservation.rows, strict=True)
+            }
+            if not manager.finalize_temporary_append(transaction.reservation, keep):
+                raise RuntimeError("speculative commit did not finalize its lease")
+            for seq, row, snapshot, tokens, cached, draft_cached in prepared:
+                for token in tokens:
+                    seq.append_token(token)
+                # Publish only complete blocks covered by actual target KV.
+                # hash_blocks uses the OLD coverage plus newly processed count.
+                seq.num_scheduled_tokens = cached - seq.num_cached_tokens
+                manager.hash_blocks(seq)
+                seq.num_cached_tokens, seq.num_draft_cached_tokens = cached, draft_cached
+                seq.num_scheduled_tokens = 0
+                if seq.first_token_time is None:
+                    seq.first_token_time = now
+                seq.token_times.extend([now] * len(tokens))
+                counters = dict(getattr(seq, "spec_metrics", {}))
+                updates = {
+                    "spec_cycles": 1, "spec_proposed_draft_tokens": plan.effective_k,
+                    "spec_accepted_draft_tokens": min(row.accepted_draft_tokens, len(tokens)),
+                    "spec_committed_tokens": len(tokens),
+                    "spec_bonus_tokens": int(row.used_bonus and len(tokens) == len(row.committed_token_ids)),
+                    "spec_draft_positions": plan.effective_k + snapshot.target_cached_tokens - snapshot.draft_cached_tokens,
+                    "spec_target_verification_positions": plan.effective_k + 1,
+                    "spec_residual_numerical_fallbacks": row.residual_numerical_fallbacks,
+                }
+                for name, value in updates.items():
+                    counters[name] = counters.get(name, 0) + value
+                seq.spec_metrics = counters
+                if (not seq.ignore_eos and tokens[-1] == self.eos) or seq.num_completion_tokens >= seq.max_tokens:
+                    seq.finish_time = now
+                    seq.status = SequenceStatus.FINISHED
+                    manager.deallocate(seq)
+                    self.running.remove(seq)
+            events = [StreamOutput(seq.seq_id, token, seq.is_finished and index == len(tokens) - 1)
+                      for seq, _, _, tokens, _, _ in prepared for index, token in enumerate(tokens)]
+        except BaseException:
+            for seq, state in sequence_states:
+                seq.__dict__.clear()
+                seq.__dict__.update(state)
+            free, used, hashes, blocks, reservations, indices = allocator_state
+            manager.free_block_ids, manager.used_block_ids, manager.hash_to_block_id = deque(free), used, hashes
+            for block, (ref_count, block_hash, tokens) in zip(manager.blocks, blocks, strict=True):
+                block.ref_count, block.hash, block.token_ids = ref_count, block_hash, tokens
+            manager._active_temporary_reservations = reservations
+            manager._temporary_reservation_by_seq_id = indices
+            self.running, self.waiting = deque(running_before), deque(waiting_before)
+            raise
+        self._active_draft_discard = None
+        self._active_spec_transaction = None
+        return events
 
     def capture_decode_schedule_rollback(
         self,

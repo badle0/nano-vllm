@@ -32,7 +32,10 @@ recompile-limit warning outside the route proof, so those artifacts support only
 their stated numerical and output oracles. V4 planning, reservation and shadow
 integration now have a narrow retained eager/graph GPU certificate at B<=4,
 K<=2 and an explicit 64-block pool. Automatic KV sizing and wider joint gate
-coverage remain open; V5-V7 are not implemented. See
+coverage remain open in that historical V4 certificate. V5 now implements real
+verification/acceptance/commit on `feat/spec-v2-verify-commit`; see
+[09_v5_verified_execution.md](09_v5_verified_execution.md) for the implementation,
+greedy compatibility lane, scope and remaining retained/performance gates. See
 [07_v4_scheduler_transactions.md](07_v4_scheduler_transactions.md) and
 [08_v4_retained_gpu_validation.md](08_v4_retained_gpu_validation.md) for the
 implementation, evidence, a failed auto-sizing experiment and remaining gates.
