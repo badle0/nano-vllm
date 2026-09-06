@@ -7,6 +7,9 @@ are committed and retained-tested on A100. See
 descriptions below retain their original narrow scope. V7's heterogeneous pair,
 performance qualification and roofline analysis are recorded separately in
 [12_v7_experimental_qualification.md](12_v7_experimental_qualification.md).
+The qualified initial implementation is opt-in, TP=1, live B<=4/effective K<=4;
+its measured active routes are slower than ordinary decoding. No speedup or
+merge into `fork-main` is claimed.
 
 Status: the V0 design packet was frozen in commit `480a3b2`, and V1 sampling-law
 work was implemented and locally certified through `8989e44`. V2's inert

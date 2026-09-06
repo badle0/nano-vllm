@@ -1,0 +1,3 @@
+# Generated raw evidence remains available; GitHub may collapse it in PR diffs.
+evidence/**/*.json linguist-generated=true
+evidence/**/*.log linguist-generated=true

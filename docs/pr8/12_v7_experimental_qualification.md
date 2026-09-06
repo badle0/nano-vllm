@@ -211,8 +211,169 @@ already measured improvements or a reason to erase the slower results.
   graph-captured parallel target verifier, broad model-fleet certification, or
   production speedup. Those are separate optimization/qualification tasks.
 
-## Result status
+## Final measurement results
 
-The five-pair timing, off-regression, supplemental and phase runs are in progress.
-Final numeric tables, archive digest and test totals will replace this paragraph
-only after all raw artifacts pass the model-free validator.
+The bounded experimental qualification is complete. **No primary cell demonstrated
+acceleration.** The active B=1/4 routes have paired speed ratios 0.276–0.521,
+approximately **1.92–3.62 times slower** than speculation off. B=8 correctly
+bypasses speculation; its ratios 0.963–0.974 show approximately 2.6–3.8% opt-in
+overhead while draft resources remain resident. This is not a production
+performance release, and no useful crossover is claimed.
+
+The sealed archive contains **32 successful fresh-process runs**, **1,308 timing
+samples**, the heterogeneous cold correctness controls and **238 diagnostic
+cycles** across eager/graph profiles. Twelve timing samples are explicitly
+excluded because a second GPU process appeared at a recorded boundary. Their
+owner was not established or terminated. The preregistered repair pairs were
+uncontended; every primary and off-regression cell now has five valid pairs.
+Boundary snapshots are not a continuous proof of exclusive GPU occupancy.
+The two earlier failed setup/fixture attempts are retained and labeled failed,
+not counted as successful runs.
+
+### Primary paired speed ratios
+
+Each entry is off/on wall-time ratio with its descriptive 95% process-pair
+bootstrap interval. Values below one mean slower with speculation enabled.
+
+| B | Context | Sampling | Ratio [interval] |
+|---:|---:|---|---:|
+| 1 | 32 | Greedy | 0.440 [0.431, 0.453] |
+| 1 | 32 | Plain | 0.489 [0.477, 0.506] |
+| 1 | 32 | Top-k | 0.338 [0.318, 0.353] |
+| 1 | 32 | Top-p | 0.486 [0.466, 0.498] |
+| 1 | 32 | Combined | 0.340 [0.331, 0.356] |
+| 1 | 256 | Greedy | 0.469 [0.462, 0.483] |
+| 1 | 256 | Plain | 0.521 [0.498, 0.533] |
+| 1 | 256 | Top-k | 0.505 [0.472, 0.519] |
+| 1 | 256 | Top-p | 0.502 [0.480, 0.506] |
+| 1 | 256 | Combined | 0.484 [0.475, 0.519] |
+| 4 | 32 | Greedy | 0.423 [0.411, 0.426] |
+| 4 | 32 | Plain | 0.382 [0.373, 0.394] |
+| 4 | 32 | Top-k | 0.276 [0.265, 0.284] |
+| 4 | 32 | Top-p | 0.376 [0.368, 0.381] |
+| 4 | 32 | Combined | 0.316 [0.297, 0.319] |
+| 4 | 256 | Greedy | 0.470 [0.455, 0.481] |
+| 4 | 256 | Plain | 0.509 [0.493, 0.529] |
+| 4 | 256 | Top-k | 0.344 [0.330, 0.354] |
+| 4 | 256 | Top-p | 0.516 [0.499, 0.542] |
+| 4 | 256 | Combined | 0.400 [0.362, 0.416] |
+| 8 | 32 | Greedy | 0.963 [0.955, 0.966] |
+| 8 | 32 | Plain | 0.970 [0.961, 0.977] |
+| 8 | 32 | Top-k | 0.964 [0.953, 0.975] |
+| 8 | 32 | Top-p | 0.964 [0.957, 0.974] |
+| 8 | 32 | Combined | 0.963 [0.956, 0.967] |
+| 8 | 256 | Greedy | 0.971 [0.955, 0.977] |
+| 8 | 256 | Plain | 0.973 [0.961, 0.979] |
+| 8 | 256 | Top-k | 0.971 [0.960, 0.981] |
+| 8 | 256 | Top-p | 0.974 [0.964, 0.976] |
+| 8 | 256 | Combined | 0.972 [0.957, 0.977] |
+
+Repair selection: B1/C32/combined uses pairs 0/1/3/4/5; B1/C256 greedy/plain/
+top-k use 0/1/2/3/5; all other primary cells use 0/1/2/3/4. Extra valid samples
+are retained but do not replace earlier valid pairs.
+
+### Speculation-off regression
+
+This compares the **old and current runtimes with speculation disabled on both**,
+not the resource-resident high-batch bypass case above.
+
+| B | Old/current paired speed ratio [interval] | Paired current-latency change |
+|---:|---:|---:|
+| 1 | 1.0017 [0.9857, 1.0094] | −0.17% |
+| 4 | 0.9996 [0.9960, 1.0017] | +0.04% |
+| 8 | 0.9960 [0.9941, 1.0033] | +0.40% |
+
+All are inside the preregistered ±5% noise band; no material off-path regression
+was measured. B8 uses pairs 0/1/3/4/5; the other cells use 0/1/2/3/4. Paired
+ratios are not computed by dividing two pooled latency medians, which can differ
+slightly near zero change. Same-seed off-path token outputs match exactly.
+
+### Calibrated roofs and measured cost
+
+Median calibration across the twelve primary processes: **1.372 TB/s** logical
+copy bandwidth and **253.787 TFLOP/s** dense BF16 compute. Their ridge point is
+about 185 FLOP/byte. The ideal target-weight stream takes **5.864 ms**; the draft
+weight stream takes **0.869 ms**. One target query's dense linear work takes an
+ideal 0.0317 ms at the compute roof, making low-batch decode strongly bandwidth-
+bound in this simplified model. These floors exclude the additional work and
+host/kernel-launch limitations described above.
+
+Illustrative diagnostic averages for **B1/code/R32**, in milliseconds per cycle:
+
+| Engine mode | Sampling | Draft incl. catch-up | Target verification | Acceptance | Commit | Total | Emitted/row-cycle |
+|---|---|---:|---:|---:|---:|---:|---:|
+| Graph | Greedy | 42.546 | 44.495 | 1.176 | 0.108 | 89.466 | 5.000 |
+| Graph | Plain | 30.122 | 35.994 | 1.734 | 0.103 | 69.078 | 3.875 |
+| Eager | Greedy | 127.443 | 168.582 | 1.146 | 0.125 | 298.261 | 5.000 |
+| Eager | Plain | 113.741 | 36.568 | 1.675 | 0.116 | 153.004 | 3.875 |
+
+Total additionally includes bonus draws and other host/dispatch work. These are
+synchronized diagnostic samples, not alternative headline measurements. The
+greedy workload accepts all four proposals in each of six cycles, yet is slow:
+perfect acceptance cannot compensate for five target calls and repeated eager
+catch-up. Its 37 catch-up positions are the initial 32 plus five one-token
+catch-ups. Plain sampling records acceptance lengths 0/2/2/3/4/4/4/4 across eight
+cycles and 36 catch-up positions. The histogram is unordered; it does not claim
+that sequence was the chronological acceptance order.
+
+As a measured-component accounting check, 69.078/3.875 is about 17.8 ms per
+speculatively emitted token, versus about 8.7 ms/token for the primary plain
+control. That explains a ratio near 0.49 without pretending the optimistic
+weight-only roof predicts wall time. This is not an independent speedup oracle:
+the diagnostic uses R32/one seed, the primary uses R64/paired seeds, and both
+include workload/tail effects. Component timings do not separately identify CPU
+time versus device-kernel time.
+
+### Supplemental outcomes
+
+All 96 extended and 24 configured-K-cap samples passed without exclusions.
+B16/32/64/128 had zero speculative cycles. B1 at contexts 1024 and 2048 executed
+13 cycles per request in these samples; B4 at those contexts correctly bypassed
+because initial catch-up could not fit the aggregate token budget. Normal and
+slow stream consumers returned every requested token. Configured K=5/6 completed
+through the capped registered path. These are bounded functional/exploratory
+checks, not five-pair performance claims for every supplemental cell.
+
+## Archive and recheck
+
+Archive: [V7 manifest](../../benchmarks/speculative_v7/evidence/2026-09-06-a100-v7-89829e6/manifest.json).
+SHA256: `c7fe59acd0db36882ba7bf8fb8f4c9c60d607fe602a283511d96bdccc9bd44ee`.
+The archive was sealed only after source/model identities, complete matrices,
+same-mode controls, registered exclusions, pair ordering, work/metrics and
+phase ledgers validated. Original failed attempts and excluded samples are kept.
+
+```bash
+python benchmarks/speculative_v7/validate_retained_evidence.py \
+  benchmarks/speculative_v7/evidence/2026-09-06-a100-v7-89829e6
+python benchmarks/speculative_v7/analyze.py \
+  benchmarks/speculative_v7/evidence/2026-09-06-a100-v7-89829e6
+```
+
+These commands need Git history, but no GPU, Torch, model files or network.
+Analysis first validates the pinned archive and then recomputes paired ratios,
+exact-bootstrap intervals, work counts, roof arithmetic and phase summaries.
+CPU CI runs the validator and semantic/integrity tamper tests. It does not rerun
+the GPU experiments or claim remote CI has already passed on an unpushed branch.
+
+Final CPU-only pytest at archive checkpoint `66c141d`: **1,263 passed, 31 skipped**,
+14 Torch deprecation warnings, 157.53 seconds. The separate CUDA-enabled run at
+the same checkpoint passed **1,293 tests, with 1 skipped**, 14 deprecation warnings,
+in 208.99 seconds. Logs retain the tested commit and runtime-tree identities:
+[CPU](../../benchmarks/speculative_v7/checks/final-cpu.log) and
+[CUDA-enabled](../../benchmarks/speculative_v7/checks/final-gpu-pytest.log).
+Skips are not counted as passes, and local testing does not assert remote CI success.
+
+## Handoff
+
+The complete implementation/evidence stack is on `feat/spec-v2-performance` in
+the `/workspace/nano-vllm-spec-v2` worktree. Earlier `feat/spec-v2-*` branches are
+milestone checkpoints, not substitutes for this final qualified tip; in
+particular, final scratch-pricing/lifecycle corrections landed after the initial
+V5 checkpoint. Runtime tree `c2c9fbce937217ad2227955fbb4451441a721dd3` is unchanged
+by the subsequent benchmark, evidence, test-log and documentation commits.
+
+No push, PR, release publication or merge into `fork-main` was performed.
+`fork-main`, the upstream repository and the preserved PR7 prototype were not
+modified. The next external action requires the owner's review and push/PR;
+the next engineering task is optional performance optimization with fresh
+qualification, not implementation of missing verification/acceptance/commit.
