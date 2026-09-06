@@ -52,6 +52,13 @@ tests cover cases that finite natural-model samples cannot force, including
 rejection and EOS at every position, every commit failure phase, and numerical
 residual corners. Neither archive claims to prove the absence of all bugs.
 
+"Exact" refers to modified rejection for the represented canonical FP32 p/q
+laws, evaluated robustly in FP64. It does not promise bit-identical probabilities
+from differently batched BF16 model kernels. Matching-mode greedy compatibility
+is a separate gate, not a tolerance silently applied to sampled output IDs.
+Rollback tests inject recoverable failures; they do not promise reuse after a
+device-fatal CUDA error or a poisoned CUDA context.
+
 ## Timing protocol and interpretation
 
 The [preregistered protocol](11_v7_measurement_policy.md) fixes five fresh-process
@@ -129,6 +136,11 @@ plus KV writes and metadata. Attention work is approximately
 `4*L*B*C*query_heads*D` FLOPs. GQA reuses KV across query-head groups; charging
 32 independent KV heads would overcount the ideal floor. The 64 physical blocks,
 each of 256 tokens, occupy 2,415,919,104 target-KV bytes regardless of occupancy.
+The draft has 28 layers and the same KV-head count/dimension: 114,688 bytes per
+cached token, or 1,879,048,192 bytes for its 64-block pool. The two physical pools
+therefore occupy exactly 4 GiB together. Logical block IDs are shared; physical
+target and draft KV tensors are not. Driver memory occupancy also includes CUDA
+context, reserved allocator blocks, graphs and buffers, not just weights and KV.
 
 With measured bandwidth `BW` and compute roof `F`, a useful optimistic step model
 is `max((target_weights + KV_reads)/BW, (linear_FLOPs + attention_FLOPs)/F)`.
