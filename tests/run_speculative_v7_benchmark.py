@@ -29,6 +29,7 @@ def hardware():
 
 
 def main():
+    process_started_ns = time.time_ns()
     parser = argparse.ArgumentParser()
     parser.add_argument("--model", required=True)
     parser.add_argument("--draft-model", required=True)
@@ -176,6 +177,7 @@ def main():
                            matmul_ms=matmul_ms, bf16_flops_per_second=2 * 4096**3 / (matmul_ms / 1000))
         payload = dict(schema="speculative-v7-benchmark-v1", args={**vars(args), "source_root": str(source), "output": str(args.output)},
                        runtime_revision=revision, harness_sha256=digest_file(Path(__file__)),
+                       process_started_ns=process_started_ns, samples_finished_ns=time.time_ns(),
                        source_sha256=source_hashes, torch=torch.__version__, cuda=torch.version.cuda,
                        python=platform.python_version(), gpu=torch.cuda.get_device_name(),
                        config=config, initialization_seconds=initialization_seconds,

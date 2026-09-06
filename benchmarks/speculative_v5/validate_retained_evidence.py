@@ -22,12 +22,16 @@ def sha(payload):
     return hashlib.sha256(payload).hexdigest()
 
 
-def check_run(value, role, producer, repo=ROOT):
+def check_run(value, role, producer, repo=ROOT, *, model_files=None,
+              work_limits=(1024, 512), memory_utilization=.5):
     require(value["schema"] == "nano-vllm-speculative-v5-gpu-v1", "wrong run schema")
     require(value["revision"] == producer and value["args"]["expected_commit"] == producer, "producer mismatch")
     require(value["args"]["retained"] is True, "exploratory run cannot be retained")
     require("A100-SXM4-40GB" in value["gpu"], "wrong GPU")
-    require(value["model_files"]["model.safetensors"]["sha256"] == MODEL_SHA256, "wrong model weights")
+    if model_files is None:
+        require(value["model_files"]["model.safetensors"]["sha256"] == MODEL_SHA256, "wrong model weights")
+    else:
+        require(value["model_files"] == model_files, "wrong model weights/configuration")
     tracked = git(repo, "ls-tree", "-r", "--name-only", producer, "nanovllm").decode().splitlines()
     expected_files = {name for name in tracked if name.endswith(".py")}
     require(set(value["source_sha256"]) == expected_files, "incomplete runtime source identities")
@@ -36,8 +40,8 @@ def check_run(value, role, producer, repo=ROOT):
     mode, side = role.split("-", 1)
     enabled = side != "off"
     require(value["args"]["mode"] == mode and value["args"]["enabled"] is enabled, "role mismatch")
-    require(value["config"]["max_num_batched_tokens"] == 1024 and value["config"]["max_model_len"] == 512, "work-limit mismatch")
-    require(value["config"]["gpu_memory_utilization"] == .5, "memory budget mismatch")
+    require((value["config"]["max_num_batched_tokens"], value["config"]["max_model_len"]) == work_limits, "work-limit mismatch")
+    require(value["config"]["gpu_memory_utilization"] == memory_utilization, "memory budget mismatch")
     require([(r["length"], r["batch"]) for r in value["results"]] == [(16, 1), (255, 2), (256, 3), (257, 4)], "missing boundary workload")
     for row in value["results"]:
         require(row["cache_repeat"] is True and row["stream_parity"] is True, "cache/stream control failed")
