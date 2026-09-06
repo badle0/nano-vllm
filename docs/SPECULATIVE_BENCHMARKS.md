@@ -169,3 +169,48 @@ Raw evidence and historical validators remain on the full experiment branch.
 The slim branch carries runtime regression tests and usable GPU tools, not the
 historical archive-specific test count. Its own validation is recorded separately
 below; historical measurements above are not newly collected integration results.
+
+## Slim integration validation (2026-09-06)
+
+Implementation/test/CI checkpoint:
+`7e2c6b560334a6617380915e3b62bc358b6fe7b2`. The subsequent validation-record
+commit changes documentation only. The complete `nanovllm` tree matches the
+qualified experiment exactly (`c2c9fbce937217ad2227955fbb4451441a721dd3`).
+
+| Check | Result |
+|---|---|
+| CPU run with Qwen shim, CUDA hidden | 991 passed, 31 skipped, 14 warnings |
+| Full suite with real CUDA dependencies | 1,021 passed, 1 skipped, 14 warnings |
+| Exact CPU-CI selection in independent depth-one clone | 991 passed, 26 skipped, 14 warnings |
+| Syntax and all six existing evidence-validation commands in depth-one clone | Passed |
+| Fresh Qwen3-4B / Qwen3-0.6B graph-enabled integration sweep in depth-one clone | Passed: 255 cycles, 80 sweep cells |
+| GPU integration, timing and phase tool CLI imports in depth-one clone | Passed |
+| Whitespace, runtime identity, unchanged existing benchmarks/package/license | Passed |
+
+The shallow clone contained only this checkpoint and could not resolve the
+experiment tip. Thus these checks did not depend on hidden experimental Git
+history or speculative raw archives. The smaller test count is intentional:
+272 historical artifact/harness tests remain on the experiment branch, rather
+than being marked skipped here. The additional five CPU-CI exclusions are the
+Triton-importing histogram module; those tests ran in the CUDA suite.
+Warnings were the existing TorchScript deprecation warnings.
+
+The fresh graph sweep used the command above with `--enabled --sweep`, default
+B<=4/K=4, model length 512, input budget 1024 and fixed 64-block KV pools. It
+observed four pending tokens before both close and abandonment, passed causal
+verification and recoverable fault/RNG rollback with retry, and produced four
+13-token outputs in each stochastic/mixed case. This was a tool/integration
+check, **not** a new five-pair performance qualification, matching off-control
+pair, or isolated-cold-cache `--retained` certificate.
+
+Its temporary raw result is outside Git at
+`/tmp/nano-vllm-slim-graph-7e2c6b5.json`, SHA256
+`49d87b7c400343c813b539090debafb2b4b83e40dfb6b7e4b69b61d66bbcf110`.
+This temporary file is not a durable archive; the complete historical evidence
+remains on the pinned experiment branch.
+
+Local tests used Python 3.12.13 and Torch 2.10.0+cu128. The GitHub Actions
+Python 3.10/3.12, Torch 2.4.1 CPU dependency matrix has **not** run remotely yet;
+passing the local selection does not establish that matrix's result. Require
+the fork-local PR checks before merging. Neither branch has been pushed or
+merged as part of this preparation.
