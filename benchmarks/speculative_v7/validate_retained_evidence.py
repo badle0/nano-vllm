@@ -26,6 +26,8 @@ TARGET_WEIGHTS = {
     "model-00003-of-00003.safetensors": "e4bf436957184f4eeb86a80e9db394503f1f56446b2e6b7edeac5b81470f4ca1",
 }
 FAMILIES = ("greedy", "plain", "topk", "topp", "combined")
+FAILED_ATTEMPTS = {"attempt-noexec.log": "failed to map segment from shared object",
+                   "attempt-first-burst.log": "assert abandoned_pending > 0"}
 
 
 @lru_cache(maxsize=8)
@@ -187,6 +189,13 @@ def validate(archive, repo=ROOT, *, trusted=TRUSTED_MANIFEST_SHA256):
     require(manifest["benchmark_producer"] == BENCH_PRODUCER and manifest["cold_producer"] == COLD_PRODUCER
             and manifest["old_revision"] == OLD_REVISION, "manifest producer mismatch")
     require(manifest["target_hf_revision"] == "1cfa9a7208912126459214e8b04321603b3df60c", "wrong target checkpoint revision")
+    require(set(manifest["failed_attempts"]) == set(FAILED_ATTEMPTS), "missing failed-attempt history")
+    for name, marker in FAILED_ATTEMPTS.items():
+        entry = manifest["failed_attempts"][name]
+        require(entry["file"] == name and entry["classification"] == "failed-not-certified", "failed attempt mislabeled")
+        data = regular(archive / name)
+        require(len(data) == entry["bytes"] and sha(data) == entry["sha256"], "failed-attempt digest mismatch")
+        require(marker.encode() in data and b"PASS " not in data, "wrong failed-attempt log")
     values = {}
     for role, record in manifest["runs"].items():
         for extension in ("json", "log"):
@@ -224,9 +233,15 @@ def seal(source, destination):
         values[role] = load_json(files[f"{role}.json"])
         check_value(values[role], role, ROOT)
     cross_checks(values)
+    failures = {}
+    for name, marker in FAILED_ATTEMPTS.items():
+        data = regular(source / name)
+        require(marker.encode() in data and b"PASS " not in data, "wrong failed-attempt log")
+        files[name] = data
+        failures[name] = dict(file=name, bytes=len(data), sha256=sha(data), classification="failed-not-certified")
     raw = (json.dumps(dict(schema=SCHEMA, benchmark_producer=BENCH_PRODUCER, cold_producer=COLD_PRODUCER,
                            old_revision=OLD_REVISION, target_hf_revision="1cfa9a7208912126459214e8b04321603b3df60c",
-                           runs=runs), indent=2, sort_keys=True) + "\n").encode()
+                           runs=runs, failed_attempts=failures), indent=2, sort_keys=True) + "\n").encode()
     destination.mkdir(parents=True, exist_ok=False)
     for name, data in {**files, "manifest.json": raw}.items():
         with (destination / name).open("xb") as handle:
