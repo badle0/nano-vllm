@@ -38,7 +38,7 @@ def test_sealing_refuses_overwrite(tmp_path):
         V7.seal(tmp_path, tmp_path)
 
 
-@pytest.mark.parametrize("kind", ["matrix", "duplicate", "source", "harness", "capacity", "gpu", "tokens", "metrics", "fallback", "work", "time", "roof", "pair", "contended"])
+@pytest.mark.parametrize("kind", ["matrix", "duplicate", "source", "harness", "capacity", "gpu", "tokens", "metrics", "fallback", "work", "time", "roof", "pair", "contended", "vacuous", "exclusion"])
 def test_benchmark_semantic_tampering_is_rejected(kind):
     value = V7.load_json((EVIDENCE / "primary-p0-on.json").read_bytes())
     row = value["records"][0]
@@ -57,6 +57,12 @@ def test_benchmark_semantic_tampering_is_rejected(kind):
     elif kind == "roof": value["calibration"]["copy_bytes"] //= 2
     elif kind == "pair": row["pair"] = 4
     elif kind == "contended": row["hardware_before"]["gpu_processes"].append("999999")
+    elif kind == "vacuous":
+        for name in list(metrics):
+            if name.startswith("spec_"): metrics[name] = 0
+    elif kind == "exclusion":
+        row["accepted"] = False
+        row["rejection_reasons"] = ["slow sample"]
     with pytest.raises(ValueError):
         V7.check_benchmark(value, "primary-p0-on")
 

@@ -94,9 +94,23 @@ def check_benchmark(value, role, repo=ROOT):
         require(math.isfinite(row["seconds"]) and row["seconds"] > 0, "invalid sample time")
         require(math.isclose(row["tokens_per_second"], row["batch"] * row["completion"] / row["seconds"], rel_tol=1e-12), "throughput mismatch")
         require(row["accepted"] is (not row["rejection_reasons"]), "inconsistent sample exclusion")
+        allowed = {"not exactly one visible GPU process", "host load above 0.75 per logical CPU",
+                   "GPU temperature >=85 C", "timed sample compiled a new graph"}
+        require(set(row["rejection_reasons"]) <= allowed, "unregistered sample exclusion")
+        observed = set()
+        for hardware in (row["hardware_before"], row["hardware_after"]):
+            if len(hardware["gpu_processes"]) != 1:
+                observed.add("not exactly one visible GPU process")
+            if hardware["load_average"][0] > .75 * hardware["cpu_count"]:
+                observed.add("host load above 0.75 per logical CPU")
+            if float(hardware["gpu"].split(",")[4].strip()) >= 85:
+                observed.add("GPU temperature >=85 C")
+        require(set(row["rejection_reasons"]) - {"timed sample compiled a new graph"} == observed,
+                "exclusion disagrees with retained hardware")
         if row["accepted"]:
             for hardware in (row["hardware_before"], row["hardware_after"]):
                 require(len(hardware["gpu_processes"]) == 1, "contended GPU sample")
+                require(hardware["gpu_processes"][0].isdigit(), "invalid GPU process identity")
                 require(hardware["load_average"][0] <= .75 * hardware["cpu_count"], "busy host sample")
                 require(float(hardware["gpu"].split(",")[4].strip()) < 85, "hot GPU sample")
         require(len(row["outputs"]) == row["batch"], "missing request output")
