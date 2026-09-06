@@ -16,7 +16,7 @@ SCHEMA = "nano-vllm-speculative-v7-retained-v1"
 TRUSTED_MANIFEST_SHA256 = "PENDING"
 BENCH_PRODUCER = "89829e6052c17e0ef4fcd65e294d0f1e78139184"
 COLD_PRODUCER = "a715a199d413a67ba563271f1b4fa8fe87f00eaa"
-OLD_REVISION = git(ROOT, "rev-parse", "2678d76").decode().strip()
+OLD_REVISION = "2678d764ad0341bbfbdd2a93ac0e5528959058a4"
 ROLES = tuple(f"primary-p{i}-{s}" for i in range(5) for s in ("off", "on"))
 ROLES += tuple(f"regression-p{i}-{s}" for i in range(5) for s in ("old", "new"))
 ROLES += ("extended-off", "extended-on", "cap5-on", "cap6-on", "graph-off", "graph-on", "phases-graph", "phases-eager")
@@ -167,6 +167,18 @@ def check_phases(value, role, repo=ROOT):
             require(row["residual_numerical_fallbacks"] == 0 and len(row["committed_token_ids"]) == row["accepted_draft_tokens"] + 1, "phase law violation")
 
 
+def check_value(value, role, repo):
+    if role.startswith("phases-"):
+        check_phases(value, role, repo)
+    elif role.startswith("graph-"):
+        check_models(dict(target=value["model_files"], draft=value["draft_model_files"]))
+        V56.check_run(value, role, COLD_PRODUCER, repo, model_files=value["model_files"],
+                      work_limits=(4096, 4096), memory_utilization=.8)
+        require(value["args"]["max_batch"] == 8, "wrong cold batch capacity")
+    else:
+        check_benchmark(value, role, repo)
+
+
 def validate(archive, repo=ROOT, *, trusted=TRUSTED_MANIFEST_SHA256):
     raw = regular(archive / "manifest.json")
     require(sha(raw) == trusted, "untrusted archive manifest")
@@ -186,16 +198,7 @@ def validate(archive, repo=ROOT, *, trusted=TRUSTED_MANIFEST_SHA256):
                 values[role] = load_json(data)
             else:
                 require(b"PASS " in data and b"Traceback (most recent call last)" not in data, "unsuccessful run log")
-        value = values[role]
-        if role.startswith("phases-"):
-            check_phases(value, role, repo)
-        elif role.startswith("graph-"):
-            check_models(dict(target=value["model_files"], draft=value["draft_model_files"]))
-            V56.check_run(value, role, COLD_PRODUCER, repo, model_files=value["model_files"],
-                          work_limits=(4096, 4096), memory_utilization=.8)
-            require(value["args"]["max_batch"] == 8, "wrong cold batch capacity")
-        else:
-            check_benchmark(value, role, repo)
+        check_value(values[role], role, repo)
     cross_checks(values)
     return dict(runtime_tree=git(repo, "rev-parse", f"{BENCH_PRODUCER}:nanovllm").decode().strip(),
                 runs=len(values), cold_cycles=len(values["graph-on"]["cycles"]),
@@ -207,7 +210,7 @@ def seal(source, destination):
     for component in (destination, *destination.parents):
         require(not component.is_symlink(), "archive path traverses symlink")
     require(not destination.exists(), "archive destination already exists")
-    files, runs = {}, {}
+    files, runs, values = {}, {}, {}
     for role in ROLES:
         record = {}
         for extension in ("json", "log"):
@@ -215,7 +218,12 @@ def seal(source, destination):
             data = regular(source / filename)
             files[filename] = data
             record[extension] = dict(file=filename, bytes=len(data), sha256=sha(data))
+            if extension == "log":
+                require(b"PASS " in data and b"Traceback (most recent call last)" not in data, "unsuccessful run log")
         runs[role] = record
+        values[role] = load_json(files[f"{role}.json"])
+        check_value(values[role], role, ROOT)
+    cross_checks(values)
     raw = (json.dumps(dict(schema=SCHEMA, benchmark_producer=BENCH_PRODUCER, cold_producer=COLD_PRODUCER,
                            old_revision=OLD_REVISION, target_hf_revision="1cfa9a7208912126459214e8b04321603b3df60c",
                            runs=runs), indent=2, sort_keys=True) + "\n").encode()
