@@ -1,0 +1,10 @@
+sample 1 32 plain 17 0.5557 accepted True
+sample 1 32 plain 23 0.5561 accepted True
+sample 1 32 plain 41 0.5585 accepted True
+sample 4 32 plain 17 0.5487 accepted True
+sample 4 32 plain 23 0.5519 accepted True
+sample 4 32 plain 41 0.5521 accepted True
+sample 8 32 plain 17 0.5567 accepted True
+sample 8 32 plain 23 0.5581 accepted True
+sample 8 32 plain 41 0.555 accepted True
+PASS /tmp/spec-v7-bench-final/regression-p3-new.json

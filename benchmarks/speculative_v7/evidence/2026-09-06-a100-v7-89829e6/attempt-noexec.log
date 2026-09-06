@@ -1,0 +1,140 @@
+[rank0]: Traceback (most recent call last):
+[rank0]:   File "/workspace/nano-vllm-spec-v2/tests/run_speculative_v5_gpu.py", line 393, in <module>
+[rank0]:     main()
+[rank0]:   File "/workspace/nano-vllm-spec-v2/tests/run_speculative_v5_gpu.py", line 85, in main
+[rank0]:     llm = LLM(args.model, **config)
+[rank0]:           ^^^^^^^^^^^^^^^^^^^^^^^^^
+[rank0]:   File "/workspace/nano-vllm-spec-v2/nanovllm/engine/llm_engine.py", line 409, in __init__
+[rank0]:     self.model_runner = ModelRunner(config, 0, self.events)
+[rank0]:                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[rank0]:   File "/workspace/nano-vllm-spec-v2/nanovllm/engine/model_runner.py", line 258, in __init__
+[rank0]:     self._initialize(config, rank, event)
+[rank0]:   File "/workspace/nano-vllm-spec-v2/nanovllm/engine/model_runner.py", line 337, in _initialize
+[rank0]:     self.warmup_model()
+[rank0]:   File "/workspace/nano-vllm-spec-v2/nanovllm/engine/model_runner.py", line 702, in warmup_model
+[rank0]:     self.run(seqs, True)
+[rank0]:   File "/workspace/nano-vllm-spec-v2/nanovllm/engine/model_runner.py", line 2580, in run
+[rank0]:     logits = self.run_model(input_ids, positions, is_prefill)
+[rank0]:              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[rank0]:   File "/venv/main/lib/python3.12/site-packages/torch/utils/_contextlib.py", line 124, in decorate_context
+[rank0]:     return func(*args, **kwargs)
+[rank0]:            ^^^^^^^^^^^^^^^^^^^^^
+[rank0]:   File "/workspace/nano-vllm-spec-v2/nanovllm/engine/model_runner.py", line 2563, in run_model
+[rank0]:     return self.model.compute_logits(self.model(input_ids, positions))
+[rank0]:                                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[rank0]:   File "/venv/main/lib/python3.12/site-packages/torch/nn/modules/module.py", line 1776, in _wrapped_call_impl
+[rank0]:     return self._call_impl(*args, **kwargs)
+[rank0]:            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[rank0]:   File "/venv/main/lib/python3.12/site-packages/torch/nn/modules/module.py", line 1787, in _call_impl
+[rank0]:     return forward_call(*args, **kwargs)
+[rank0]:            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[rank0]:   File "/workspace/nano-vllm-spec-v2/nanovllm/models/qwen3.py", line 210, in forward
+[rank0]:     return self.model(input_ids, positions)
+[rank0]:            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[rank0]:   File "/venv/main/lib/python3.12/site-packages/torch/nn/modules/module.py", line 1776, in _wrapped_call_impl
+[rank0]:     return self._call_impl(*args, **kwargs)
+[rank0]:            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[rank0]:   File "/venv/main/lib/python3.12/site-packages/torch/nn/modules/module.py", line 1787, in _call_impl
+[rank0]:     return forward_call(*args, **kwargs)
+[rank0]:            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[rank0]:   File "/workspace/nano-vllm-spec-v2/nanovllm/models/qwen3.py", line 181, in forward
+[rank0]:     hidden_states, residual = layer(positions, hidden_states, residual)
+[rank0]:                               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[rank0]:   File "/venv/main/lib/python3.12/site-packages/torch/nn/modules/module.py", line 1776, in _wrapped_call_impl
+[rank0]:     return self._call_impl(*args, **kwargs)
+[rank0]:            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[rank0]:   File "/venv/main/lib/python3.12/site-packages/torch/nn/modules/module.py", line 1787, in _call_impl
+[rank0]:     return forward_call(*args, **kwargs)
+[rank0]:            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[rank0]:   File "/workspace/nano-vllm-spec-v2/nanovllm/models/qwen3.py", line 153, in forward
+[rank0]:     hidden_states, residual = self.input_layernorm(hidden_states), hidden_states
+[rank0]:                               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[rank0]:   File "/venv/main/lib/python3.12/site-packages/torch/nn/modules/module.py", line 1776, in _wrapped_call_impl
+[rank0]:     return self._call_impl(*args, **kwargs)
+[rank0]:            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[rank0]:   File "/venv/main/lib/python3.12/site-packages/torch/nn/modules/module.py", line 1787, in _call_impl
+[rank0]:     return forward_call(*args, **kwargs)
+[rank0]:            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[rank0]:   File "/workspace/nano-vllm-spec-v2/nanovllm/layers/layernorm.py", line 48, in forward
+[rank0]:     return self.rms_forward(x)
+[rank0]:            ^^^^^^^^^^^^^^^^^^^
+[rank0]:   File "/venv/main/lib/python3.12/site-packages/torch/_dynamo/eval_frame.py", line 967, in compile_wrapper
+[rank0]:     raise e.remove_dynamo_frames() from None  # see TORCHDYNAMO_VERBOSE=1
+[rank0]:     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[rank0]:   File "/venv/main/lib/python3.12/site-packages/torch/_inductor/compile_fx.py", line 1019, in _compile_fx_inner
+[rank0]:     raise InductorError(e, currentframe()).with_traceback(
+[rank0]:   File "/venv/main/lib/python3.12/site-packages/torch/_inductor/compile_fx.py", line 1003, in _compile_fx_inner
+[rank0]:     mb_compiled_graph = fx_codegen_and_compile(
+[rank0]:                         ^^^^^^^^^^^^^^^^^^^^^^^
+[rank0]:   File "/venv/main/lib/python3.12/site-packages/torch/_inductor/compile_fx.py", line 1766, in fx_codegen_and_compile
+[rank0]:     return scheme.codegen_and_compile(gm, example_inputs, inputs_to_check, graph_kwargs)
+[rank0]:            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[rank0]:   File "/venv/main/lib/python3.12/site-packages/torch/_inductor/compile_fx.py", line 1537, in codegen_and_compile
+[rank0]:     compiled_module = graph.compile_to_module()
+[rank0]:                       ^^^^^^^^^^^^^^^^^^^^^^^^^
+[rank0]:   File "/venv/main/lib/python3.12/site-packages/torch/_inductor/graph.py", line 2416, in compile_to_module
+[rank0]:     return self._compile_to_module()
+[rank0]:            ^^^^^^^^^^^^^^^^^^^^^^^^^
+[rank0]:   File "/venv/main/lib/python3.12/site-packages/torch/_inductor/graph.py", line 2422, in _compile_to_module
+[rank0]:     self.codegen_with_cpp_wrapper() if self.cpp_wrapper else self.codegen()
+[rank0]:                                                              ^^^^^^^^^^^^^^
+[rank0]:   File "/venv/main/lib/python3.12/site-packages/torch/_inductor/graph.py", line 2358, in codegen
+[rank0]:     self.scheduler.codegen()
+[rank0]:   File "/venv/main/lib/python3.12/site-packages/torch/_inductor/scheduler.py", line 6019, in codegen
+[rank0]:     self._codegen_partitions()
+[rank0]:   File "/venv/main/lib/python3.12/site-packages/torch/_inductor/scheduler.py", line 6161, in _codegen_partitions
+[rank0]:     self._codegen(partition)
+[rank0]:   File "/venv/main/lib/python3.12/site-packages/torch/_inductor/scheduler.py", line 6266, in _codegen
+[rank0]:     self.get_backend(device).codegen_node(node)
+[rank0]:   File "/venv/main/lib/python3.12/site-packages/torch/_inductor/codegen/cuda_combined_scheduling.py", line 130, in codegen_node
+[rank0]:     return self._triton_scheduling.codegen_node(node)
+[rank0]:            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[rank0]:   File "/venv/main/lib/python3.12/site-packages/torch/_inductor/codegen/simd.py", line 1822, in codegen_node
+[rank0]:     return self._codegen_nodes(nodes, coalesce_analysis)  # type: ignore[arg-type]
+[rank0]:            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[rank0]:   File "/venv/main/lib/python3.12/site-packages/torch/_inductor/codegen/simd.py", line 1795, in _codegen_nodes
+[rank0]:     return self.codegen_node_schedule(
+[rank0]:            ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[rank0]:   File "/venv/main/lib/python3.12/site-packages/torch/_inductor/codegen/simd.py", line 1885, in codegen_node_schedule
+[rank0]:     src_code = kernel.codegen_kernel()
+[rank0]:                ^^^^^^^^^^^^^^^^^^^^^^^
+[rank0]:   File "/venv/main/lib/python3.12/site-packages/torch/_inductor/codegen/triton.py", line 5295, in codegen_kernel
+[rank0]:     **self.inductor_meta_common(),
+[rank0]:       ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[rank0]:   File "/venv/main/lib/python3.12/site-packages/torch/_inductor/codegen/triton.py", line 5097, in inductor_meta_common
+[rank0]:     "backend_hash": torch.utils._triton.triton_hash_with_backend(),
+[rank0]:                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[rank0]:   File "/venv/main/lib/python3.12/site-packages/torch/utils/_triton.py", line 200, in triton_hash_with_backend
+[rank0]:     backend = triton_backend()
+[rank0]:               ^^^^^^^^^^^^^^^^
+[rank0]:   File "/venv/main/lib/python3.12/site-packages/torch/utils/_triton.py", line 192, in triton_backend
+[rank0]:     target = driver.active.get_current_target()
+[rank0]:              ^^^^^^^^^^^^^
+[rank0]:   File "/venv/main/lib/python3.12/site-packages/triton/runtime/driver.py", line 28, in active
+[rank0]:     self._active = self.default
+[rank0]:                    ^^^^^^^^^^^^
+[rank0]:   File "/venv/main/lib/python3.12/site-packages/triton/runtime/driver.py", line 22, in default
+[rank0]:     self._default = _create_driver()
+[rank0]:                     ^^^^^^^^^^^^^^^^
+[rank0]:   File "/venv/main/lib/python3.12/site-packages/triton/runtime/driver.py", line 10, in _create_driver
+[rank0]:     return active_drivers[0]()
+[rank0]:            ^^^^^^^^^^^^^^^^^^^
+[rank0]:   File "/venv/main/lib/python3.12/site-packages/triton/backends/nvidia/driver.py", line 720, in __init__
+[rank0]:     self.utils = CudaUtils()  # TODO: make static
+[rank0]:                  ^^^^^^^^^^^
+[rank0]:   File "/venv/main/lib/python3.12/site-packages/triton/backends/nvidia/driver.py", line 62, in __init__
+[rank0]:     mod = compile_module_from_src(
+[rank0]:           ^^^^^^^^^^^^^^^^^^^^^^^^
+[rank0]:   File "/venv/main/lib/python3.12/site-packages/triton/runtime/build.py", line 97, in compile_module_from_src
+[rank0]:     return _load_module_from_path(name, cache_path)
+[rank0]:            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[rank0]:   File "/venv/main/lib/python3.12/site-packages/triton/runtime/build.py", line 69, in _load_module_from_path
+[rank0]:     mod = importlib.util.module_from_spec(spec)
+[rank0]:           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+[rank0]:   File "<frozen importlib._bootstrap>", line 813, in module_from_spec
+[rank0]:   File "<frozen importlib._bootstrap_external>", line 1293, in create_module
+[rank0]:   File "<frozen importlib._bootstrap>", line 488, in _call_with_frames_removed
+[rank0]: torch._inductor.exc.InductorError: ImportError: /dev/shm/spec-v7-cold.xCB0TJ/triton/XU5DT2AO5BD5AEHEYGLPP5LRDFHHCUEJT4LGDVLB4STXUGVGHFPA/cuda_utils.cpython-312-x86_64-linux-gnu.so: failed to map segment from shared object
+
+[rank0]: Set TORCHDYNAMO_VERBOSE=1 for the internal stack trace (please do this especially if you're reporting a bug to PyTorch). For even more developer context, set TORCH_LOGS="+dynamo"
+

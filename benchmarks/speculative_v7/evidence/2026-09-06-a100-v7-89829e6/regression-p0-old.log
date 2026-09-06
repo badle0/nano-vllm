@@ -1,0 +1,10 @@
+sample 1 32 plain 17 0.5529 accepted True
+sample 1 32 plain 23 0.5556 accepted True
+sample 1 32 plain 41 0.5558 accepted True
+sample 4 32 plain 17 0.5511 accepted True
+sample 4 32 plain 23 0.5498 accepted True
+sample 4 32 plain 41 0.5503 accepted True
+sample 8 32 plain 17 0.5594 accepted True
+sample 8 32 plain 23 0.555 accepted True
+sample 8 32 plain 41 0.556 accepted True
+PASS /tmp/spec-v7-bench-final/regression-p0-old.json

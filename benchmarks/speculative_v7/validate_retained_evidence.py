@@ -13,7 +13,7 @@ V56 = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(V56)
 require, regular, load_json, git, sha = V56.require, V56.regular, V56.load_json, V56.git, V56.sha
 SCHEMA = "nano-vllm-speculative-v7-retained-v1"
-TRUSTED_MANIFEST_SHA256 = "PENDING"
+TRUSTED_MANIFEST_SHA256 = "c7fe59acd0db36882ba7bf8fb8f4c9c60d607fe602a283511d96bdccc9bd44ee"
 BENCH_PRODUCER = "89829e6052c17e0ef4fcd65e294d0f1e78139184"
 COLD_PRODUCER = "a715a199d413a67ba563271f1b4fa8fe87f00eaa"
 OLD_REVISION = "2678d764ad0341bbfbdd2a93ac0e5528959058a4"

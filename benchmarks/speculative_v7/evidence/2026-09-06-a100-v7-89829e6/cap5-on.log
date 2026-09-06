@@ -1,0 +1,13 @@
+sample 1 32 greedy 17 0.3568 accepted True
+sample 1 32 greedy 23 0.3437 accepted True
+sample 1 32 greedy 41 0.357 accepted True
+sample 1 32 plain 17 0.3098 accepted True
+sample 1 32 plain 23 0.3765 accepted True
+sample 1 32 plain 41 0.3184 accepted True
+sample 4 32 greedy 17 0.3546 accepted True
+sample 4 32 greedy 23 0.3617 accepted True
+sample 4 32 greedy 41 0.3651 accepted True
+sample 4 32 plain 17 0.5277 accepted True
+sample 4 32 plain 23 0.3946 accepted True
+sample 4 32 plain 41 0.5591 accepted True
+PASS /tmp/spec-v7-bench-final/cap5-on.json
