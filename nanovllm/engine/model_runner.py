@@ -252,7 +252,9 @@ class ModelRunner:
             # verifier shapes need more than the default eight specializations.
             # Scope this finite construction budget; do not globally disable
             # compilation or suppress failures, and leave speculation-off alone.
-            with torch._dynamo.config.patch(recompile_limit=32):
+            limit_name = ("recompile_limit" if hasattr(torch._dynamo.config, "recompile_limit")
+                          else "cache_size_limit")
+            with torch._dynamo.config.patch(**{limit_name: 32}):
                 self._initialize(config, rank, event)
         else:
             self._initialize(config, rank, event)
@@ -2356,8 +2358,10 @@ class ModelRunner:
             reset_context()
         name, message, notes = failure
         error = SpeculativeDraftExecutionError(f"speculative verification failed ({name}): {message}")
-        for note in notes:
-            error.add_note(note)
+        add_note = getattr(error, "add_note", None)
+        if callable(add_note):
+            for note in notes:
+                add_note(note)
         raise error from None
 
     def run_speculative_discard(

@@ -17,7 +17,7 @@ import warnings
 import weakref
 
 import torch
-from nanovllm import LLM, SamplingParams
+from nanovllm import LLM, SamplingParams, StreamingDetokenizer
 from run_speculative_v3_route_compile import (
     cache_root_path, initialize_cache_root, require_compiler_environment,
     install_capture_ledger, compiler_snapshot, compiler_delta_summary,
@@ -160,14 +160,19 @@ def main():
             assert tokens == [item["token_ids"] for item in repeated]
             check_drained()
             streamed = {}
+            rendered = {}
+            detokenizer = StreamingDetokenizer(llm.tokenizer)
             terminal = set()
             with llm.stream(prompts, params) as session:
                 for event in session:
                     assert event.seq_id not in terminal
                     streamed.setdefault(event.seq_id, []).append(event.token_id)
+                    rendered[event.seq_id] = detokenizer.feed(event.seq_id, event.token_id).apply(rendered.get(event.seq_id, ""))
                     if event.finished:
+                        rendered[event.seq_id] = detokenizer.flush(event.seq_id).apply(rendered[event.seq_id])
                         terminal.add(event.seq_id)
             assert list(streamed.values()) == tokens
+            assert list(rendered.values()) == [item["text"] for item in generated]
             assert len(terminal) == batch
             check_drained()
             results.append(dict(length=length, batch=batch, tokens=tokens, seconds=elapsed,
@@ -326,6 +331,24 @@ def main():
             assert pending_before_close > 0
             assert cycles and any(any(row["accepted_draft_tokens"] > 0 for row in c["result"]["rows"]) for c in cycles)
             assert all(c["peak_increment"] <= c["reservation"] + runner._warmup_transient_bytes for c in cycles)
+            assert all(c["peak_increment"] <= runner.speculative_memory_plan.modeled_live_peak_bytes
+                       for c in cycles if c["purpose"] == "normal"), "production live peak exceeds its model"
+        sort_scratch = []
+        if args.enabled:
+            for rows in (4, 12, 16, 20):
+                logits = torch.randn(rows, runner.config.hf_config.vocab_size, dtype=torch.bfloat16, device="cuda")
+                temperatures = torch.ones(rows, device="cuda")
+                cutoffs = torch.full((rows,), .1, device="cuda")
+                torch.cuda.synchronize()
+                baseline = torch.cuda.memory_allocated()
+                torch.cuda.reset_peak_memory_stats()
+                runner.sampler.filter_top_p(logits, temperatures, None, cutoffs)
+                torch.cuda.synchronize()
+                measured = torch.cuda.max_memory_allocated() - baseline
+                priced = rows * logits.size(1) * 52
+                assert measured <= priced, "top-p private scratch exceeds its two-payload allowance"
+                sort_scratch.append(dict(rows=rows, measured=measured, priced=priced))
+                del logits, temperatures, cutoffs
         payload = dict(schema="nano-vllm-speculative-v5-gpu-v1", args=vars(args), config=config,
                        revision=revision, source_sha256=source_hashes,
                        torch=torch.__version__, cuda=torch.version.cuda,
@@ -342,6 +365,7 @@ def main():
                        pending_before_close=pending_before_close,
                        abandoned_pending=abandoned_pending, completed_metrics=metrics,
                        forced_metrics=forced_metrics, failure_retry=failure_retry, causality_probe=causality_probe,
+                       sort_scratch=sort_scratch,
                        logit_trace=logit_trace,
                        stochastic_lengths=[len(r["token_ids"]) for r in parallel],
                        sweep_cells=sweep_cells,

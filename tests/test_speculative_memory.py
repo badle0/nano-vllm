@@ -109,25 +109,25 @@ def test_workspace_plan_has_exact_small_fixture_components():
     assert plan.verifier_transform_bytes == 540
     assert plan.draft_top_k_workspace_bytes == 366
     assert plan.verifier_top_k_workspace_bytes == 1_098
-    assert plan.draft_top_p_workspace_bytes == 1_200
-    assert plan.verifier_top_p_workspace_bytes == 3_600
+    assert plan.draft_top_p_workspace_bytes == 1_560
+    assert plan.verifier_top_p_workspace_bytes == 4_680
     assert plan.draft_sampling_workspace_bytes == 840
     assert plan.bonus_sampling_workspace_bytes == 840
     assert plan.rejection_correction_workspace_bytes == 2_040
     assert plan.metadata_bytes == 861
 
-    assert plan.draft_filter_phase_bytes == 2_421
+    assert plan.draft_filter_phase_bytes == 2_781
     assert plan.draft_softmax_phase_bytes == 1_341
     assert plan.draft_race_phase_bytes == 2_001
-    assert plan.draft_phase_bytes == 2_421
-    assert plan.verifier_filter_phase_bytes == 5_061
+    assert plan.draft_phase_bytes == 2_781
+    assert plan.verifier_filter_phase_bytes == 6_141
     assert plan.verifier_softmax_phase_bytes == 2_181
-    assert plan.verifier_phase_bytes == 5_061
+    assert plan.verifier_phase_bytes == 6_141
     assert plan.rejection_phase_bytes == 3_501
     assert plan.bonus_phase_bytes == 2_301
-    assert plan.modeled_live_peak_bytes == 5_061
+    assert plan.modeled_live_peak_bytes == 6_141
     assert plan.allocator_margin_bytes == ALLOCATOR_MARGIN_MIN_BYTES
-    assert plan.reservation_bytes == 5_061 + ALLOCATOR_MARGIN_MIN_BYTES
+    assert plan.reservation_bytes == 6_141 + ALLOCATOR_MARGIN_MIN_BYTES
 
 
 def test_probability_floor_counts_both_q_and_p_at_configured_maximum():
@@ -363,13 +363,13 @@ def test_top_k_and_top_p_are_named_and_only_the_larger_private_peak_is_charged()
     plan = plan_speculative_workspace(
         vocab_size=128,
         configured_k=3,
-        max_num_seqs=64,
-        max_num_batched_tokens=256,
+        max_num_seqs=128,
+        max_num_batched_tokens=512,
         max_model_len=512,
         target_logits_dtype=torch.float16,
         draft_logits_dtype=torch.float16,
     )
-    assert plan.verifier_rows == 256
+    assert plan.verifier_rows == 512
     assert plan.verifier_top_k_workspace_bytes > plan.verifier_top_p_workspace_bytes
     expected_filter_phase = (
         plan.draft_probability_bytes

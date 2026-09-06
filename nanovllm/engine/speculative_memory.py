@@ -21,7 +21,7 @@ The workspace model follows the PR8 correctness-first implementation:
 Library-internal selection/sort scratch and graph-pool/static allocations are
 not fully knowable without executing the selected CUDA routes. Until the A100
 peak-memory certificate replaces this provisional model, top-p reserves an
-additional payload equal to its sort outputs and the diagnostic marks the
+  two additional payloads equal to its sort outputs and the diagnostic marks the
 remaining quantities as audit-required rather than silently reporting zero.
 """
 
@@ -222,7 +222,8 @@ def _top_p_workspace_bytes(
     Sorting is chunked exactly like ``Sampler.filter_top_p``.  Per live chunk we
     price FP32 scaled and sorted values, int64 sort indices, FP32 softmax and
     cumulative-probability buffers, two boolean masks, and an additional
-    value+index payload for opaque backend sort scratch.
+    two value+index payloads for opaque backend sort scratch. The A100/Torch
+    2.10 V5 all-query probe exceeded the former single-payload allowance.
     """
 
     dense_elements = rows * vocab_size
@@ -234,7 +235,7 @@ def _top_p_workspace_bytes(
         + INT64_BYTES
         + 2 * BOOL_BYTES
     )
-    sort_library_scratch = chunk_elements * (FP32_BYTES + INT64_BYTES)
+    sort_library_scratch = 2 * chunk_elements * (FP32_BYTES + INT64_BYTES)
     return active_logits_copy + explicit_chunk_payload + sort_library_scratch
 
 

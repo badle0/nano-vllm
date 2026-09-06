@@ -20,7 +20,7 @@ def ledger(batch, k, vocab, draft_bytes, target_bytes):
             prefix + "_clone": rows * vocab * itemsize,
             prefix + "_scaled": rows * vocab * 4,
             prefix + "_topk": rows * vocab * (2 * itemsize + 8) + rows * itemsize,
-            prefix + "_topp": rows * vocab * itemsize + min(rows, 64) * vocab * 38,
+            prefix + "_topp": rows * vocab * itemsize + min(rows, 64) * vocab * 50,
         })
         base = {"q", "metadata", prefix + "_logits", prefix + "_clone"}
         phases[prefix + "_topk"] = base | {prefix + "_topk"}
@@ -58,7 +58,7 @@ def test_lifetimes_and_alias_mutations(batch, k, vocab, dtype):
     # Sequential greedy lane retains preallocated p, but filters only B rows;
     # it must fit the already-reserved all-query envelope for every K >= 1.
     row_private = max(batch * vocab * (2 * itemsize + 8) + batch * itemsize,
-                      batch * vocab * itemsize + min(batch, 64) * vocab * 38)
+                      batch * vocab * itemsize + min(batch, 64) * vocab * 50)
     sequential_peak = (owners["q"] + owners["p"] + owners["metadata"]
                        + 2 * batch * vocab * itemsize + max(row_private, 4 * batch * vocab))
     assert sequential_peak <= production.modeled_live_peak_bytes

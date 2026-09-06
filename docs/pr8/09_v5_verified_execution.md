@@ -128,6 +128,12 @@ An independent named-owner ledger checks phase peaks and the sequential lane's
 fit within the parallel workspace envelope. It checks owner omission/duplication
 per phase; it does not claim an arbitrary non-dominant owner changes global peak.
 
+The first exhaustive GPU sweep exposed an underestimated CUDA top-p sort-scratch
+term (about 151 MB measured versus 122 MB priced for 20 rows at V=151936).
+The workspace model now allows two value/index scratch payloads, not one;
+its independent ledger and raw private-scratch probe are checked together.
+The 64 MiB allocator margin is not used to hide a live-tensor underestimate.
+
 Exploratory A100 runs pass matching-mode greedy controls, cached replay, token
 stream parity, stochastic mixtures, automatic KV sizing (including graph K=2),
 and zero compiler deltas within observed speculative cycles. These are not the
