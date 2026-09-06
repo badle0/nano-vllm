@@ -10,7 +10,7 @@ import os
 import platform
 import re
 import subprocess
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Iterable
 
@@ -220,7 +220,7 @@ def base_result(kind: str, argv: list[str], pin: dict, model: dict, environment:
     return {
         "schema_version": 1,
         "kind": kind,
-        "started_at_utc": datetime.now(UTC).isoformat(),
+        "started_at_utc": datetime.now(timezone.utc).isoformat(),
         "argv": argv,
         "cwd": str(Path.cwd()),
         "provenance": pin,

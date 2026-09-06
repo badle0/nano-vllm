@@ -12,7 +12,7 @@ import stat
 import statistics
 import sys
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
 
 from benchmarks.chunked_prefill_tail.common import (
@@ -791,7 +791,7 @@ def aggregate_artifacts(
     return {
         "schema_version": SCHEMA_VERSION,
         "kind": KIND,
-        "created_at_utc": datetime.now(UTC).isoformat(),
+        "created_at_utc": datetime.now(timezone.utc).isoformat(),
         "argv": argv,
         "provenance": current_pin,
         "protocol": RUN_PROTOCOL,
@@ -876,7 +876,7 @@ def write_archive(
     immutable_write_json(target / "manifest.json", {
         "schema_version": 1,
         "kind": "chunked_prefill_certification_archive",
-        "created_at_utc": datetime.now(UTC).isoformat(),
+        "created_at_utc": datetime.now(timezone.utc).isoformat(),
         "files": files,
     })
     runs_dir.chmod(0o555)

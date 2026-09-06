@@ -12,7 +12,7 @@ import platform
 import random
 import statistics
 import sys
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from time import perf_counter_ns
 from types import SimpleNamespace
@@ -222,7 +222,7 @@ def main(argv: list[str] | None = None) -> int:
     result = {
         "schema_version": 1,
         "kind": "chunk_scheduler_backlog_roofline",
-        "recorded_at_utc": datetime.now(UTC).isoformat(),
+        "recorded_at_utc": datetime.now(timezone.utc).isoformat(),
         "argv": list(sys.argv if argv is None else [sys.argv[0], *argv]),
         "seed": args.seed,
         "measurement_order": order,

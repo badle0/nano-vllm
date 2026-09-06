@@ -16,7 +16,7 @@ import random
 import statistics
 import sys
 from collections.abc import Callable
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from time import perf_counter
 
@@ -515,7 +515,7 @@ def _main_impl(
     result["provenance_after_run"] = validate_release_pin(
         args.expected_commit, args.expected_source_sha256
     )
-    result["completed_at_utc"] = datetime.now(UTC).isoformat()
+    result["completed_at_utc"] = datetime.now(timezone.utc).isoformat()
     immutable_write_json(args.output, result)
     print(json.dumps({
         "output": str(args.output),

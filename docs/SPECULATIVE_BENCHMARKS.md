@@ -214,3 +214,30 @@ Python 3.10/3.12, Torch 2.4.1 CPU dependency matrix has **not** run remotely yet
 passing the local selection does not establish that matrix's result. Require
 the fork-local PR checks before merging. Neither branch has been pushed or
 merged as part of this preparation.
+
+### First remote CI follow-up
+
+[PR #7's initial run](https://github.com/badle0/nano-vllm/actions/runs/34048871011)
+passed both syntax/evidence jobs, but Python 3.10 CPU-test collection failed:
+the older chunked-prefill benchmark helpers imported `datetime.UTC`, an alias
+introduced in Python 3.11. Matrix fail-fast then cancelled the Python 3.12
+contract job; cancellation is not a passing or failing test result for that lane.
+The preceding local Python 3.12 results could not establish 3.10 compatibility.
+
+The follow-up replaces that alias with `timezone.utc` in `common.py`,
+`aggregate_certification.py`, `full_completion_cert.py` and
+`scheduler_roofline.py`. Timestamp timezone/format is unchanged. It keeps
+Python 3.10 in the matrix and adds a subprocess regression that removes the
+newer alias before importing all four helpers. Matrix fail-fast is disabled so
+both Python versions can report independently.
+
+This narrow follow-up does change four benchmark helper source files; the
+earlier "unchanged benchmarks" check describes the original integration
+checkpoint, not this follow-up. No retained JSON, manifests or provenance hashes
+are rewritten. Both chunk archives still validate, and the complete `nanovllm`
+tree remains identical to the qualified runtime. The affected test modules plus
+the regression passed locally (44 tests). The complete CPU-CI selection then
+passed on local Python 3.12/Torch 2.10: 992 passed, 26 skipped, 14 existing
+TorchScript deprecation warnings. This includes the missing-UTC simulation,
+not an actual local Python 3.10 execution. A successful rerun of the remote
+dependency matrix is still required before merging.
