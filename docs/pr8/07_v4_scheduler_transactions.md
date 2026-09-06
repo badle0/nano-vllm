@@ -1,6 +1,7 @@
 # V4 scheduler transactions: implementation checkpoint
 
 Date: 2026-09-06. Branch: `feat/spec-v2-scheduler-plan`.
+Runtime checkpoint: `22b63e8`.
 
 This checkpoint resumes the four unfinished V4 planning/allocator files left
 after V3's retained-evidence commit `d760c1c2`. It adds engine/runner integration,
@@ -75,6 +76,13 @@ unified atomic commit/undo protocol must cover that separate gate.
 
 ## Validation at this checkpoint
 
+Final full CPU regression: **1,041 passed, 31 skipped, 14 warnings in 89.15s**
+with CUDA hidden, against runtime commit `22b63e8` plus the historical-provenance
+test correction described below. Skipped GPU-dependent tests are not certified
+by this result. The workflow's V3/V4 test selection also passed locally:
+**324 passed** with the CPU shim and offline environment. The frozen 21-artifact
+V3 archive still validates; its claim boundary and pinned runtime are unchanged.
+
 The focused V4 suites plus scheduler cancellation pass: **212 tests** on the
 local Python 3.12 environment with CUDA hidden. Coverage includes:
 
@@ -98,7 +106,11 @@ The initial full CPU run found a missing attribute in a deliberately minimal
 scheduler double; `abort_speculative_step()` now treats absent transaction state
 as inactive. The remaining dirty-checkout failure was the provenance test
 correctly requiring runtime file hashes to match HEAD. Do not weaken that gate;
-run it after committing the implementation.
+run it after committing the implementation. That run additionally exposed a
+historical test assuming HEAD must forever have V3's runtime tree. The test now
+checks both frozen V3 producer commits and explicitly requires rejection of a
+changed runtime (including V4 HEAD). The evidence validator and its pinned trees
+are unchanged.
 
 A fresh-process **exploratory** A100-SXM4-40GB eager off/on control also ran with
 the same Qwen3-0.6B checkpoint on both sides, B=2, K=2, model/token limits 128,
@@ -109,6 +121,11 @@ files under `/tmp/nanovllm-v4-smoke.BTaGMi/`; they are not retained release evid
 The frozen V3 comparator rejected this altered configuration as intended. Direct
 field comparisons established only the narrow parity result above, not a new
 V3 or V4 retained certificate.
+
+An attempted graph-mode run on clean `22b63e8` was rejected **before model
+execution** by the unchanged V3 producer/runtime binding. No graph-mode parity
+result is claimed for V4. This confirms the need for a separate V4 provenance
+harness, rather than extending the old archive's claim boundary.
 
 Reproduce CPU checks from the repository root:
 
@@ -125,13 +142,12 @@ CPU matrix. Local success is not a claim that remote CI has run.
 
 ## Unfinished gates / next work
 
-1. Run the full CPU suite on the committed runtime and preserve its result.
-2. Produce V4-specific clean-SHA retained GPU controls, including graph mode,
+1. Produce V4-specific clean-SHA retained GPU controls, including graph mode,
    boundary/cache-fill cases and admitted-route coverage; do not relabel the
    frozen V3 archive or this dirty-source eager smoke as that certificate.
-3. Review coverage against every V4 hard gate in document 04 before marking the
+2. Review coverage against every V4 hard gate in document 04 before marking the
    rung complete. In particular, expand joint queue/pool/route-cap boundary
    coverage beyond the separate tests above.
-4. Only then start V5 target verification, exact rejection/bonus handling and
+3. Only then start V5 target verification, exact rejection/bonus handling and
    atomic logical/physical/cache-hash commit. Acceptance, bursts, speculative
    streaming/metrics, measured workspace peaks, and speedup remain unimplemented.

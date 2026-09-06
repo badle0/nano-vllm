@@ -56,8 +56,13 @@ def initialize_repository(path):
     return path
 
 
-def test_real_v3_implementation_pin_matches_runtime_tree():
-    snapshot = EVIDENCE.git_snapshot(REPO_ROOT)
+@pytest.mark.parametrize("producer", [
+    "7fec9993d5e4e0e06fec22e3973dfc203fdbd2d8",
+    "e8e0452f99727958077b51f340a5375a090e6884",
+])
+def test_real_v3_implementation_pin_matches_frozen_producer_tree(producer):
+    # Historical certification pins the producer, not all future HEADs.
+    snapshot = {"nanovllm_tree": git(REPO_ROOT, "rev-parse", f"{producer}:nanovllm")}
     binding = EVIDENCE.validate_implementation_binding(REPO_ROOT, snapshot)
 
     assert binding == {
@@ -66,6 +71,17 @@ def test_real_v3_implementation_pin_matches_runtime_tree():
         "parent": "e252086ee625ea8aefdb63f3affc093380f40064",
         "nanovllm_tree": "52398af379f767708a0b804646f4b490fa8323ad",
     }
+
+
+def test_real_v3_binding_rejects_a_changed_runtime_including_later_heads():
+    with pytest.raises(AssertionError, match="producer commit changes"):
+        EVIDENCE.validate_implementation_binding(REPO_ROOT, {"nanovllm_tree": "0" * 40})
+    snapshot = EVIDENCE.git_snapshot(REPO_ROOT)
+    if snapshot["nanovllm_tree"] == EVIDENCE.IMPLEMENTATION_NANOVLLM_TREE:
+        EVIDENCE.validate_implementation_binding(REPO_ROOT, snapshot)
+    else:
+        with pytest.raises(AssertionError, match="producer commit changes"):
+            EVIDENCE.validate_implementation_binding(REPO_ROOT, snapshot)
 
 
 def test_real_v3_runtime_import_registry_matches_checkout():
