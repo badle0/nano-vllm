@@ -4,8 +4,9 @@ Current implementation: V5/V6 real verification, acceptance and burst execution
 are committed and retained-tested on A100. See
 [09_v5_verified_execution.md](09_v5_verified_execution.md) and
 [10_v6_retained_validation.md](10_v6_retained_validation.md). Historical milestone
-descriptions below retain their original narrow scope. V7 performance and the
-heterogeneous model pair are separate qualification work.
+descriptions below retain their original narrow scope. V7's heterogeneous pair,
+performance qualification and roofline analysis are recorded separately in
+[12_v7_experimental_qualification.md](12_v7_experimental_qualification.md).
 
 Status: the V0 design packet was frozen in commit `480a3b2`, and V1 sampling-law
 work was implemented and locally certified through `8989e44`. V2's inert

@@ -27,9 +27,10 @@ finally:
     llm.exit()
 ```
 
-The same-model example tests functionality, not useful acceleration. A smaller
-compatible Qwen3 draft may improve the cost ratio, but heterogeneous checkpoints
-have not been GPU-certified here. Config validates model family, vocabulary and
+The same-model example tests functionality, not useful acceleration. V7 adds a
+Qwen3-4B target / Qwen3-0.6B draft graph-mode qualification; see
+[the measured scope and limits](12_v7_experimental_qualification.md).
+Config validates model family, vocabulary and
 tokenizer compatibility, position limits, and safetensors before execution.
 Speculation requires TP=1 and the exact sampling backend; FlashInfer and TP>1
 are rejected. Omit both draft options to retain ordinary decoding.
@@ -134,11 +135,12 @@ The workspace model now allows two value/index scratch payloads, not one;
 its independent ledger and raw private-scratch probe are checked together.
 The 64 MiB allocator margin is not used to hide a live-tensor underestimate.
 
-Exploratory A100 runs pass matching-mode greedy controls, cached replay, token
-stream parity, stochastic mixtures, automatic KV sizing (including graph K=2),
-and zero compiler deltas within observed speculative cycles. These are not the
-final retained certificate: clean-commit exhaustive route, failure, lifecycle,
-and performance evidence is the next gate. The old auto-sizing failure remains
+The [final retained V5/V6 certificate](10_v6_retained_validation.md) includes
+matching-mode greedy controls, cached replay, token stream parity, stochastic
+mixtures, automatic KV sizing (including graph K=2), exhaustive registered routes,
+failure/lifecycle cases and zero compiler deltas inside speculative intervals.
+Performance is qualified separately in [V7](12_v7_experimental_qualification.md).
+The old auto-sizing failure remains
 retained as historical evidence, not erased or retrospectively labeled a pass.
 
 Runtime `gpu_certified=False` remains intentional: a narrow retained experiment
