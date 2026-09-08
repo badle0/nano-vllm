@@ -2531,8 +2531,17 @@ class ModelRunner:
             ):
                 return self.model.compute_logits(self.model(input_ids, positions))
             bs = input_ids.size(0)
+            graph_bs = next(
+                (x for x in self.graph_bs if x >= bs and x in self.graphs),
+                None,
+            )
+            if graph_bs is None:
+                # Graph availability is an optimization, not an execution
+                # prerequisite. Keep the live context for ordinary eager
+                # decode when no compatible capture exists.
+                return self.model.compute_logits(self.model(input_ids, positions))
             context = get_context()
-            graph = self.graphs[next(x for x in self.graph_bs if x >= bs)]
+            graph = self.graphs[graph_bs]
             graph_vars = self.graph_vars
             graph_vars["input_ids"][:bs] = input_ids
             graph_vars["positions"][:bs] = positions
@@ -2752,8 +2761,9 @@ class ModelRunner:
         # Two slot tiers per bucket (P13): zero-length padding slots cost real replay
         # time (~0.006-0.011 ms/slot at T=512/1024), so the common few-segment step
         # replays a lean capture while high-ns mixed steps keep a full-slot graph
-        # instead of falling back to eager (which would break the ITL bound exactly
-        # in the many-decoder regime). Tiers are prefix-slices of the SAME buffers —
+        # instead of falling back to eager in the many-decoder regime. This reduces
+        # dispatch overhead; it does not guarantee a wall-time ITL bound.
+        # Tiers are prefix-slices of the SAME buffers —
         # the baked grid comes from the slice length; _fill_varlen's full-size
         # padding serves every tier.
         self.varlen_slots = sorted({min(64, S1), S1})

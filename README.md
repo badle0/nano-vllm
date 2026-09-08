@@ -266,6 +266,19 @@ universal speedup.
 
 ### Chunked Prefill and GC Control
 
+Chunked prefill prioritizes ongoing decode requests. Under KV pressure, a
+partially computed waiting prompt is reclaimed before a running decoder;
+the prompt is requeued behind existing waiters. This can increase its TTFT
+and recomputation work. If reclaiming it is insufficient, decoder preemption
+is still possible. The token budget bounds scheduled query tokens, **not
+wall-clock inter-token latency**: mixed-forward cost also depends on context
+length, graph routing, and host/device synchronization.
+
+The [chunked-prefill review and repair notes](docs/CHUNKED_PREFILL_REVIEW_FIXES.md)
+separate verified defects from remaining performance experiments and describe
+the regression checks. Full-prompt KV allocation and sampling on intermediate
+chunks remain unchanged; no new throughput or latency certification is claimed.
+
 For workloads sensitive to process-wide cyclic-GC pauses, an engine can
 explicitly opt in with:
 

@@ -212,12 +212,20 @@ class Scheduler:
         self._check_mid_chunk_invariant()
         scheduled_seqs = []
 
-        # decode admission first, unconditionally (F2): the ITL bound exists only if
-        # decodes never wait behind prefill work — the loop is dev's decode loop verbatim
+        # Prefer ongoing decode, including when a partial prefill holds the KV
+        # capacity it needs. This is scheduling priority, not a wall-time ITL
+        # bound: all rows still wait for the complete mixed forward.
         while self.running and len(scheduled_seqs) < self.max_num_seqs:
             seq = self.running.popleft()
             while not self.block_manager.can_append(seq):
-                if self.running:
+                if self.mid_chunk_seq is not None:
+                    # The invariant above identifies the waiting head. No
+                    # prefill work has been scheduled in this synchronous step,
+                    # so its blocks can be reclaimed before evicting a decoder.
+                    # Retry capacity: reclamation must not assume exclusive KV
+                    # ownership or a particular number of released blocks.
+                    self.preempt(self.waiting.popleft())
+                elif self.running:
                     self.preempt(self.running.pop())
                 else:
                     self.preempt(seq)
