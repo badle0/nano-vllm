@@ -1,3 +1,6 @@
+import os
+from pathlib import Path
+
 import pytest
 from transformers import AutoTokenizer
 
@@ -18,7 +21,34 @@ CASES = [
 
 @pytest.fixture(scope="module")
 def tok():
-    return AutoTokenizer.from_pretrained(MODEL_PATH)
+    path = Path(os.environ.get("NANOVLLM_TEST_TOKENIZER_PATH", MODEL_PATH))
+    if not path.is_dir():
+        pytest.fail(
+            f"Tokenizer fixture directory is missing: {path}. "
+            "Run .github/ci/prepare_tokenizer.py --output DIR and set "
+            "NANOVLLM_TEST_TOKENIZER_PATH=DIR. Model weights are not required."
+        )
+    return AutoTokenizer.from_pretrained(str(path), local_files_only=True)
+
+
+def test_tokenizer_fixture_uses_configured_local_directory(tmp_path, monkeypatch):
+    monkeypatch.setenv("NANOVLLM_TEST_TOKENIZER_PATH", str(tmp_path))
+    expected = object()
+    calls = []
+
+    def load(path, **kwargs):
+        calls.append((path, kwargs))
+        return expected
+
+    monkeypatch.setattr(AutoTokenizer, "from_pretrained", load)
+    assert tok.__wrapped__() is expected
+    assert calls == [(str(tmp_path), {"local_files_only": True})]
+
+
+def test_missing_tokenizer_fixture_fails_explicitly(tmp_path, monkeypatch):
+    monkeypatch.setenv("NANOVLLM_TEST_TOKENIZER_PATH", str(tmp_path / "missing"))
+    with pytest.raises(pytest.fail.Exception, match="Tokenizer fixture directory is missing"):
+        tok.__wrapped__()
 
 
 def apply_update(rendered, update):
