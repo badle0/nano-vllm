@@ -1,5 +1,10 @@
 # Speculative decoding: benchmark and integration record
 
+For the later invariant/speculative repair bundle, see the
+[2026-09-09 replacement A100 qualification](REPLACEMENT_A100_QUALIFICATION.md),
+including measured speedups and the unresolved automatic-KV sizing regression.
+The record below describes the original integration runtime.
+
 ## Provenance and scope
 
 This branch is a curated integration, not a rerun or reinterpretation of the
