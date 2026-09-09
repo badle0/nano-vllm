@@ -249,6 +249,7 @@ def test_draft_model_construction_uses_and_restores_explicit_dtype(
         "draft_warmup",
         "route_registry",
         "graph_profile",
+        "workspace_allocate",
         "joint_allocate",
         "draft_graph",
         "draft_pretouch",
@@ -356,7 +357,15 @@ def test_each_draft_constructor_phase_rolls_back_one_runner_transaction(
         self.speculative_memory_plan = object()
         self.draft_route_registry = object()
 
+    def initialize_workspaces(self):
+        assert not hasattr(self, "kv_cache")
+        assert self.speculative_memory_plan is not None
+        self._spec_q_rows = object()
+        if failure_phase == "workspace_allocate":
+            raise InjectedError("workspace_allocate")
+
     def allocate(self):
+        assert self._spec_q_rows is not None
         self.kv_cache = object()
         self.draft_kv_cache = object()
         if failure_phase == "joint_allocate":
@@ -404,6 +413,9 @@ def test_each_draft_constructor_phase_rolls_back_one_runner_transaction(
         ModelRunner,
         "_profile_speculative_graph_memory",
         graph_profile,
+    )
+    monkeypatch.setattr(
+        ModelRunner, "_initialize_speculative_workspaces", initialize_workspaces
     )
     monkeypatch.setattr(ModelRunner, "allocate_kv_cache", allocate)
     monkeypatch.setattr(ModelRunner, "capture_cudagraph", capture_target)
@@ -900,8 +912,9 @@ def test_speculative_explicit_override_has_exact_joint_boundary(
             runner.allocate_kv_cache()
 
 
+@pytest.mark.parametrize("resident_workspace_bytes", (0, 1))
 def test_speculative_graph_sizing_prices_disjoint_capture_and_runtime_peaks(
-    monkeypatch,
+    monkeypatch, resident_workspace_bytes,
 ):
     runner = _spec_allocation_runner(enforce_eager=False)
     runner._profiled_graph_allocated_bytes = 10
@@ -924,7 +937,9 @@ def test_speculative_graph_sizing_prices_disjoint_capture_and_runtime_peaks(
     runtime = 20 + 200 + plan.reservation_bytes
     sizing_overhead = max(graph_construction, runtime)
     total = sizing_overhead + 3 * joint_block
-    _patch_spec_allocation_cuda(monkeypatch, free=total, total=total)
+    _patch_spec_allocation_cuda(
+        monkeypatch, free=total - resident_workspace_bytes, total=total
+    )
     monkeypatch.setattr(
         torch,
         "empty",
@@ -933,7 +948,7 @@ def test_speculative_graph_sizing_prices_disjoint_capture_and_runtime_peaks(
 
     runner.allocate_kv_cache()
 
-    assert runner.config.num_kvcache_blocks == 3
+    assert runner.config.num_kvcache_blocks == (2 if resident_workspace_bytes else 3)
     inputs = runner._speculative_memory_audit_inputs
     assert inputs["warmup_transient_bytes"] == 200
     assert inputs["profiled_graph_ownership_bytes"] == 20
@@ -1523,3 +1538,25 @@ def test_invariant_prefill_samples_only_explicit_emission_rows(monkeypatch):
 
     assert runner.run(rows, is_prefill=True) == [0, 7, 0]
     assert sampled_rows == [rows[1]]
+
+
+def test_verifier_pretouch_preserves_preallocated_workspace(monkeypatch):
+    import nanovllm.engine.speculative_execution as execution
+
+    runner = object.__new__(ModelRunner)
+    names = ("_spec_q_rows", "_spec_proposal_ids",
+             "_spec_target_probability_rows", "_spec_bonus_noise",
+             "_spec_result_rows")
+    buffers = {name: object() for name in names}
+    for name, buffer in buffers.items():
+        setattr(runner, name, buffer)
+
+    def unexpected_allocation():
+        pytest.fail("verifier pretouch must not allocate permanent workspaces after KV sizing")
+
+    monkeypatch.setattr(runner, "_initialize_speculative_workspaces", unexpected_allocation)
+    seen = []
+    monkeypatch.setattr(execution, "warm_verifier", lambda value: seen.append(value))
+    runner._pretouch_speculative_verifier()
+    assert seen == [runner]
+    assert all(getattr(runner, name) is buffer for name, buffer in buffers.items())

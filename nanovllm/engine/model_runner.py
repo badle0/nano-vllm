@@ -370,6 +370,17 @@ class ModelRunner:
                             "target/draft graph-memory profile",
                             self._profile_speculative_graph_memory,
                         )
+                if self.speculation_enabled:
+                    # Reusable verifier buffers are permanent ownership. Make
+                    # them visible to mem_get_info before choosing KV capacity,
+                    # and retain them through capture and verifier pretouch.
+                    # The legacy phase plan remains a conservative additional
+                    # runtime reserve; its sequential lifetimes do not model
+                    # all of these buffers remaining resident simultaneously.
+                    self._run_draft_phase(
+                        "speculative workspace allocation",
+                        self._initialize_speculative_workspaces,
+                    )
                 self.allocate_kv_cache()
                 if not self.enforce_eager:
                     self.capture_cudagraph()
@@ -2476,7 +2487,7 @@ class ModelRunner:
         max_batch = min(4, plan.batch_size)
         max_k = min(4, plan.max_effective_k)
         vocab_size = self.config.hf_config.vocab_size
-        device = self.kv_cache.device
+        device = torch.device("cuda", self.rank)
         self._spec_q_rows = torch.empty(
             (max_batch * max_k, vocab_size),
             dtype=torch.float32,
@@ -2500,7 +2511,6 @@ class ModelRunner:
     def _pretouch_speculative_verifier(self):
         from nanovllm.engine.speculative_execution import warm_verifier
         from nanovllm.layers.sampler import ModifiedRejectionSampler
-        self._initialize_speculative_workspaces()
         self.speculative_rejection_sampler = ModifiedRejectionSampler()
         warm_verifier(self)
 
