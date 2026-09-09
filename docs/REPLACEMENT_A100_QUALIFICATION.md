@@ -1,6 +1,11 @@
 # Replacement A100 qualification — 2026-09-09
 
-The invariant-prefill and speculative repair bundle passes the tested fixed-KV
+**Follow-up:** the automatic-KV regression below is repaired in `c15dd52`.
+See the [automatic-KV repair qualification](AUTOMATIC_KV_REPAIR.md): five fresh
+GPU sweeps pass, followed by 1086 passed / 1 skipped in full pytest. The record
+below preserves the original results at `74eac2f`, including its failure.
+
+The invariant-prefill and speculative repair bundle at `74eac2f` passes the tested fixed-KV
 numerical and lifecycle checks and improves speculative throughput over its
 pre-fix implementation. **Full qualification remains incomplete: automatic KV
 sizing regressed and can refuse initialization.** Integration of this repair

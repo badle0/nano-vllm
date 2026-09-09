@@ -2,7 +2,9 @@
 
 For the later invariant/speculative repair bundle, see the
 [2026-09-09 replacement A100 qualification](REPLACEMENT_A100_QUALIFICATION.md),
-including measured speedups and the unresolved automatic-KV sizing regression.
+including measured speedups and the initial automatic-KV sizing regression.
+The subsequent [automatic-KV accounting repair](AUTOMATIC_KV_REPAIR.md) passes
+fresh GPU lifecycle verification and the full regression suite.
 The record below describes the original integration runtime.
 
 ## Provenance and scope
