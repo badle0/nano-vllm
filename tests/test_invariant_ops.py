@@ -3,14 +3,15 @@ import math
 import pytest
 import torch
 
+# Skip before importing CUDA-only dependencies: a pytest marker is evaluated
+# after collection and cannot protect a CPU-only environment from these imports.
+if not torch.cuda.is_available():
+    pytest.skip("invariant kernels require CUDA", allow_module_level=True)
+
 from nanovllm.layers.attention import Attention
 from nanovllm.layers.invariant_ops import invariant_linear, invariant_rms_norm
 from nanovllm.utils.context import reset_context, set_context
 
-
-pytestmark = pytest.mark.skipif(
-    not torch.cuda.is_available(), reason="invariant kernels require CUDA"
-)
 
 
 def test_invariant_linear_is_bitwise_independent_of_live_row_geometry():
