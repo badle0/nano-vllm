@@ -209,6 +209,7 @@ class SpeculativeMemoryAudit(NamedTuple):
     modeled_runtime_headroom_bytes: int
     audit_required_components: tuple[str, ...]
     gpu_certified: bool
+    persistent_workspace_reservation_bytes: int = 0
 
 
 def tensor_parallel_shm_size(config: Config) -> int:
@@ -370,17 +371,6 @@ class ModelRunner:
                             "target/draft graph-memory profile",
                             self._profile_speculative_graph_memory,
                         )
-                if self.speculation_enabled:
-                    # Reusable verifier buffers are permanent ownership. Make
-                    # them visible to mem_get_info before choosing KV capacity,
-                    # and retain them through capture and verifier pretouch.
-                    # The legacy phase plan remains a conservative additional
-                    # runtime reserve; its sequential lifetimes do not model
-                    # all of these buffers remaining resident simultaneously.
-                    self._run_draft_phase(
-                        "speculative workspace allocation",
-                        self._initialize_speculative_workspaces,
-                    )
                 self.allocate_kv_cache()
                 if not self.enforce_eager:
                     self.capture_cudagraph()
@@ -1153,8 +1143,18 @@ class ModelRunner:
         # Runtime keeps graph ownership resident while model activation and Wspec
         # overlap; graph construction uses the measured capture high-water plus
         # its provisional allocator margin. Price only the larger envelope.
+        # Reusable buffers are allocated after graph capture and remain live
+        # across all runtime phases. The legacy plan assumes sequential buffer
+        # lifetimes, so retain it as additional scratch rather than subtracting
+        # buffers from a phase that may not actually include them. Price their
+        # future ownership explicitly; allocator cache reuse cannot supply this
+        # information through the pre-KV driver snapshot.
+        persistent_workspace_reservation = (
+            self._speculative_workspace_reservation_bytes()
+        )
         runtime_reservation = (
-            profiled_graph_ownership
+            persistent_workspace_reservation
+            + profiled_graph_ownership
             + transient_peak
             + plan.reservation_bytes
         )
@@ -1243,6 +1243,7 @@ class ModelRunner:
             graph_reservation_bytes=graph_construction_reservation,
             runtime_reservation_bytes=runtime_reservation,
             sizing_overhead_bytes=sizing_overhead,
+            persistent_workspace_reservation_bytes=persistent_workspace_reservation,
             target_block_bytes=target_block_bytes,
             draft_block_bytes=draft_block_bytes,
             joint_block_bytes=joint_block_bytes,
@@ -2480,6 +2481,29 @@ class ModelRunner:
             ),
         )
 
+    def _speculative_workspace_reservation_bytes(self):
+        """Reserve permanent buffers independently of the legacy phase plan.
+
+        Round each allocation to a 2 MiB segment allowance, including small
+        metadata buffers. This deliberately allows separate allocator segments
+        instead of relying on cache reuse or packing to satisfy the KV budget.
+        The final audit measures resident ownership and does not charge this
+        future-allocation allowance a second time.
+        """
+        plan = self.speculative_memory_plan
+        batch = min(4, plan.batch_size)
+        k = min(4, plan.max_effective_k)
+        vocab = self.config.hf_config.vocab_size
+        sizes = (
+            batch * k * vocab * 4,       # FP32 draft probability rows
+            batch * k * 8,              # int64 proposal IDs
+            batch * (k + 1) * vocab * 4, # FP32 target probability rows
+            batch * vocab * 4,           # FP32 bonus noise
+            batch * (k + 3) * 8,         # int64 result rows
+        )
+        alignment = 2 * 1024 * 1024
+        return sum((size + alignment - 1) // alignment * alignment for size in sizes)
+
     def _initialize_speculative_workspaces(self):
         """Allocate one reusable buffer set for every admitted B/K route."""
 
@@ -2487,7 +2511,7 @@ class ModelRunner:
         max_batch = min(4, plan.batch_size)
         max_k = min(4, plan.max_effective_k)
         vocab_size = self.config.hf_config.vocab_size
-        device = torch.device("cuda", self.rank)
+        device = self.kv_cache.device
         self._spec_q_rows = torch.empty(
             (max_batch * max_k, vocab_size),
             dtype=torch.float32,
@@ -2511,6 +2535,7 @@ class ModelRunner:
     def _pretouch_speculative_verifier(self):
         from nanovllm.engine.speculative_execution import warm_verifier
         from nanovllm.layers.sampler import ModifiedRejectionSampler
+        self._initialize_speculative_workspaces()
         self.speculative_rejection_sampler = ModifiedRejectionSampler()
         warm_verifier(self)
 
