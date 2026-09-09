@@ -1149,8 +1149,14 @@ class ModelRunner:
         # buffers from a phase that may not actually include them. Price their
         # future ownership explicitly; allocator cache reuse cannot supply this
         # information through the pre-KV driver snapshot.
+        persistent_workspace_bytes = self._speculative_workspace_reservation_bytes()
+        # KV capacity is discrete. Reserve whole joint blocks so an allocation
+        # that fits within the old remainder still relinquishes capacity for
+        # permanent buffers and allocator segment variation. This is deliberately
+        # conservative, like the graph allocator's one-joint-block minimum.
         persistent_workspace_reservation = (
-            self._speculative_workspace_reservation_bytes()
+            (persistent_workspace_bytes + joint_block_bytes - 1)
+            // joint_block_bytes * joint_block_bytes
         )
         runtime_reservation = (
             persistent_workspace_reservation

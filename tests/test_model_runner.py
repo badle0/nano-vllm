@@ -1540,6 +1540,7 @@ def test_persistent_workspace_reservation_reduces_joint_kv_capacity(
     plan = runner.speculative_memory_plan
     joint = sum(runner_module.kv_cache_block_bytes(c, block_size=runner.block_size)
                 for c in (runner.config.hf_config, runner.config.draft_hf_config))
+    persistent = (persistent + joint - 1) // joint * joint
     total = plan.reservation_bytes + persistent + 200 + 4 * joint - 1
     _patch_spec_allocation_cuda(monkeypatch, free=total, total=total)
     monkeypatch.setattr(torch, "empty", lambda *shape, dtype, device:
