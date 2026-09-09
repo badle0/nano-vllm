@@ -425,6 +425,85 @@ class Sampler(nn.Module):
         return probabilities
 
     @torch.inference_mode()
+    def prepare_exact_probabilities_trusted(
+        self,
+        logits: torch.Tensor,
+        temperatures: torch.Tensor,
+        *,
+        top_k_buckets=(),
+        top_p_plan=None,
+        probabilities_out: torch.Tensor,
+        all_greedy: bool,
+    ) -> torch.Tensor:
+        """Internal exact-law path for host-validated speculative metadata.
+
+        The public oracle retains its exhaustive tensor validation. Engine-owned
+        metadata and storage are validated once before a cycle reaches this
+        method, avoiding repeated device-to-host condition checks at every draft
+        step.
+        """
+
+        greedy_tokens = logits.argmax(dim=-1)
+        if all_greedy:
+            probabilities_out.zero_()
+            probabilities_out.scatter_(1, greedy_tokens[:, None], 1.0)
+            return probabilities_out
+
+        filtered_logits = logits.clone()
+        for top_k, row_indices in top_k_buckets:
+            self.filter_top_k(filtered_logits, row_indices, top_k)
+        if top_p_plan is not None:
+            row_indices, probability_cutoffs = top_p_plan
+            self.filter_top_p(
+                filtered_logits,
+                temperatures,
+                row_indices,
+                probability_cutoffs,
+            )
+        scaled_logits = filtered_logits.to(
+            dtype=torch.float32, copy=True
+        ).div_(temperatures.clamp_min(1e-10).unsqueeze(dim=1))
+        torch.softmax(scaled_logits, dim=-1, out=probabilities_out)
+        greedy_rows = torch.nonzero(
+            temperatures == 0, as_tuple=False
+        ).flatten()
+        if greedy_rows.numel():
+            probabilities_out.index_fill_(0, greedy_rows, 0.0)
+            probabilities_out[
+                greedy_rows, greedy_tokens.index_select(0, greedy_rows)
+            ] = 1.0
+        return probabilities_out
+
+    @torch.inference_mode()
+    def sample_exact_with_probabilities_trusted(
+        self,
+        logits: torch.Tensor,
+        temperatures: torch.Tensor,
+        *,
+        top_k_buckets=(),
+        top_p_plan=None,
+        probabilities_out: torch.Tensor,
+        all_greedy: bool,
+    ) -> ExactSample:
+        probabilities = self.prepare_exact_probabilities_trusted(
+            logits,
+            temperatures,
+            top_k_buckets=top_k_buckets,
+            top_p_plan=top_p_plan,
+            probabilities_out=probabilities_out,
+            all_greedy=all_greedy,
+        )
+        greedy_tokens = probabilities.argmax(dim=-1)
+        if all_greedy:
+            return ExactSample(greedy_tokens, probabilities)
+        noise = torch.empty_like(probabilities).exponential_(1)
+        sampled_tokens = _sample_exponential_race(probabilities, noise)
+        return ExactSample(
+            torch.where(temperatures != 0, sampled_tokens, greedy_tokens),
+            probabilities,
+        )
+
+    @torch.inference_mode()
     def sample_exact_with_probabilities(
         self,
         logits: torch.Tensor,
@@ -625,6 +704,79 @@ class ModifiedRejectionSampler:
             row_count, dtype=torch.bool, device=target_weights.device
         )
         return ResidualSample(token_ids, used_reference, target_fallback)
+
+    @torch.inference_mode()
+    def accept_trusted(
+        self,
+        target_weights: torch.Tensor,
+        draft_tokens: torch.Tensor,
+        draft_weights: torch.Tensor,
+        *,
+        uniforms: torch.Tensor | None = None,
+        correction_noise: torch.Tensor | None = None,
+    ) -> ModifiedRejectionResult:
+        """Internal device-only modified rejection for validated engine buffers.
+
+        Optional random tensors are an oracle/fault-injection seam. Production
+        callers omit them, so this path retains its single end-of-cycle host
+        synchronization contract.
+        """
+
+        batch_size, proposal_length, _ = target_weights.shape
+        target_masses = target_weights.sum(dim=-1, dtype=torch.float64)
+        draft_masses = draft_weights.sum(dim=-1, dtype=torch.float64)
+        selected = draft_tokens.unsqueeze(dim=-1)
+        selected_target = target_weights.gather(-1, selected).squeeze(-1).to(
+            torch.float64
+        ) / target_masses
+        selected_draft = draft_weights.gather(-1, selected).squeeze(-1).to(
+            torch.float64
+        ) / draft_masses
+        acceptance = (selected_target / selected_draft).clamp(max=1.0)
+        if uniforms is None:
+            uniforms = torch.rand(
+                (batch_size, proposal_length),
+                dtype=torch.float32,
+                device=target_weights.device,
+            )
+        accepted_prefix = (
+            (uniforms.to(torch.float64) < acceptance)
+            .to(torch.int64)
+            .cumprod(dim=1)
+        )
+        accepted_counts = accepted_prefix.sum(dim=1, dtype=torch.int64)
+
+        correction_positions = accepted_counts.clamp_max(proposal_length - 1)
+        rows = torch.arange(batch_size, device=target_weights.device)
+        target_law = target_weights[rows, correction_positions].to(torch.float64)
+        draft_law = draft_weights[rows, correction_positions].to(torch.float64)
+        target_law = target_law / target_law.sum(dim=-1, keepdim=True)
+        draft_law = draft_law / draft_law.sum(dim=-1, keepdim=True)
+        residual = (target_law - draft_law).clamp_min(0.0)
+        residual_mass = residual.sum(dim=-1, keepdim=True)
+        rejected = accepted_counts < proposal_length
+        target_fallback = rejected & (residual_mass.squeeze(-1) == 0)
+        correction_law = residual / torch.where(
+            residual_mass == 0,
+            torch.ones_like(residual_mass),
+            residual_mass,
+        )
+        correction_law = torch.where(
+            target_fallback[:, None], target_law, correction_law
+        )
+        if correction_noise is None:
+            correction_noise = torch.empty_like(
+                target_weights[:, 0]
+            ).exponential_(1)
+        corrective_token_ids = _sample_exponential_race(
+            correction_law, correction_noise
+        )
+        return ModifiedRejectionResult(
+            accepted_counts,
+            corrective_token_ids,
+            rejected,
+            target_fallback,
+        )
 
     @torch.inference_mode()
     def accept(

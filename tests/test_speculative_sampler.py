@@ -981,3 +981,140 @@ def test_bfloat16_canonical_seam_is_finite_and_nonmutating(device):
         atol=1e-6,
     )
     assert torch.equal(logits, original)
+
+
+
+def test_trusted_probability_path_matches_validated_exact_oracle():
+    logits = torch.tensor(
+        [[1.0, 5.0, 5.0, -2.0], [0.2, 1.4, -0.3, 0.8]],
+        dtype=torch.float32,
+    )
+    temperatures = torch.tensor([0.0, 0.8], dtype=torch.float32)
+    rows = torch.tensor([1], dtype=torch.int64)
+    top_k = ((3, rows),)
+    top_p = (rows, torch.tensor([0.2], dtype=torch.float32))
+    sampler = Sampler()
+
+    expected = sampler.prepare_exact_probabilities(
+        logits,
+        temperatures,
+        top_k_buckets=top_k,
+        top_p_plan=top_p,
+    )
+    storage = torch.empty_like(expected)
+    actual = sampler.prepare_exact_probabilities_trusted(
+        logits,
+        temperatures,
+        top_k_buckets=top_k,
+        top_p_plan=top_p,
+        probabilities_out=storage,
+        all_greedy=False,
+    )
+
+    assert actual.data_ptr() == storage.data_ptr()
+    torch.testing.assert_close(actual, expected, rtol=0.0, atol=0.0)
+
+
+def test_trusted_rejection_preserves_exact_law_for_certain_outcomes():
+    target = torch.tensor(
+        [[[0.0, 1.0, 0.0]], [[0.0, 1.0, 0.0]]], dtype=torch.float32
+    )
+    draft = torch.tensor(
+        [[[1.0, 0.0, 0.0]], [[0.0, 1.0, 0.0]]], dtype=torch.float32
+    )
+    tokens = torch.tensor([[0], [1]], dtype=torch.int64)
+
+    result = ModifiedRejectionSampler().accept_trusted(target, tokens, draft)
+
+    assert result.accepted_counts.tolist() == [0, 1]
+    assert result.corrective_token_ids[0].item() == 1
+    _assert_bool_tensor(result.used_reference, [True, False])
+    _assert_bool_tensor(result.target_fallback, [False, False])
+
+
+def _assert_rejection_results_equal(actual, expected):
+    assert torch.equal(actual.accepted_counts, expected.accepted_counts)
+    assert torch.equal(actual.used_reference, expected.used_reference)
+    assert torch.equal(actual.target_fallback, expected.target_fallback)
+    # The trusted vectorized path deliberately computes and discards correction
+    # samples for full-accept rows. Their token IDs are outside the result
+    # contract; compare correction IDs only where rejection used the reference.
+    rejected = expected.used_reference
+    assert torch.equal(
+        actual.corrective_token_ids[rejected],
+        expected.corrective_token_ids[rejected],
+    )
+
+
+def test_trusted_rejection_normalizes_fp32_row_mass_before_acceptance_ratio():
+    target = torch.tensor(
+        [[[0.1, 0.2, 0.7000001]]], dtype=torch.float32
+    )
+    draft = torch.tensor(
+        [[[0.1, 0.2, 0.6999998]]], dtype=torch.float32
+    )
+    tokens = torch.tensor([[0]], dtype=torch.int64)
+    # The largest representable FP32 value below one lies above normalized
+    # p(d)/q(d), but below the old raw-weight ratio after it was clamped to one.
+    uniform = torch.nextafter(torch.tensor([[1.0]]), torch.tensor([[0.0]]))
+    noise = torch.ones(1, 3, dtype=torch.float32)
+    sampler = ModifiedRejectionSampler()
+
+    expected = sampler.accept(
+        target,
+        tokens,
+        draft,
+        uniforms=uniform,
+        correction_noise=noise,
+    )
+    actual = sampler.accept_trusted(
+        target,
+        tokens,
+        draft,
+        uniforms=uniform,
+        correction_noise=noise,
+    )
+
+    assert expected.accepted_counts.tolist() == [0]
+    _assert_rejection_results_equal(actual, expected)
+
+
+@pytest.mark.parametrize("batch_size,proposal_length,vocab_size", [(1, 1, 3), (3, 4, 11)])
+def test_trusted_rejection_matches_validated_oracle_for_fixed_randomness(
+    batch_size,
+    proposal_length,
+    vocab_size,
+):
+    generator = torch.Generator().manual_seed(
+        20260908 + batch_size * 100 + proposal_length
+    )
+    target = torch.rand(
+        batch_size, proposal_length, vocab_size, generator=generator
+    ).add_(0.01)
+    draft = torch.rand(
+        batch_size, proposal_length, vocab_size, generator=generator
+    ).add_(0.01)
+    tokens = draft.argmax(dim=-1)
+    uniforms = torch.rand(
+        batch_size, proposal_length, generator=generator
+    )
+    correction_noise = torch.rand(
+        batch_size, vocab_size, generator=generator
+    ).add_(0.01)
+    sampler = ModifiedRejectionSampler()
+
+    expected = sampler.accept(
+        target,
+        tokens,
+        draft,
+        uniforms=uniforms,
+        correction_noise=correction_noise,
+    )
+    actual = sampler.accept_trusted(
+        target,
+        tokens,
+        draft,
+        uniforms=uniforms,
+        correction_noise=correction_noise,
+    )
+    _assert_rejection_results_equal(actual, expected)

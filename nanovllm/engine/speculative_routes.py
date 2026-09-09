@@ -19,7 +19,7 @@ from hashlib import sha256
 from nanovllm.engine.speculative_memory import SpeculativeMemoryPlan
 
 
-DRAFT_ROUTE_SCHEMA = "draft-discard-v1"
+DRAFT_ROUTE_SCHEMA = "draft-discard-v2-lm-head"
 MAX_CUDA_GRAPH_BATCH_SIZE = 512
 # V3 is a correctness route, not yet the V7 performance router.  Bounding the
 # enumerated K axis prevents a hostile-but-valid configuration from constructing
@@ -309,10 +309,21 @@ def draft_graph_batch_buckets(batch_cap: int) -> tuple[int, ...]:
     )
 
 
-def speculative_plan_fingerprint(plan: SpeculativeMemoryPlan) -> str:
+def speculative_plan_fingerprint(
+    plan: SpeculativeMemoryPlan,
+    numerical_backend: str = "fast",
+) -> str:
     if not isinstance(plan, SpeculativeMemoryPlan):
         raise TypeError("plan must be a SpeculativeMemoryPlan")
-    payload = tuple((field.name, repr(getattr(plan, field.name))) for field in fields(plan))
+    if not isinstance(numerical_backend, str) or not numerical_backend:
+        raise ValueError("numerical_backend must be a non-empty string")
+    payload = (
+        numerical_backend,
+        tuple(
+            (field.name, repr(getattr(plan, field.name)))
+            for field in fields(plan)
+        ),
+    )
     return sha256(repr(payload).encode("utf-8")).hexdigest()
 
 
@@ -366,6 +377,7 @@ def build_draft_route_registry(
     plan: SpeculativeMemoryPlan,
     *,
     enforce_eager: bool,
+    numerical_backend: str = "fast",
 ) -> DraftRouteRegistry:
     """Build the bounded desired registry before graph capture/pretouch."""
 
@@ -373,7 +385,7 @@ def build_draft_route_registry(
         raise TypeError("plan must be a SpeculativeMemoryPlan")
     if type(enforce_eager) is not bool:
         raise TypeError("enforce_eager must be a bool")
-    fingerprint = speculative_plan_fingerprint(plan)
+    fingerprint = speculative_plan_fingerprint(plan, numerical_backend)
     if plan.batch_size == 0 or plan.max_effective_k == 0:
         return DraftRouteRegistry(DRAFT_ROUTE_SCHEMA, fingerprint, ())
 

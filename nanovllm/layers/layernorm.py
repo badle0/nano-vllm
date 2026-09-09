@@ -1,6 +1,8 @@
 import torch
 from torch import nn
 
+from nanovllm.layers.invariant_ops import invariant_rms_norm
+
 
 class RMSNorm(nn.Module):
 
@@ -10,6 +12,7 @@ class RMSNorm(nn.Module):
         eps: float = 1e-6,
     ) -> None:
         super().__init__()
+        self.numerical_mode = "fast"
         self.eps = eps
         self.weight = nn.Parameter(torch.ones(hidden_size))
 
@@ -44,6 +47,8 @@ class RMSNorm(nn.Module):
         x: torch.Tensor,
         residual: torch.Tensor | None = None,
     ) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor]:
+        if self.numerical_mode == "invariant":
+            return invariant_rms_norm(x, self.weight, self.eps, residual)
         if residual is None:
             return self.rms_forward(x)
         else:

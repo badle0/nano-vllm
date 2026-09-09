@@ -94,10 +94,12 @@ def test_gc_control_defaults_off_and_diagnostic_flag_is_explicit():
         field.name
         for field in Config.__dataclass_fields__.values()
         if field.init
-    ][-3:] == [
+    ][-5:] == [
         "disable_python_gc",
         "draft_model",
         "num_speculative_tokens",
+        "numerical_mode",
+        "speculative_policy",
     ]
     assert build_parser().parse_args([]).disable_python_gc is False
     assert build_parser().parse_args(["--disable-python-gc"]).disable_python_gc is True

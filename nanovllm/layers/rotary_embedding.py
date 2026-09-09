@@ -24,6 +24,7 @@ class RotaryEmbedding(nn.Module):
         base: float,
     ) -> None:
         super().__init__()
+        self.numerical_mode = "fast"
         self.head_size = head_size
         assert rotary_dim == head_size
         inv_freq = 1.0 / (base**(torch.arange(0, rotary_dim, 2, dtype=torch.float) / rotary_dim))
@@ -34,8 +35,7 @@ class RotaryEmbedding(nn.Module):
         cache = torch.cat((cos, sin), dim=-1).unsqueeze_(1)
         self.register_buffer("cos_sin_cache", cache, persistent=False)
 
-    @torch.compile
-    def forward(
+    def _apply(
         self,
         positions: torch.Tensor,
         query: torch.Tensor,
@@ -46,6 +46,25 @@ class RotaryEmbedding(nn.Module):
         query = apply_rotary_emb(query, cos, sin)
         key = apply_rotary_emb(key, cos, sin)
         return query, key
+
+    @torch.compile
+    def compiled_forward(
+        self,
+        positions: torch.Tensor,
+        query: torch.Tensor,
+        key: torch.Tensor,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        return self._apply(positions, query, key)
+
+    def forward(
+        self,
+        positions: torch.Tensor,
+        query: torch.Tensor,
+        key: torch.Tensor,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        if self.numerical_mode == "invariant":
+            return self._apply(positions, query, key)
+        return self.compiled_forward(positions, query, key)
 
 
 @lru_cache(1)

@@ -147,6 +147,7 @@ class Scheduler:
         self.block_manager = BlockManager(config.num_kvcache_blocks, config.kvcache_block_size)
         self._configured_k = getattr(config, "configured_k", 0)
         self._max_model_len = getattr(config, "max_model_len", 0)
+        self._numerical_mode = getattr(config, "numerical_mode", "fast")
         self._draft_discard_cycle_ids = count()
         self._active_spec_transaction: ActiveSpecTransaction | None = None
         self._active_draft_discard: tuple[
@@ -212,12 +213,20 @@ class Scheduler:
         self._check_mid_chunk_invariant()
         scheduled_seqs = []
 
-        # decode admission first, unconditionally (F2): the ITL bound exists only if
-        # decodes never wait behind prefill work — the loop is dev's decode loop verbatim
+        # Prefer ongoing decode, including when a partial prefill holds the KV
+        # capacity it needs. This is scheduling priority, not a wall-time ITL
+        # bound: all rows still wait for the complete mixed forward.
         while self.running and len(scheduled_seqs) < self.max_num_seqs:
             seq = self.running.popleft()
             while not self.block_manager.can_append(seq):
-                if self.running:
+                if self.mid_chunk_seq is not None:
+                    # The invariant above identifies the waiting head. No
+                    # prefill work has been scheduled in this synchronous step,
+                    # so its blocks can be reclaimed before evicting a decoder.
+                    # Retry capacity: reclamation must not assume exclusive KV
+                    # ownership or a particular number of released blocks.
+                    self.preempt(self.waiting.popleft())
+                elif self.running:
                     self.preempt(self.running.pop())
                 else:
                     self.preempt(seq)
@@ -238,15 +247,41 @@ class Scheduler:
             if remaining <= 0:
                 break
             seq = self.waiting[0]
+            num_cached_blocks = None
             if not seq.block_table:
+                # Preserve whole-request admission while deferring physical KV
+                # ownership to the prefix covered by this scheduled chunk.
                 num_cached_blocks = self.block_manager.can_allocate(seq)
                 if num_cached_blocks == -1:
                     break
                 num_tokens = seq.num_tokens - num_cached_blocks * self.block_size
-                self.block_manager.allocate(seq, num_cached_blocks)
             else:
                 num_tokens = seq.num_tokens - seq.num_cached_tokens
             seq.num_scheduled_tokens = min(num_tokens, remaining)
+            through_tokens = seq.num_cached_tokens + seq.num_scheduled_tokens
+            if num_cached_blocks is not None:
+                through_tokens = (
+                    num_cached_blocks * self.block_size
+                    + seq.num_scheduled_tokens
+                )
+                allocated = self.block_manager.allocate_incremental(
+                    seq, num_cached_blocks, through_tokens
+                )
+                if not allocated:
+                    # can_allocate established a stronger whole-request bound
+                    # without an intervening mutation, so this indicates
+                    # allocator state corruption rather than ordinary pressure.
+                    raise RuntimeError(
+                        "incremental KV allocation changed after admission"
+                    )
+            elif not self.block_manager.extend(seq, through_tokens):
+                # Decode growth may consume capacity between chunks. Requeue
+                # this partial prefill with no change to logical coverage.
+                seq.num_scheduled_tokens = 0
+                self.preempt(self.waiting.popleft())
+                if scheduled_seqs:
+                    break
+                continue
             num_batched_tokens += seq.num_scheduled_tokens
             if seq.num_cached_tokens + seq.num_scheduled_tokens == seq.num_tokens:
                 if seq is self.mid_chunk_seq:
@@ -557,7 +592,9 @@ class Scheduler:
                 raise TypeError("route_admission must be a DraftRouteAdmission")
             if route_admission.batch_size != len(rows):
                 raise ValueError("route admission batch size does not match decode rows")
-            if route_admission.plan_fingerprint != speculative_plan_fingerprint(configured_workspace):
+            if route_admission.plan_fingerprint != speculative_plan_fingerprint(
+                configured_workspace, self._numerical_mode
+            ):
                 raise ValueError("route admission workspace fingerprint is stale")
             cap = route_admission.max_effective_k
         cycle_id = next(self._draft_discard_cycle_ids)

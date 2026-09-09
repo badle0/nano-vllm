@@ -718,6 +718,9 @@ def _spec_allocation_runner(num_blocks=-1, *, enforce_eager=True):
         num_kvcache_blocks=num_blocks,
     )
     runner.speculative_memory_plan = None
+    # Existing phase-envelope tests isolate the legacy scratch/graph model.
+    # Dedicated boundary tests below exercise the real persistent reservation.
+    runner._speculative_workspace_reservation_bytes = lambda: 0
     runner.draft_route_registry = None
     runner.speculative_memory_audit = None
     runner._speculative_memory_audit_inputs = None
@@ -1488,3 +1491,75 @@ def test_flashinfer_config_without_active_top_p_uses_legacy_sampler(monkeypatch)
 
     assert runner.run([object(), object()], is_prefill=False) == [4, 5]
     assert calls == ["legacy"]
+
+
+
+def test_invariant_prefill_samples_only_explicit_emission_rows(monkeypatch):
+    sampled_rows = []
+
+    class FakeSampler:
+        def greedy(self, logits):
+            assert logits.shape == (1, 8)
+            return torch.tensor([7])
+
+    rows = [
+        SimpleNamespace(num_cached_tokens=0, num_scheduled_tokens=2, num_tokens=5),
+        SimpleNamespace(num_cached_tokens=2, num_scheduled_tokens=1, num_tokens=3),
+        SimpleNamespace(num_cached_tokens=1, num_scheduled_tokens=1, num_tokens=4),
+    ]
+    runner = object.__new__(ModelRunner)
+    runner.rank = 0
+    runner.numerical_mode = "invariant"
+    runner.config = SimpleNamespace(top_p_backend="exact")
+    runner.sampler = FakeSampler()
+    runner.prepare_prefill = lambda seqs: (torch.tensor([1]), torch.tensor([0]))
+
+    def prepare_sample(seqs):
+        sampled_rows.extend(seqs)
+        return None, (), None, True
+
+    runner.prepare_sample = prepare_sample
+    runner.run_model = lambda input_ids, positions, is_prefill: torch.zeros(1, 8)
+    monkeypatch.setattr(
+        "nanovllm.engine.model_runner.reset_context", lambda: None
+    )
+
+    assert runner.run(rows, is_prefill=True) == [0, 7, 0]
+    assert sampled_rows == [rows[1]]
+
+
+@pytest.mark.parametrize("requested, passes", [(-1, True), (3, True), (4, False)])
+def test_persistent_workspace_reservation_reduces_joint_kv_capacity(
+    monkeypatch, requested, passes
+):
+    runner = _spec_allocation_runner(requested)
+    del runner._speculative_workspace_reservation_bytes
+    runner._initialize_speculative_route_registry()
+    persistent = runner._speculative_workspace_reservation_bytes()
+    assert persistent == 5 * 2 * 1024**2
+    plan = runner.speculative_memory_plan
+    joint = sum(runner_module.kv_cache_block_bytes(c, block_size=runner.block_size)
+                for c in (runner.config.hf_config, runner.config.draft_hf_config))
+    persistent = (persistent + joint - 1) // joint * joint
+    total = plan.reservation_bytes + persistent + 200 + 4 * joint - 1
+    _patch_spec_allocation_cuda(monkeypatch, free=total, total=total)
+    monkeypatch.setattr(torch, "empty", lambda *shape, dtype, device:
+                        _FakeAllocation(shape, dtype, device))
+    if not passes:
+        with pytest.raises(SpeculativeKVCacheCapacityError, match="requested num_kvcache_blocks=4"):
+            runner.allocate_kv_cache()
+        return
+    runner.allocate_kv_cache()
+    assert runner.config.num_kvcache_blocks == 3
+    inputs = runner._speculative_memory_audit_inputs
+    assert inputs["persistent_workspace_reservation_bytes"] == persistent
+    assert inputs["runtime_reservation_bytes"] == plan.reservation_bytes + persistent + 200
+
+
+@pytest.mark.parametrize("batch,k", [(4, 4), (5, 4), (8, 6)])
+def test_qwen_persistent_reservation_covers_allocations_and_caps(batch, k):
+    runner = object.__new__(ModelRunner)
+    runner.speculative_memory_plan = SimpleNamespace(batch_size=batch, max_effective_k=k)
+    runner.config = SimpleNamespace(hf_config=SimpleNamespace(vocab_size=151936))
+    # Five independent allocations: 10, 2, 12, 4 and 2 MiB segment allowances.
+    assert runner._speculative_workspace_reservation_bytes() == 30 * 1024**2

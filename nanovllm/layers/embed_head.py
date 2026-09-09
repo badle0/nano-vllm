@@ -3,6 +3,7 @@ from torch import nn
 import torch.nn.functional as F
 import torch.distributed as dist
 
+from nanovllm.layers.invariant_ops import invariant_linear
 from nanovllm.utils.context import get_context
 from nanovllm.utils.loader import (
     require_exact_global_weight_shape,
@@ -18,6 +19,7 @@ class VocabParallelEmbedding(nn.Module):
         embedding_dim: int,
     ):
         super().__init__()
+        self.numerical_mode = "fast"
         self.tp_rank = dist.get_rank()
         self.tp_size = dist.get_world_size()
         assert num_embeddings % self.tp_size == 0
@@ -67,9 +69,16 @@ class ParallelLMHead(VocabParallelEmbedding):
     def forward(self, x: torch.Tensor, *, all_positions: bool = False):
         context = get_context()
         if context.is_prefill and not all_positions:
-            last_indices = context.cu_seqlens_q[1:] - 1
+            last_indices = (
+                context.emission_query_indices
+                if self.numerical_mode == "invariant"
+                and context.emission_query_indices is not None
+                else context.cu_seqlens_q[1:] - 1
+            )
             x = x[last_indices].contiguous()
-        logits = F.linear(x, self.weight)
+        logits = (invariant_linear(x, self.weight)
+                  if self.numerical_mode == "invariant"
+                  else F.linear(x, self.weight))
         if self.tp_size > 1:
             all_logits = [torch.empty_like(logits) for _ in range(self.tp_size)] if self.tp_rank == 0 else None
             dist.gather(logits, all_logits, 0)

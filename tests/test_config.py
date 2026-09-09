@@ -84,10 +84,14 @@ def test_speculative_config_defaults_are_inert_and_appended(config_dependencies)
     assert config.configured_k == 0
     assert config.speculation_enabled is False
     assert config.draft_hf_config is None
-    assert [field.name for field in fields(Config) if field.init][-3:] == [
+    assert config.numerical_mode == "fast"
+    assert config.speculative_policy == "fixed"
+    assert [field.name for field in fields(Config) if field.init][-5:] == [
         "disable_python_gc",
         "draft_model",
         "num_speculative_tokens",
+        "numerical_mode",
+        "speculative_policy",
     ]
 
 
@@ -540,3 +544,74 @@ raise SystemExit(1)
         text=True,
     )
     assert result.returncode == 0, result.stderr
+
+@pytest.mark.parametrize("value", [None, True, 1, 1.0])
+def test_numerical_mode_requires_a_string(config_dependencies, value):
+    with pytest.raises(TypeError, match="numerical_mode must be a string"):
+        Config(config_dependencies, numerical_mode=value)
+
+
+def test_numerical_mode_rejects_unknown_value(config_dependencies):
+    with pytest.raises(ValueError, match="fast.*invariant"):
+        Config(config_dependencies, numerical_mode="deterministic")
+
+
+@pytest.mark.parametrize("value", [None, True, 1, 1.0])
+def test_speculative_policy_requires_a_string(config_dependencies, value):
+    with pytest.raises(TypeError, match="speculative_policy must be a string"):
+        Config(config_dependencies, speculative_policy=value)
+
+
+def test_adaptive_policy_requires_enabled_speculation(config_dependencies):
+    with pytest.raises(ValueError, match="requires speculative decoding"):
+        Config(config_dependencies, speculative_policy="adaptive")
+
+
+def test_invariant_mode_accepts_qualified_qwen_geometry(monkeypatch, tmp_path):
+    import torch
+
+    monkeypatch.setattr(
+        config_module.AutoConfig,
+        "from_pretrained",
+        lambda model: SimpleNamespace(
+            max_position_embeddings=8192,
+            model_type="qwen3",
+            vocab_size=151936,
+            dtype=torch.bfloat16,
+            hidden_size=1024,
+            num_hidden_layers=28,
+        ),
+    )
+    config = Config(tmp_path, numerical_mode="invariant", max_model_len=4096)
+    assert config.numerical_mode == "invariant"
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "message"),
+    [
+        ("dtype", "torch.float16", "requires BF16"),
+        ("model_type", "llama", "supports Qwen3"),
+        ("hidden_size", 2048, "Qwen3-0.6B and Qwen3-4B"),
+    ],
+)
+def test_invariant_mode_rejects_unqualified_models(
+    monkeypatch, tmp_path, field, value, message
+):
+    import torch
+
+    values = dict(
+        max_position_embeddings=8192,
+        model_type="qwen3",
+        vocab_size=151936,
+        dtype=torch.bfloat16,
+        hidden_size=1024,
+        num_hidden_layers=28,
+    )
+    values[field] = value
+    monkeypatch.setattr(
+        config_module.AutoConfig,
+        "from_pretrained",
+        lambda model: SimpleNamespace(**values),
+    )
+    with pytest.raises(ValueError, match=message):
+        Config(tmp_path, numerical_mode="invariant")

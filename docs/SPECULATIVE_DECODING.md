@@ -1,9 +1,13 @@
 # Experimental speculative decoding
 
-This is an opt-in, correctness-first implementation, not a performance release.
-It performs actual proposal, target verification, rejection/correction or bonus
-sampling, and atomic token/KV commit. The measured active routes are **1.92–3.62x
-slower** than speculation off; see [the benchmark report](SPECULATIVE_BENCHMARKS.md).
+This is an opt-in experimental implementation. It performs actual proposal,
+target verification, rejection/correction or bonus sampling, and atomic token/KV
+commit. The retained baseline routes measured **1.92–3.62x slower** than
+speculation off; see [the benchmark report](SPECULATIVE_BENCHMARKS.md). The
+follow-up adds reusable workspaces, graph-backed verification, invariant parallel
+greedy verification, and adaptive bypass. Its implementation and current
+qualification limits are recorded in
+[invariant and speculative optimization](NUMERICAL_AND_SPECULATIVE_OPTIMIZATIONS.md).
 
 ## Enable or disable
 
@@ -19,6 +23,7 @@ llm = LLM(
     "/path/to/Qwen3-4B",
     draft_model="/path/to/Qwen3-0.6B",
     num_speculative_tokens=4,
+    speculative_policy="fixed",  # or "adaptive" with loaded calibration
     tensor_parallel_size=1,
     top_p_backend="exact",
     max_num_seqs=4,
@@ -38,9 +43,12 @@ finally:
 ```
 
 Omit **both** `draft_model` and `num_speculative_tokens` to use ordinary decoding.
-Speculation is disabled by default. Passing only one option is invalid. Using
-the same checkpoint for both models is a functional test, not an acceleration
-strategy. Memory requirements include both models and separate physical KV pools.
+Speculation is disabled by default. Passing only one option is invalid. The
+`fixed` policy preserves configured behavior. The `adaptive` policy requires
+calibration loaded through `llm.load_speculative_calibration(...)` and bypasses
+unknown or predicted-losing cells. Using the same checkpoint for both models is
+a functional test, not an acceleration strategy. Memory requirements include
+both models and separate physical KV pools.
 
 ## Supported envelope and bypass
 
@@ -85,18 +93,22 @@ identical sampled output for the same random seed as ordinary decoding.
 | `engine/llm_engine.py`, `metrics.py` | Execution, failure/RNG handling, public delivery and counters |
 | `models/qwen3.py`, `layers/embed_head.py` | Explicit all-query logits path; ordinary prefill still selects its final query |
 
-Pure stochastic batches verify `[last committed token, d1, ..., dK]` with one
-eager causal paged target pass producing B*(K+1) logits rows. A batch containing
-any greedy row instead uses K+1 ordinary target decode calls. This preserves
-matching-mode BF16 decode geometry after parallel verification showed a
-non-tied greedy discrepancy. It is an implemented compatibility lane, but
-claims **no greedy acceleration**.
+Stochastic batches verify `[last committed token, d1, ..., dK]` with one causal
+paged target pass producing B*(K+1) logits rows. Fast-mode batches containing any
+greedy row retain K+1 ordinary target decode calls because cross-shape BF16
+verification can change a non-tied greedy decision. Invariant homogeneous-greedy
+batches use one causal pass and compare target argmax IDs directly, without
+dense target probability or residual tensors. Invariant mixed batches use the
+parallel probability path.
 
-Graph mode uses warmed draft decode graphs; draft catch-up and parallel target
-verification remain eager. LM-head/probability/sampling work is outside the
-draft transformer graph. Warmup covers both target lanes and admitted B/K and
-sampling families. Old shadow/discard entry points remain for contract tests;
-initialized speculative engines select verified execution.
+Graph mode captures the draft transformer and LM head. A one-token draft
+catch-up reuses the decode graph; longer ragged catch-up remains eager. Parallel
+target verification uses warmed ragged target graphs when its token/slot shape
+fits and otherwise executes eager. Exact probability and rejection sampling
+remain eager ATen operations over reusable engine buffers. Warmup covers target
+lanes and admitted B/K and sampling families. Old shadow/discard entry points
+remain for contract tests; initialized speculative engines select verified
+execution.
 
 ## Commit, rollback, streaming and metrics
 
@@ -133,6 +145,9 @@ Enabled requests expose additive counters (zero even if speculation never runs):
 
 Failed cycles add no counters. Speculation-off metrics are unchanged.
 `StepOutput.num_decode_tokens` remains a decode-row count, not a burst-token count.
+Adaptive engines additionally expose `llm.speculative_routing_metrics()`, which
+reports selected K counts, bypass reasons, the last decision, and calibration
+cell count without conflating bypass with speculation disabled.
 
 ## Maintained tests and archive boundary
 
@@ -159,8 +174,9 @@ does not repair or certify the older compiler; see the
 [CI follow-up record](SPECULATIVE_BENCHMARKS.md). Compilation remains enabled,
 with neither error suppression nor an eager-test substitution.
 
-The GPU integration tool is `tests/run_speculative_v5_gpu.py`. Its compiler/cache
-instrumentation still imports `run_speculative_v3_route_compile.py` and
+The GPU integration tool is `tests/run_speculative_v5_gpu.py`; use
+`--numerical-mode invariant --mode eager` for the invariant route. Its
+compiler/cache instrumentation still imports `run_speculative_v3_route_compile.py` and
 `_speculative_v3_evidence.py`; these are retained dependencies, not disposable
 logs. Use the V5 entry point for the current implementation, not the historical
 V3 certification entry point. Current benchmark and phase tools are

@@ -39,6 +39,7 @@ def main():
     parser.add_argument("--model", default="/workspace/models/Qwen3-0.6B")
     parser.add_argument("--draft-model")
     parser.add_argument("--mode", choices=("eager", "graph"), required=True)
+    parser.add_argument("--numerical-mode", choices=("fast", "invariant"), default="fast")
     parser.add_argument("--enabled", action="store_true")
     parser.add_argument("--auto-kv", action="store_true")
     parser.add_argument("--logit-trace", action="store_true")
@@ -75,7 +76,8 @@ def main():
             initialize_cache_root(name, root)
         captures = install_capture_ledger()
     config = dict(max_num_seqs=args.max_batch, max_num_batched_tokens=args.token_budget, max_model_len=args.model_length,
-                  gpu_memory_utilization=args.memory_utilization, enforce_eager=args.mode == "eager")
+                  gpu_memory_utilization=args.memory_utilization, enforce_eager=args.mode == "eager",
+                  numerical_mode=args.numerical_mode)
     if not args.auto_kv:
         config["num_kvcache_blocks"] = 64
     if args.enabled:
@@ -131,7 +133,12 @@ def main():
                 assert snapshot_before == snapshot_after, compiler_delta_summary(snapshot_before, snapshot_after)
             cycles.append(dict(batch=len(seqs), k=plan.effective_k,
                                purpose=purpose,
-                               verifier="sequential_greedy" if any(s.temperature == 0. for s in seqs) else "paged_parallel",
+                               verifier=("invariant_parallel_greedy"
+                                         if any(s.temperature == 0. for s in seqs)
+                                         and runner.numerical_mode == "invariant"
+                                         else "sequential_greedy"
+                                         if any(s.temperature == 0. for s in seqs)
+                                         else "paged_parallel"),
                                catchup=plan.draft_catchup_tokens,
                                seconds=time.perf_counter() - start,
                                peak_increment=torch.cuda.max_memory_allocated() - baseline,
@@ -271,10 +278,10 @@ def main():
             import nanovllm.engine.speculative_execution as execution
             parallel_verifier = execution.target_probabilities
             def probe_causality(runner, rows, proposals):
-                original = parallel_verifier(runner, rows, proposals)
+                original = parallel_verifier(runner, rows, proposals).clone()
                 altered = proposals.clone()
                 altered[:, -1] = (altered[:, -1] + 1) % original.size(-1)
-                perturbed = parallel_verifier(runner, rows, altered)
+                perturbed = parallel_verifier(runner, rows, altered).clone()
                 assert torch.equal(original[:, :-1], perturbed[:, :-1]), "future proposal leaked into earlier target law"
                 assert not torch.equal(original[:, -1], perturbed[:, -1]), "causality probe was vacuous"
                 # Restore actual proposal KV before acceptance/commit.
@@ -289,20 +296,37 @@ def main():
             check_drained()
             from nanovllm.layers.sampler import ModifiedRejectionResult
             rejection = runner.speculative_rejection_sampler
-            real_accept = rejection.accept
+            accept_name = (
+                "accept_trusted" if hasattr(rejection, "accept_trusted") else "accept"
+            )
+            real_accept = getattr(rejection, accept_name)
             def forced_accept(p, tokens, q):
-                rejection.accept = real_accept  # force exactly one cycle
+                setattr(rejection, accept_name, real_accept)  # force exactly one cycle
                 correction = rejection.sample_correction(p[:, 0], p[:, 0])
                 assert correction.target_fallback.all()
                 return ModifiedRejectionResult(torch.zeros(p.size(0), dtype=torch.int64, device=p.device),
                                                 correction.token_ids, correction.used_reference,
                                                 correction.target_fallback)
             purpose = "forced_empty_residual"
-            rejection.accept = forced_accept
+            setattr(rejection, accept_name, forced_accept)
             try:
-                forced = llm.generate([[42] * 16], SamplingParams(temperature=0., max_tokens=9, ignore_eos=True), use_tqdm=False)
+                # Invariant homogeneous greedy uses the direct argmax verifier
+                # and therefore has no rejection sampler to inject. Exercise
+                # numerical residual recovery through a stochastic exact row.
+                forced_temperature = (
+                    0.8 if runner.numerical_mode == "invariant" else 0.0
+                )
+                forced = llm.generate(
+                    [[42] * 16],
+                    SamplingParams(
+                        temperature=forced_temperature,
+                        max_tokens=9,
+                        ignore_eos=True,
+                    ),
+                    use_tqdm=False,
+                )
             finally:
-                rejection.accept = real_accept
+                setattr(rejection, accept_name, real_accept)
             forced_metrics = forced[0]["metrics"]
             assert forced_metrics["spec_residual_numerical_fallbacks"] == 1
             check_drained()
