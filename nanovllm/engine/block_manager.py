@@ -185,6 +185,126 @@ class BlockManager:
         # draft model up explicitly before proposal execution.
         seq.num_draft_cached_tokens = 0
 
+    def allocate_incremental(
+        self,
+        seq: Sequence,
+        num_cached_blocks: int,
+        through_tokens: int,
+    ) -> bool:
+        """Pin reusable prefixes and allocate only the scheduled prompt suffix.
+
+        Admission remains a whole-request decision in :meth:`can_allocate`.
+        This method changes physical ownership only after proving that the
+        requested prefix can be attached in full.
+        """
+
+        self._assert_allocator_mutation_allowed("allocate a sequence incrementally")
+        if seq.block_table:
+            raise ValueError("incremental allocation requires an empty block table")
+        if type(num_cached_blocks) is not int or not 0 <= num_cached_blocks < seq.num_blocks:
+            raise ValueError("num_cached_blocks is outside the reusable prefix")
+        if type(through_tokens) is not int or not 1 <= through_tokens <= seq.num_tokens:
+            raise ValueError("through_tokens must be within the sequence")
+        required_blocks = (through_tokens + self.block_size - 1) // self.block_size
+        if required_blocks <= num_cached_blocks:
+            raise ValueError("scheduled coverage must extend beyond the cached prefix")
+
+        h = -1
+        cached_ids = []
+        for i in range(num_cached_blocks):
+            token_ids = seq.block(i)
+            h = self.compute_hash(token_ids, h)
+            block_id = self.hash_to_block_id.get(h, -1)
+            if block_id == -1 or self.blocks[block_id].token_ids != token_ids:
+                raise RuntimeError("reusable prefix changed after admission")
+            cached_ids.append(block_id)
+        free_needed = required_blocks - num_cached_blocks + sum(
+            block_id not in self.used_block_ids for block_id in cached_ids
+        )
+        if len(self.free_block_ids) < free_needed:
+            return False
+
+        free_before = tuple(self.free_block_ids)
+        used_before = frozenset(self.used_block_ids)
+        hashes_before = tuple(sorted(self.hash_to_block_id.items()))
+        cached_free = set(cached_ids) - set(used_before)
+        new_block_count = required_blocks - num_cached_blocks
+        candidate_ids = tuple(
+            block_id for block_id in free_before if block_id not in cached_free
+        )[:new_block_count]
+        block_states = self._snapshot_block_states((*cached_ids, *candidate_ids))
+        cached_tokens_before = seq.num_cached_tokens
+        draft_cached_tokens_before = seq.num_draft_cached_tokens
+        try:
+            for block_id in cached_ids:
+                block = self.blocks[block_id]
+                if block_id in self.used_block_ids:
+                    block.ref_count += 1
+                else:
+                    block.ref_count = 1
+                    self.free_block_ids.remove(block_id)
+                    self.used_block_ids.add(block_id)
+                seq.block_table.append(block_id)
+            for _ in range(num_cached_blocks, required_blocks):
+                seq.block_table.append(self._allocate_block())
+            seq.num_cached_tokens = num_cached_blocks * self.block_size
+            seq.num_draft_cached_tokens = 0
+        except BaseException:
+            seq.block_table.clear()
+            seq.num_cached_tokens = cached_tokens_before
+            seq.num_draft_cached_tokens = draft_cached_tokens_before
+            for state in block_states:
+                block = self.blocks[state.block_id]
+                block.ref_count = state.ref_count
+                block.hash = state.hash
+                block.token_ids = list(state.token_ids)
+            self.free_block_ids = deque(free_before)
+            self.used_block_ids = set(used_before)
+            self.hash_to_block_id = dict(hashes_before)
+            raise
+        return True
+
+    def extend(self, seq: Sequence, through_tokens: int) -> bool:
+        """Extend physical KV coverage atomically through one scheduled chunk."""
+
+        self._assert_allocator_mutation_allowed("extend a sequence")
+        if not seq.block_table:
+            raise ValueError("cannot extend an unallocated sequence")
+        if type(through_tokens) is not int or not 1 <= through_tokens <= seq.num_tokens:
+            raise ValueError("through_tokens must be within the sequence")
+        required_blocks = (through_tokens + self.block_size - 1) // self.block_size
+        current_blocks = len(seq.block_table)
+        if required_blocks <= current_blocks:
+            return True
+        new_blocks = required_blocks - current_blocks
+        if len(self.free_block_ids) < new_blocks:
+            return False
+        table_before = tuple(seq.block_table)
+        free_before = tuple(self.free_block_ids)
+        used_before = frozenset(self.used_block_ids)
+        hashes_before = tuple(sorted(self.hash_to_block_id.items()))
+        candidate_ids = free_before[:new_blocks]
+        block_states = self._snapshot_block_states(candidate_ids)
+        cached_tokens_before = seq.num_cached_tokens
+        draft_cached_tokens_before = seq.num_draft_cached_tokens
+        try:
+            for _ in range(new_blocks):
+                seq.block_table.append(self._allocate_block())
+        except BaseException:
+            seq.block_table[:] = table_before
+            seq.num_cached_tokens = cached_tokens_before
+            seq.num_draft_cached_tokens = draft_cached_tokens_before
+            for state in block_states:
+                block = self.blocks[state.block_id]
+                block.ref_count = state.ref_count
+                block.hash = state.hash
+                block.token_ids = list(state.token_ids)
+            self.free_block_ids = deque(free_before)
+            self.used_block_ids = set(used_before)
+            self.hash_to_block_id = dict(hashes_before)
+            raise
+        return True
+
     def deallocate(self, seq: Sequence):
         active = self._active_temporary_reservation()
         if active is not None:

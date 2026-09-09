@@ -1488,3 +1488,38 @@ def test_flashinfer_config_without_active_top_p_uses_legacy_sampler(monkeypatch)
 
     assert runner.run([object(), object()], is_prefill=False) == [4, 5]
     assert calls == ["legacy"]
+
+
+
+def test_invariant_prefill_samples_only_explicit_emission_rows(monkeypatch):
+    sampled_rows = []
+
+    class FakeSampler:
+        def greedy(self, logits):
+            assert logits.shape == (1, 8)
+            return torch.tensor([7])
+
+    rows = [
+        SimpleNamespace(num_cached_tokens=0, num_scheduled_tokens=2, num_tokens=5),
+        SimpleNamespace(num_cached_tokens=2, num_scheduled_tokens=1, num_tokens=3),
+        SimpleNamespace(num_cached_tokens=1, num_scheduled_tokens=1, num_tokens=4),
+    ]
+    runner = object.__new__(ModelRunner)
+    runner.rank = 0
+    runner.numerical_mode = "invariant"
+    runner.config = SimpleNamespace(top_p_backend="exact")
+    runner.sampler = FakeSampler()
+    runner.prepare_prefill = lambda seqs: (torch.tensor([1]), torch.tensor([0]))
+
+    def prepare_sample(seqs):
+        sampled_rows.extend(seqs)
+        return None, (), None, True
+
+    runner.prepare_sample = prepare_sample
+    runner.run_model = lambda input_ids, positions, is_prefill: torch.zeros(1, 8)
+    monkeypatch.setattr(
+        "nanovllm.engine.model_runner.reset_context", lambda: None
+    )
+
+    assert runner.run(rows, is_prefill=True) == [0, 7, 0]
+    assert sampled_rows == [rows[1]]

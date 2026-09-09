@@ -21,6 +21,7 @@ from nanovllm.engine.speculative_routes import (
     build_draft_route_registry,
     draft_graph_batch_buckets,
     max_eligible_draft_catchup,
+    speculative_plan_fingerprint,
 )
 
 
@@ -551,3 +552,15 @@ def test_route_pretouch_wrapper_restores_rng_and_context(monkeypatch):
     context = get_context()
     assert context.is_prefill is False
     assert context.slot_mapping is None
+
+
+
+def test_workspace_fingerprint_binds_numerical_backend_identity():
+    plan = _memory_plan()
+    fast = speculative_plan_fingerprint(plan, "fast")
+    invariant = speculative_plan_fingerprint(plan, "invariant")
+
+    assert fast != invariant
+    assert build_draft_route_registry(
+        plan, enforce_eager=True, numerical_backend="invariant"
+    ).plan_fingerprint == invariant

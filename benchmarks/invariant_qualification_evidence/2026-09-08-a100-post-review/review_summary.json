@@ -1,0 +1,171 @@
+{
+  "base_commit": "198e1e6a084dfb1f59d178a8ca3bdc1d0b094bed",
+  "date_utc": "2026-09-08",
+  "fast_mode_negative_control": {
+    "divergent_request_indices": [
+      9,
+      12
+    ],
+    "passed": false,
+    "request_12_first_decode_tokens": {
+      "eager": 25,
+      "graph": 38297
+    },
+    "request_9_first_tokens": {
+      "eager": 9,
+      "graph": 3988
+    }
+  },
+  "fp64_primitives_passed": true,
+  "hardware": {
+    "cuda": "12.8",
+    "gpu": "NVIDIA A100-SXM4-40GB",
+    "qualified_model": "/workspace/models/Qwen3-0.6B",
+    "qwen3_4b_available": false,
+    "torch": "2.10.0+cu128"
+  },
+  "implementation_sha256": "fe0431d97f7f1f0ea1c1063c5339d6dabd174e332d93586cda18ddc553c4f266",
+  "limitations": [
+    "Qwen3-4B weights were unavailable, so the declared 4B envelope is not certified",
+    "the FP64 reference covers independent linear, RMSNorm/residual, and attention primitives rather than a full FP64 model",
+    "fast-mode graph/eager numerical differences remain by design",
+    "these runs are correctness and lifecycle evidence, not speculative speed promotion evidence"
+  ],
+  "numerical_comparisons": {
+    "cache_chunk_b257.json": {
+      "corresponding_kv_states": 2,
+      "corresponding_logit_states": 2,
+      "internal_repeated_states_passed": true,
+      "kv_mismatches": [],
+      "logit_mismatches": [],
+      "passed": true,
+      "reference_budget": 1024,
+      "reference_inject_eviction": false,
+      "reference_layout": "serial",
+      "required_emission_labels": [
+        "cache-reuse",
+        "cache-seed"
+      ]
+    },
+    "eviction_resume_b257.json": {
+      "corresponding_kv_states": 2,
+      "corresponding_logit_states": 2,
+      "internal_repeated_states_passed": true,
+      "kv_mismatches": [],
+      "logit_mismatches": [],
+      "passed": true,
+      "reference_budget": 769,
+      "reference_inject_eviction": false,
+      "reference_layout": "serial",
+      "required_emission_labels": [
+        "eviction-resume"
+      ]
+    },
+    "known_serial_b4.json": {
+      "corresponding_kv_states": 34,
+      "corresponding_logit_states": 34,
+      "internal_repeated_states_passed": true,
+      "kv_mismatches": [],
+      "logit_mismatches": [],
+      "passed": true,
+      "reference_budget": 68,
+      "reference_inject_eviction": false,
+      "reference_layout": "packed",
+      "required_emission_labels": [
+        "known-0",
+        "known-1",
+        "known-10",
+        "known-11",
+        "known-12",
+        "known-13",
+        "known-14",
+        "known-15",
+        "known-16",
+        "known-2",
+        "known-3",
+        "known-4",
+        "known-5",
+        "known-6",
+        "known-7",
+        "known-8",
+        "known-9"
+      ]
+    },
+    "long_chunk_b511.json": {
+      "corresponding_kv_states": 3,
+      "corresponding_logit_states": 3,
+      "internal_repeated_states_passed": true,
+      "kv_mismatches": [],
+      "logit_mismatches": [],
+      "passed": true,
+      "reference_budget": 4096,
+      "reference_inject_eviction": false,
+      "reference_layout": "serial",
+      "required_emission_labels": [
+        "length-1024",
+        "length-2048",
+        "length-4096"
+      ]
+    },
+    "mixed_chunk_b257.json": {
+      "corresponding_kv_states": 14,
+      "corresponding_logit_states": 14,
+      "internal_repeated_states_passed": true,
+      "kv_mismatches": [],
+      "logit_mismatches": [],
+      "passed": true,
+      "reference_budget": 2305,
+      "reference_inject_eviction": false,
+      "reference_layout": "packed",
+      "required_emission_labels": [
+        "length-1",
+        "length-255",
+        "length-256",
+        "length-257",
+        "length-511",
+        "length-512",
+        "length-513"
+      ]
+    }
+  },
+  "pre_review_snapshot": {
+    "path": "/workspace/nano-vllm-review-snapshots/2026-09-08-pre-risk-review-198e1e6",
+    "source_archive_sha256": "5aa9c4057f96565d407e8c994a3612ea082389c8a92589405c9da4f20c59d3f7"
+  },
+  "risk_fixes": [
+    "normalized FP32 p/q rows in FP64 before trusted rejection acceptance arithmetic",
+    "added runner-owned result packing and exclusive reusable-workspace validation",
+    "made incremental KV allocation and extension exception-atomic",
+    "bound verifier readiness to backend, plan, exact graph/buffer/KV/workspace ownership and revoked readiness before re-warm"
+  ],
+  "schema": "nano-vllm-risk-and-numerical-review-v1",
+  "speculative_smoke": {
+    "spec_graph_review.json": {
+      "cache_repeat_and_stream_parity": true,
+      "causality_probe": true,
+      "compiler_unchanged_every_cycle": true,
+      "cycles": 140,
+      "failure_retry": true,
+      "verifier_routes": [
+        "paged_parallel",
+        "sequential_greedy"
+      ]
+    },
+    "spec_invariant_review.json": {
+      "cache_repeat_and_stream_parity": true,
+      "causality_probe": true,
+      "compiler_unchanged_every_cycle": true,
+      "cycles": 124,
+      "failure_retry": true,
+      "verifier_routes": [
+        "invariant_parallel_greedy",
+        "paged_parallel"
+      ]
+    }
+  },
+  "test_suite": {
+    "passed": 1080,
+    "skipped": 1,
+    "warnings": 14
+  }
+}

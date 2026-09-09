@@ -35,6 +35,7 @@ from nanovllm.engine.sequence import Sequence, StreamOutput
 from nanovllm.engine.scheduler import Scheduler, as_draft_discard_plan
 from nanovllm.engine.speculative_plan import SpecStepPlan
 from nanovllm.engine.speculative_routes import DraftRouteKey
+from nanovllm.engine.speculative_policy import AdaptiveSpeculativePolicy
 from nanovllm.engine.model_runner import ModelRunner
 from nanovllm.metrics import compute_metrics
 from nanovllm.layers.sampler import require_flashinfer_sampling
@@ -375,6 +376,15 @@ class LLMEngine:
         }
         config_kwargs = {k: v for k, v in kwargs.items() if k in config_fields}
         config = Config(model, **config_kwargs)
+        self._numerical_mode = getattr(config, "numerical_mode", "fast")
+        self._speculative_policy_name = getattr(
+            config, "speculative_policy", "fixed"
+        )
+        self._adaptive_speculative_policy = (
+            AdaptiveSpeculativePolicy()
+            if self._speculative_policy_name == "adaptive"
+            else None
+        )
         if config.top_p_backend == "flashinfer":
             require_flashinfer_sampling()
         # Tokenizer failure must precede GPU/process-group ownership.
@@ -626,6 +636,28 @@ class LLMEngine:
                 raise RuntimeError(
                     f"cannot {operation}: an active {active_kind} session owns the engine"
                 )
+
+    def load_speculative_calibration(self, cells) -> None:
+        """Install independent benchmark cells before adaptive serving starts."""
+
+        self._assert_public_step_access("load speculative calibration")
+        policy = getattr(self, "_adaptive_speculative_policy", None)
+        if policy is None:
+            raise RuntimeError(
+                "speculative calibration requires speculative_policy='adaptive'"
+            )
+        with self._execution_lock:
+            if not self.scheduler.is_finished():
+                raise RuntimeError(
+                    "cannot change speculative calibration with queued requests"
+                )
+            policy.load(cells)
+
+    def speculative_routing_metrics(self) -> dict:
+        policy = getattr(self, "_adaptive_speculative_policy", None)
+        if policy is None:
+            return {"policy": getattr(self, "_speculative_policy_name", "fixed")}
+        return policy.snapshot()
 
     def _cancel_requests(self, seq_ids):
         """Cancel requests only after any in-flight engine cycle completes."""
@@ -1041,13 +1073,36 @@ class LLMEngine:
 
     def _execute_speculative_verified(self, seqs, schedule_rollback):
         from dataclasses import replace
+        from nanovllm.engine.speculative_execution import verifier_route_ready
         runner = self.model_runner
         admission = self._resolve_draft_route_admission(seqs)
         if admission is not None:
             admission = replace(admission, route_keys=tuple(
                 key for key in admission.route_keys
-                if (len(seqs), key.effective_k) in runner.speculative_verifier_shapes
+                if verifier_route_ready(runner, len(seqs), key.effective_k)
             ))
+        decision = None
+        policy = getattr(self, "_adaptive_speculative_policy", None)
+        if policy is not None:
+            candidate_ks = (
+                () if admission is None
+                else tuple(key.effective_k for key in admission.route_keys)
+            )
+            catchup_tokens = 0 if admission is None else admission.catchup_tokens
+            decision = policy.choose(
+                seqs,
+                candidate_ks=candidate_ks,
+                catchup_tokens=catchup_tokens,
+                numerical_mode=getattr(self, "_numerical_mode", "fast"),
+                max_model_len=self._admission_limits.max_model_len,
+                max_num_batched_tokens=self.scheduler.max_num_batched_tokens,
+            )
+            if decision.selected_k is None:
+                return None
+            admission = replace(
+                admission,
+                route_keys=admission.route_keys[: decision.selected_k],
+            )
         plan = self.scheduler.plan_speculative_step(
             seqs, configured_workspace=runner.speculative_memory_plan,
             route_admission=admission, baseline_decode_rollback=schedule_rollback,
@@ -1058,7 +1113,10 @@ class LLMEngine:
         rng = runner.snapshot_speculative_rng()
         try:
             result = runner.call("run_speculative", plan, seqs)
-            return self.scheduler.commit_speculative(plan, result)
+            events = self.scheduler.commit_speculative(plan, result)
+            if policy is not None:
+                policy.observe(decision, result)
+            return events
         except BaseException as error:
             try:
                 runner.restore_speculative_rng(rng)

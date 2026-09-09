@@ -3,6 +3,8 @@ from torch import nn
 import torch.nn.functional as F
 import torch.distributed as dist
 
+from nanovllm.layers.invariant_ops import invariant_linear
+
 from nanovllm.utils.loader import (
     require_exact_global_weight_shape,
     require_exact_weight_shape,
@@ -24,6 +26,7 @@ class LinearBase(nn.Module):
         tp_dim: int | None = None,
     ):
         super().__init__()
+        self.numerical_mode = "fast"
         self.tp_dim = tp_dim
         self.tp_rank = dist.get_rank()
         self.tp_size = dist.get_world_size()
@@ -34,6 +37,11 @@ class LinearBase(nn.Module):
             self.bias.weight_loader = self.weight_loader
         else:
             self.register_parameter("bias", None)
+
+    def _linear(self, x: torch.Tensor, bias=None) -> torch.Tensor:
+        if self.numerical_mode == "invariant":
+            return invariant_linear(x, self.weight, bias)
+        return F.linear(x, self.weight, bias)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         raise NotImplementedError
@@ -54,7 +62,7 @@ class ReplicatedLinear(LinearBase):
         param.data.copy_(loaded_weight)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        return F.linear(x, self.weight, self.bias)
+        return self._linear(x, self.bias)
 
 
 class ColumnParallelLinear(LinearBase):
@@ -83,7 +91,7 @@ class ColumnParallelLinear(LinearBase):
         param_data.copy_(loaded_weight)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        return F.linear(x, self.weight, self.bias)
+        return self._linear(x, self.bias)
 
 
 class MergedColumnParallelLinear(ColumnParallelLinear):
@@ -185,7 +193,7 @@ class RowParallelLinear(LinearBase):
         param_data.copy_(loaded_weight)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        y = F.linear(x, self.weight, self.bias if self.tp_rank == 0 else None)
+        y = self._linear(x, self.bias if self.tp_rank == 0 else None)
         if self.tp_size > 1:
             dist.all_reduce(y)
         return y

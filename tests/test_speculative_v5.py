@@ -25,6 +25,38 @@ def result_for(plan, accepted, *, tokens=None):
     )
 
 
+def _mark_verifier_ready(runner, shapes):
+    from nanovllm.engine.speculative_execution import (
+        _verifier_readiness_fingerprint,
+    )
+
+    plan = runner.speculative_memory_plan
+    batch = min(4, plan.batch_size)
+    k = min(4, plan.max_effective_k)
+    vocab = plan.vocab_size
+    device = runner.kv_cache.device
+    runner._spec_q_rows = torch.empty(
+        batch * k, vocab, dtype=torch.float32, device=device
+    )
+    runner._spec_proposal_ids = torch.empty(
+        batch * k, dtype=torch.int64, device=device
+    )
+    runner._spec_target_probability_rows = torch.empty(
+        batch * (k + 1), vocab, dtype=torch.float32, device=device
+    )
+    runner._spec_bonus_noise = torch.empty(
+        batch, vocab, dtype=torch.float32, device=device
+    )
+    runner._spec_result_rows = torch.empty(
+        batch, k + 3, dtype=torch.int64, device=device
+    )
+    runner.speculative_verifier_shapes = frozenset(shapes)
+    runner.speculative_verifier_fingerprint = (
+        _verifier_readiness_fingerprint(runner)
+    )
+    runner.speculative_verifier_ready = True
+
+
 @pytest.mark.parametrize("accepted", range(5))
 @pytest.mark.parametrize("batch", [1, 2, 4])
 def test_commit_oracle(monkeypatch, accepted, batch):
@@ -148,8 +180,7 @@ def test_verifier_row_geometry_and_all_logits(monkeypatch):
 def test_engine_uses_verified_burst_and_consumes_rng(monkeypatch):
     engine, seqs, _, _ = _system(monkeypatch)
     runner = engine.model_runner
-    runner.speculative_verifier_ready = True
-    runner.speculative_verifier_shapes = frozenset((1, k) for k in range(1, 5))
+    _mark_verifier_ready(runner, ((1, k) for k in range(1, 5)))
     def call(method, plan, selected):
         assert method == "run_speculative"
         torch.rand(1)
@@ -165,8 +196,7 @@ def test_engine_uses_verified_burst_and_consumes_rng(monkeypatch):
 def test_engine_failure_restores_rng_and_schedule(monkeypatch):
     engine, seqs, _, _ = _system(monkeypatch)
     runner = engine.model_runner
-    runner.speculative_verifier_ready = True
-    runner.speculative_verifier_shapes = frozenset((1, k) for k in range(1, 5))
+    _mark_verifier_ready(runner, ((1, k) for k in range(1, 5)))
     def call(*args):
         torch.rand(10)
         raise RuntimeError("injected verify failure")
@@ -220,8 +250,9 @@ def test_end_to_end_sampling_law(monkeypatch, mode):
         runner.model, runner.draft_model = Model(logits), Model(draft_logits)
         runner.sampler = Sampler()
         runner.speculative_rejection_sampler = ModifiedRejectionSampler()
-        runner.speculative_verifier_ready = True
-        runner.speculative_verifier_shapes = frozenset((b, k) for b in range(1, 5) for k in (1, 2))
+        _mark_verifier_ready(
+            runner, ((b, k) for b in range(1, 5) for k in (1, 2))
+        )
         for seq in seqs:
             seq.temperature, seq.top_k, seq.top_p = temperature, topk, topp
         def call(method, *args):
@@ -300,8 +331,7 @@ def test_forced_empty_residual_counts_once_in_real_commit(monkeypatch):
     from nanovllm.layers.sampler import ModifiedRejectionResult
     engine, seqs, _, _ = _system(monkeypatch)
     runner = engine.model_runner
-    runner.speculative_verifier_ready = True
-    runner.speculative_verifier_shapes = frozenset((1, k) for k in range(1, 5))
+    _mark_verifier_ready(runner, ((1, k) for k in range(1, 5)))
     sampler = ModifiedRejectionSampler()
     # Force the analytically unreachable rejection seam explicitly; use the
     # REAL FP64 residual implementation and stochastic target fallback.

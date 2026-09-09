@@ -266,7 +266,8 @@ class ModelRunner:
         self.config = config
         hf_config = config.hf_config
         self.block_size = config.kvcache_block_size
-        self.enforce_eager = config.enforce_eager
+        self.numerical_mode = getattr(config, "numerical_mode", "fast")
+        self.enforce_eager = config.enforce_eager or self.numerical_mode == "invariant"
         self.world_size = config.tensor_parallel_size
         self.rank = rank
         self.event = event
@@ -291,6 +292,7 @@ class ModelRunner:
             self.draft_route_registry = None
             self.speculative_verifier_ready = False
             self.speculative_verifier_shapes = frozenset()
+            self.speculative_verifier_fingerprint = None
             self._speculative_memory_audit_inputs = None
             self._profiled_graph_allocated_bytes = 0
             self._profiled_graph_reserved_bytes = 0
@@ -306,11 +308,20 @@ class ModelRunner:
             self._draft_warmup_transient_bytes = 0
             self._warmup_transient_bytes = 0
             self._draft_route_pretouch_peak_bytes = 0
+            self._spec_q_rows = None
+            self._spec_proposal_ids = None
+            self._spec_target_probability_rows = None
+            self._spec_bonus_noise = None
+            self._spec_result_rows = None
 
         default_device = torch.get_default_device()
         default_dtype = torch.get_default_dtype()
         try:
             torch.cuda.set_device(rank)
+            if self.numerical_mode == "invariant":
+                capability = torch.cuda.get_device_capability(rank)
+                if capability < (8, 0):
+                    raise RuntimeError("numerical_mode='invariant' requires CUDA compute capability >= 8.0")
             dist.init_process_group(
                 "nccl",
                 "tcp://localhost:2333",
@@ -323,6 +334,9 @@ class ModelRunner:
                 torch.set_default_dtype(hf_config.dtype)
                 torch.set_default_device("cuda")
                 self.model = Qwen3ForCausalLM(hf_config)
+                for module in self.model.modules():
+                    if hasattr(module, "numerical_mode"):
+                        module.numerical_mode = self.numerical_mode
                 load_model(self.model, config.model)
                 self.sampler = Sampler()
                 if self.speculation_enabled:
@@ -477,6 +491,12 @@ class ModelRunner:
             self.draft_model = Qwen3ForCausalLM(
                 self.config.draft_hf_config
             )
+            modules = getattr(self.draft_model, "modules", None)
+            for module in modules() if callable(modules) else ():
+                if hasattr(module, "numerical_mode"):
+                    module.numerical_mode = getattr(
+                        self, "numerical_mode", "fast"
+                    )
         except BaseException as error:
             primary_error = error
             raise
@@ -591,9 +611,16 @@ class ModelRunner:
             "speculative_memory_plan",
             "speculative_memory_audit",
             "draft_route_registry",
+            "speculative_verifier_fingerprint",
+            "speculative_verifier_ready",
             "speculative_rejection_sampler",
             "speculative_verifier_shapes",
             "_speculative_memory_audit_inputs",
+            "_spec_q_rows",
+            "_spec_proposal_ids",
+            "_spec_result_rows",
+            "_spec_target_probability_rows",
+            "_spec_bonus_noise",
         ):
             if hasattr(self, name):
                 attempt(lambda name=name: delattr(self, name))
@@ -983,6 +1010,7 @@ class ModelRunner:
         self.draft_route_registry = build_draft_route_registry(
             plan,
             enforce_eager=self.enforce_eager,
+            numerical_backend=getattr(self, "numerical_mode", "fast"),
         )
 
     @staticmethod
@@ -1352,13 +1380,16 @@ class ModelRunner:
     def prepare_ragged(self, seqs: list[Sequence | ScheduledSequence]):
         input_ids = []
         positions = []
+        query_sequence_ids = []
+        query_context_lengths = []
+        emission_query_indices = []
         cu_seqlens_q = [0]
         cu_seqlens_k = [0]
         max_seqlen_q = 0
         max_seqlen_k = 0
         slot_mapping = []
         block_tables = None
-        for seq in seqs:
+        for sequence_index, seq in enumerate(seqs):
             start = seq.num_cached_tokens
             seqlen_q = seq.num_scheduled_tokens
             end = start + seqlen_q
@@ -1373,7 +1404,11 @@ class ModelRunner:
                 # invariant; extract the explicit last-token field on worker DTOs
                 input_ids.append(seq.last_token)
             positions.extend(range(start, end))
+            query_sequence_ids.extend([sequence_index] * seqlen_q)
+            query_context_lengths.extend(range(start + 1, end + 1))
             cu_seqlens_q.append(cu_seqlens_q[-1] + seqlen_q)
+            if end == seq.num_tokens:
+                emission_query_indices.append(cu_seqlens_q[-1] - 1)
             cu_seqlens_k.append(cu_seqlens_k[-1] + seqlen_k)
             max_seqlen_q = max(seqlen_q, max_seqlen_q)
             max_seqlen_k = max(seqlen_k, max_seqlen_k)
@@ -1397,7 +1432,22 @@ class ModelRunner:
         cu_seqlens_q = torch.tensor(cu_seqlens_q, dtype=torch.int32, pin_memory=True).cuda(non_blocking=True)
         cu_seqlens_k = torch.tensor(cu_seqlens_k, dtype=torch.int32, pin_memory=True).cuda(non_blocking=True)
         slot_mapping = torch.tensor(slot_mapping, dtype=torch.int32, pin_memory=True).cuda(non_blocking=True)
-        set_context(True, cu_seqlens_q, cu_seqlens_k, max_seqlen_q, max_seqlen_k, slot_mapping, None, block_tables)
+        emission_query_indices = torch.tensor(
+            emission_query_indices, dtype=torch.int64, pin_memory=True
+        ).cuda(non_blocking=True)
+        set_context(
+            True,
+            cu_seqlens_q,
+            cu_seqlens_k,
+            max_seqlen_q,
+            max_seqlen_k,
+            slot_mapping,
+            None,
+            block_tables,
+            tuple(query_sequence_ids),
+            tuple(query_context_lengths),
+            emission_query_indices,
+        )
         return input_ids, positions
 
     prepare_prefill = prepare_ragged
@@ -1422,7 +1472,7 @@ class ModelRunner:
         slot_mapping = torch.tensor(slot_mapping, dtype=torch.int32, pin_memory=True).cuda(non_blocking=True)
         context_lens = torch.tensor(context_lens, dtype=torch.int32, pin_memory=True).cuda(non_blocking=True)
         block_tables = self.prepare_block_tables(seqs)
-        set_context(False, slot_mapping=slot_mapping, context_lens=context_lens, block_tables=block_tables)
+        set_context(False, slot_mapping=slot_mapping, context_lens=context_lens, block_tables=block_tables, query_sequence_ids=tuple(range(len(seqs))), query_context_lengths=tuple(len(seq) for seq in seqs))
         return input_ids, positions
 
     @staticmethod
@@ -1937,9 +1987,11 @@ class ModelRunner:
         cu_q = [0]
         cu_k = [0]
         slot_mapping = []
+        query_sequence_ids = []
+        query_context_lengths = []
         max_q = 0
         max_k = 0
-        for row in catchup:
+        for sequence_index, row in enumerate(catchup):
             start = row.num_cached_tokens
             end = row.num_tokens
             input_ids.extend(row.scheduled_token_ids)
@@ -1949,6 +2001,8 @@ class ModelRunner:
             cu_k.append(cu_k[-1] + end)
             max_q = max(max_q, query_len)
             max_k = max(max_k, end)
+            query_sequence_ids.extend([sequence_index] * query_len)
+            query_context_lengths.extend(range(start + 1, end + 1))
             for position in range(start, end):
                 block_id = row.block_table[position // self.block_size]
                 slot_mapping.append(
@@ -1976,6 +2030,8 @@ class ModelRunner:
             block_tables=self._prepare_draft_block_tables(
                 catchup, device=device
             ),
+            query_sequence_ids=tuple(query_sequence_ids),
+            query_context_lengths=tuple(query_context_lengths),
         )
         return input_ids_tensor, positions_tensor, len(input_ids)
 
@@ -1983,14 +2039,45 @@ class ModelRunner:
     def _run_draft_catchup(
         self,
         rows: tuple[DraftCycleRow, ...],
+        route_key: DraftRouteKey | None = None,
     ) -> int:
-        """Populate only missing committed-prefix draft KV via eager ragged work."""
+        """Populate missing committed-prefix draft KV without changing coverage."""
+
+        missing = tuple(
+            row.committed_len - 1 - row.draft_cached_tokens for row in rows
+        )
+        one_token_rows = tuple(
+            row for row, count in zip(rows, missing, strict=True) if count == 1
+        )
+        if (
+            route_key is not None
+            and one_token_rows
+            and all(count <= 1 for count in missing)
+        ):
+            # A one-token lag has decode geometry. Reuse the registered draft
+            # graph (including its LM head) and discard the logits. Rows already
+            # caught up are excluded so their next KV slot is never overwritten.
+            device = self.draft_kv_cache.device
+            input_ids = self._draft_device_tensor(
+                tuple(row.token_ids[row.draft_cached_tokens] for row in one_token_rows),
+                dtype=torch.int64,
+                device=device,
+            )
+            try:
+                input_ids, positions = self._prepare_draft_decode(
+                    one_token_rows, input_ids, -1
+                )
+                self._run_draft_decode_model(input_ids, positions, route_key)
+                return len(one_token_rows)
+            finally:
+                reset_context()
 
         try:
             input_ids, positions, count = self._prepare_draft_catchup(rows)
             if count:
-                # Catch-up is deliberately eager in V3. Its logits are not a
-                # proposal law and retaining them would create an unpriced owner.
+                # Longer and genuinely ragged catch-up remains a bounded eager
+                # route until an independently measured graph family earns its
+                # persistent-memory cost.
                 self.draft_model(input_ids, positions)
             return count
         finally:
@@ -2023,6 +2110,8 @@ class ModelRunner:
                 device=device,
             ),
             block_tables=self._prepare_draft_block_tables(rows, device=device),
+            query_sequence_ids=tuple(range(len(rows))),
+            query_context_lengths=tuple(position + 1 for position in positions),
         )
         return input_token_ids, positions_tensor
 
@@ -2099,10 +2188,14 @@ class ModelRunner:
             :batch_size, : context.block_tables.size(1)
         ] = context.block_tables
         self.draft_graphs[graph_key].replay()
-        logits = self.draft_model.compute_logits(
+        logits = variables.get("logits")
+        if isinstance(logits, torch.Tensor):
+            return logits[:batch_size], True
+        # Compatibility for test doubles and old in-memory registries. New
+        # runtime captures always own graph-resident logits.
+        return self.draft_model.compute_logits(
             variables["outputs"][:batch_size]
-        )
-        return logits, True
+        ), True
 
     def _prepare_draft_sample_metadata(
         self,
@@ -2165,13 +2258,26 @@ class ModelRunner:
             # Attention context must never survive a forward failure or become
             # visible to the sampler/next draft step.
             reset_context()
-        sample = self.sampler.sample_exact_with_probabilities(
-            logits,
-            temperatures,
-            top_k_buckets=top_k_buckets,
-            top_p_plan=top_p_plan,
-            probabilities_out=probabilities_out,
+        trusted_sample = getattr(
+            self.sampler, "sample_exact_with_probabilities_trusted", None
         )
+        if trusted_sample is None:
+            sample = self.sampler.sample_exact_with_probabilities(
+                logits,
+                temperatures,
+                top_k_buckets=top_k_buckets,
+                top_p_plan=top_p_plan,
+                probabilities_out=probabilities_out,
+            )
+        else:
+            sample = trusted_sample(
+                logits,
+                temperatures,
+                top_k_buckets=top_k_buckets,
+                top_p_plan=top_p_plan,
+                probabilities_out=probabilities_out,
+                all_greedy=all(row.temperature == 0.0 for row in rows),
+            )
         if (
             sample.probabilities.shape != probabilities_out.shape
             or sample.probabilities.dtype != torch.float32
@@ -2189,8 +2295,6 @@ class ModelRunner:
             or token_ids.shape != (len(rows),)
             or token_ids.dtype != torch.int64
             or token_ids.device != probabilities_out.device
-            or bool(torch.any(token_ids < 0).item())
-            or bool(torch.any(token_ids >= vocab_size).item())
         ):
             raise SpeculativeDraftPlanError(
                 "draft sampler returned invalid token IDs"
@@ -2208,22 +2312,46 @@ class ModelRunner:
         batch_size = len(rows)
         vocab_size = self.config.draft_hf_config.vocab_size
         device = self.draft_kv_cache.device
-        q_storage = torch.empty(
-            (effective_k, batch_size, vocab_size),
-            dtype=torch.float32,
-            device=device,
-        )
+        q_rows = getattr(self, "_spec_q_rows", None)
+        required_q_rows = effective_k * batch_size
+        if (
+            isinstance(q_rows, torch.Tensor)
+            and q_rows.device == device
+            and q_rows.dtype == torch.float32
+            and q_rows.shape[0] >= required_q_rows
+            and q_rows.shape[1] == vocab_size
+        ):
+            q_storage = q_rows[:required_q_rows].view(
+                effective_k, batch_size, vocab_size
+            )
+        else:
+            q_storage = torch.empty(
+                (effective_k, batch_size, vocab_size),
+                dtype=torch.float32,
+                device=device,
+            )
         if not q_storage.is_contiguous():
             raise SpeculativeDraftPlanError("K-major q storage must be contiguous")
-        proposal_ids = torch.empty(
-            (batch_size, effective_k),
-            dtype=torch.int64,
-            device=device,
-        )
+        proposal_storage = getattr(self, "_spec_proposal_ids", None)
+        if (
+            isinstance(proposal_storage, torch.Tensor)
+            and proposal_storage.device == device
+            and proposal_storage.dtype == torch.int64
+            and proposal_storage.numel() >= batch_size * effective_k
+        ):
+            proposal_ids = proposal_storage[: batch_size * effective_k].view(
+                batch_size, effective_k
+            )
+        else:
+            proposal_ids = torch.empty(
+                (batch_size, effective_k),
+                dtype=torch.int64,
+                device=device,
+            )
         temperatures, top_k_buckets, top_p_plan = (
             self._prepare_draft_sample_metadata(rows)
         )
-        catchup_positions = self._run_draft_catchup(rows)
+        catchup_positions = self._run_draft_catchup(rows, route_key)
         input_token_ids = self._draft_device_tensor(
             tuple(row.last_token for row in rows),
             dtype=torch.int64,
@@ -2231,6 +2359,7 @@ class ModelRunner:
         )
         graph_steps = 0
         eager_steps = 0
+        invalid_token_ids = torch.zeros((), dtype=torch.bool, device=device)
         try:
             for step in range(effective_k):
                 q_step = q_storage[step]
@@ -2252,10 +2381,20 @@ class ModelRunner:
                     raise SpeculativeDraftPlanError(
                         "draft sampler returned an invalid token shape"
                     )
+                invalid_token_ids.logical_or_(
+                    ((sampled_ids < 0) | (sampled_ids >= vocab_size)).any()
+                )
                 proposal_ids[:, step].copy_(sampled_ids)
-                input_token_ids = sampled_ids
+                # Keep invalid injected values away from the next embedding;
+                # the accumulated device flag is checked once before any
+                # proposal can reach target verification or commit.
+                input_token_ids = sampled_ids.clamp(0, vocab_size - 1)
                 graph_steps += int(used_graph)
                 eager_steps += int(not used_graph)
+            if bool(invalid_token_ids.item()):
+                raise SpeculativeDraftPlanError(
+                    "draft sampler returned invalid token IDs"
+                )
             q_bkv = q_storage.permute(1, 0, 2)
             if q_bkv.untyped_storage().data_ptr() != q_storage.untyped_storage().data_ptr():
                 raise SpeculativeDraftPlanError(
@@ -2330,9 +2469,38 @@ class ModelRunner:
             ),
         )
 
+    def _initialize_speculative_workspaces(self):
+        """Allocate one reusable buffer set for every admitted B/K route."""
+
+        plan = self.speculative_memory_plan
+        max_batch = min(4, plan.batch_size)
+        max_k = min(4, plan.max_effective_k)
+        vocab_size = self.config.hf_config.vocab_size
+        device = self.kv_cache.device
+        self._spec_q_rows = torch.empty(
+            (max_batch * max_k, vocab_size),
+            dtype=torch.float32,
+            device=device,
+        )
+        self._spec_proposal_ids = torch.empty(
+            max_batch * max_k, dtype=torch.int64, device=device
+        )
+        self._spec_target_probability_rows = torch.empty(
+            (max_batch * (max_k + 1), vocab_size),
+            dtype=torch.float32,
+            device=device,
+        )
+        self._spec_bonus_noise = torch.empty(
+            (max_batch, vocab_size), dtype=torch.float32, device=device
+        )
+        self._spec_result_rows = torch.empty(
+            (max_batch, max_k + 3), dtype=torch.int64, device=device
+        )
+
     def _pretouch_speculative_verifier(self):
         from nanovllm.engine.speculative_execution import warm_verifier
         from nanovllm.layers.sampler import ModifiedRejectionSampler
+        self._initialize_speculative_workspaces()
         self.speculative_rejection_sampler = ModifiedRejectionSampler()
         warm_verifier(self)
 
@@ -2531,8 +2699,17 @@ class ModelRunner:
             ):
                 return self.model.compute_logits(self.model(input_ids, positions))
             bs = input_ids.size(0)
+            graph_bs = next(
+                (x for x in self.graph_bs if x >= bs and x in self.graphs),
+                None,
+            )
+            if graph_bs is None:
+                # Graph availability is an optimization, not an execution
+                # prerequisite. Keep the live context for ordinary eager
+                # decode when no compatible capture exists.
+                return self.model.compute_logits(self.model(input_ids, positions))
             context = get_context()
-            graph = self.graphs[next(x for x in self.graph_bs if x >= bs)]
+            graph = self.graphs[graph_bs]
             graph_vars = self.graph_vars
             graph_vars["input_ids"][:bs] = input_ids
             graph_vars["positions"][:bs] = positions
@@ -2565,6 +2742,38 @@ class ModelRunner:
         self.varlen_graphs[graph_key].replay()
         return self.model.compute_logits(self.varlen_vars["outputs"][:t])   # gather runs on the LIVE real context
 
+    @torch.inference_mode()
+    def run_model_all_positions(
+        self,
+        input_ids: torch.Tensor,
+        positions: torch.Tensor,
+    ) -> torch.Tensor:
+        """Run a ragged target pass and retain every live query logit row."""
+
+        t = input_ids.size(0)
+        context = get_context()
+        if not context.is_prefill or context.cu_seqlens_q is None:
+            raise RuntimeError("all-position target verification requires ragged context")
+        ns = context.cu_seqlens_q.numel() - 1
+        graph_key = (
+            self._select_varlen_graph_key(t, ns)
+            if context.block_tables is not None
+            else None
+        )
+        if graph_key is not None and not self._varlen_context_fits_graph(
+            t, ns, context, graph_key
+        ):
+            graph_key = None
+        if graph_key is None:
+            if hasattr(self, "varlen_graphs") and context.block_tables is not None:
+                self.varlen_miss += 1
+            hidden_states = self.model(input_ids, positions)
+        else:
+            self._fill_varlen(input_ids, positions, context, graph_key)
+            self.varlen_graphs[graph_key].replay()
+            hidden_states = self.varlen_vars["outputs"][:t]
+        return self.model.compute_logits_all(hidden_states)
+
     def run(
         self,
         seqs: list[Sequence | ScheduledSequence],
@@ -2572,14 +2781,27 @@ class ModelRunner:
     ) -> list[int]:
         try:
             input_ids, positions = self.prepare_prefill(seqs) if is_prefill else self.prepare_decode(seqs)
+            emitting_indices = (
+                [
+                    index for index, seq in enumerate(seqs)
+                    if seq.num_cached_tokens + seq.num_scheduled_tokens
+                    == seq.num_tokens
+                ]
+                if getattr(self, "numerical_mode", "fast") == "invariant"
+                and is_prefill
+                else list(range(len(seqs)))
+            )
+            sample_seqs = [seqs[index] for index in emitting_indices]
             temperatures, top_k_buckets, top_p_plan, all_greedy = (
-                self.prepare_sample(seqs)
+                self.prepare_sample(sample_seqs)
                 if self.rank == 0
                 else (None, (), None, False)
             )
             logits = self.run_model(input_ids, positions, is_prefill)
             if self.rank == 0:
-                if all_greedy:
+                if not sample_seqs:
+                    tokens = torch.empty(0, dtype=torch.int64, device=logits.device)
+                elif all_greedy:
                     tokens = self.sampler.greedy(logits)
                 else:
                     for top_k, row_indices in top_k_buckets:
@@ -2599,7 +2821,12 @@ class ModelRunner:
                                 logits, temperatures, row_indices, probability_cutoffs
                             )
                         tokens = self.sampler(logits, temperatures)
-                token_ids = tokens.tolist()
+                sampled_token_ids = tokens.tolist()
+                token_ids = [0] * len(seqs)
+                for index, token_id in zip(
+                    emitting_indices, sampled_token_ids, strict=True
+                ):
+                    token_ids[index] = token_id
             else:
                 token_ids = None
             return token_ids
@@ -2679,6 +2906,11 @@ class ModelRunner:
             hf_config.hidden_size,
             dtype=hf_config.dtype,
         )
+        logits = torch.zeros(
+            max_bs,
+            hf_config.vocab_size,
+            dtype=hf_config.dtype,
+        )
         self.draft_graph_bs = list(graph_buckets)
         self.draft_graphs = {}
         self.draft_graph_pool = None
@@ -2695,10 +2927,12 @@ class ModelRunner:
                 outputs[:bs] = self.draft_model(
                     input_ids[:bs], positions[:bs]
                 )
+                logits[:bs] = self.draft_model.compute_logits(outputs[:bs])
                 with torch.cuda.graph(graph, self.draft_graph_pool):
                     outputs[:bs] = self.draft_model(
                         input_ids[:bs], positions[:bs]
                     )
+                    logits[:bs] = self.draft_model.compute_logits(outputs[:bs])
                 if self.draft_graph_pool is None:
                     self.draft_graph_pool = graph.pool()
                 self.draft_graphs[bs] = graph
@@ -2713,6 +2947,7 @@ class ModelRunner:
             context_lens=context_lens,
             block_tables=block_tables,
             outputs=outputs,
+            logits=logits,
         )
 
     @torch.inference_mode()
@@ -2752,8 +2987,9 @@ class ModelRunner:
         # Two slot tiers per bucket (P13): zero-length padding slots cost real replay
         # time (~0.006-0.011 ms/slot at T=512/1024), so the common few-segment step
         # replays a lean capture while high-ns mixed steps keep a full-slot graph
-        # instead of falling back to eager (which would break the ITL bound exactly
-        # in the many-decoder regime). Tiers are prefix-slices of the SAME buffers —
+        # instead of falling back to eager in the many-decoder regime. This reduces
+        # dispatch overhead; it does not guarantee a wall-time ITL bound.
+        # Tiers are prefix-slices of the SAME buffers —
         # the baked grid comes from the slice length; _fill_varlen's full-size
         # padding serves every tier.
         self.varlen_slots = sorted({min(64, S1), S1})
@@ -2901,6 +3137,7 @@ class ModelRunner:
             "context_lens",
             "block_tables",
             "outputs",
+            "logits",
         }
         if (
             tuple(graph_bs or ()) != buckets
@@ -2954,6 +3191,8 @@ class ModelRunner:
             slot_mapping=slot_mapping,
             context_lens=context_lens,
             block_tables=block_tables,
+            query_sequence_ids=tuple(range(batch_size)),
+            query_context_lengths=(1,) * batch_size,
         )
         try:
             with torch.inference_mode():
@@ -3044,6 +3283,8 @@ class ModelRunner:
         cu_k = [0]
         positions = []
         slot_mapping = []
+        query_sequence_ids = []
+        query_context_lengths = []
         physical_table = tuple(
             logical_block % physical_blocks
             for logical_block in range(max_blocks)
@@ -3055,6 +3296,8 @@ class ModelRunner:
             cu_q.append(cu_q[-1] + query_len)
             cu_k.append(cu_k[-1] + end)
             positions.extend(range(start, end))
+            query_sequence_ids.extend([len(cu_q) - 2] * query_len)
+            query_context_lengths.extend(range(start + 1, end + 1))
             slot_mapping.extend(
                 physical_table[position // self.block_size] * self.block_size
                 + position % self.block_size
@@ -3083,6 +3326,8 @@ class ModelRunner:
                 dtype=torch.int32,
                 device=device,
             ),
+            query_sequence_ids=tuple(query_sequence_ids),
+            query_context_lengths=tuple(query_context_lengths),
         )
         try:
             self.draft_model(input_ids, positions_tensor)

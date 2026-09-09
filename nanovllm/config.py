@@ -54,6 +54,8 @@ class Config:
     # meaning. The loaded draft config is derived state, never caller input.
     draft_model: str | os.PathLike | None = None
     num_speculative_tokens: int = 0
+    numerical_mode: str = "fast"
+    speculative_policy: str = "fixed"
     draft_hf_config: AutoConfig | None = field(
         init=False,
         default=None,
@@ -69,6 +71,16 @@ class Config:
         return self.num_speculative_tokens > 0
 
     def __post_init__(self):
+        if not isinstance(self.numerical_mode, str):
+            raise TypeError("numerical_mode must be a string")
+        if self.numerical_mode not in {"fast", "invariant"}:
+            raise ValueError("numerical_mode must be either 'fast' or 'invariant'")
+        if not isinstance(self.speculative_policy, str):
+            raise TypeError("speculative_policy must be a string")
+        if self.speculative_policy not in {"fixed", "adaptive"}:
+            raise ValueError("speculative_policy must be either 'fixed' or 'adaptive'")
+        if self.speculative_policy == "adaptive" and not self.speculation_enabled:
+            raise ValueError("speculative_policy='adaptive' requires speculative decoding")
         if not isinstance(self.top_p_backend, str):
             raise TypeError("top_p_backend must be a string")
         if self.top_p_backend not in {"exact", "flashinfer"}:
@@ -171,6 +183,21 @@ class Config:
             _require_safetensors(self.draft_model, "draft")
 
         self.hf_config = AutoConfig.from_pretrained(self.model)
+        if self.numerical_mode == "invariant":
+            if self.tensor_parallel_size != 1:
+                raise ValueError("numerical_mode='invariant' supports tensor_parallel_size=1 only")
+            if self.top_p_backend != "exact":
+                raise ValueError("numerical_mode='invariant' requires top_p_backend='exact'")
+            if getattr(self.hf_config, "model_type", None) != "qwen3":
+                raise ValueError("numerical_mode='invariant' currently supports Qwen3 only")
+            if str(getattr(self.hf_config, "dtype", None)) != "torch.bfloat16":
+                raise ValueError("numerical_mode='invariant' currently requires BF16 weights")
+            if self.max_model_len > 4096:
+                raise ValueError("numerical_mode='invariant' supports max_model_len <= 4096")
+            supported = {(1024, 28), (2560, 36)}
+            geometry = (self.hf_config.hidden_size, self.hf_config.num_hidden_layers)
+            if geometry not in supported:
+                raise ValueError("numerical_mode='invariant' supports Qwen3-0.6B and Qwen3-4B")
         if not self.speculation_enabled:
             # Preserve the established target-only path and its compatibility.
             self.max_model_len = min(
@@ -180,6 +207,12 @@ class Config:
             return
 
         self.draft_hf_config = AutoConfig.from_pretrained(self.draft_model)
+        if self.numerical_mode == "invariant":
+            if str(getattr(self.draft_hf_config, "dtype", None)) != "torch.bfloat16":
+                raise ValueError("numerical_mode='invariant' requires a BF16 draft model")
+            draft_geometry = (self.draft_hf_config.hidden_size, self.draft_hf_config.num_hidden_layers)
+            if draft_geometry not in {(1024, 28), (2560, 36)}:
+                raise ValueError("invariant draft must be Qwen3-0.6B or Qwen3-4B")
         target_model_type = getattr(self.hf_config, "model_type", None)
         draft_model_type = getattr(self.draft_hf_config, "model_type", None)
         if target_model_type != "qwen3" or draft_model_type != "qwen3":

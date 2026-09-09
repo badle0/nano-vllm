@@ -332,6 +332,7 @@ def test_draft_decode_routes_to_captured_graph_or_eager(monkeypatch):
         "context_lens": torch.zeros(4, dtype=torch.int32),
         "block_tables": torch.zeros(4, 8, dtype=torch.int32),
         "outputs": torch.zeros(4, 11),
+        "logits": torch.zeros(4, 11),
     }
 
     graphed = graph_runner._execute_draft_proposals(plan, seqs)
@@ -528,6 +529,7 @@ def test_missing_registered_graph_is_a_pre_reservation_admission_miss(monkeypatc
             batch_cap, max_blocks, dtype=torch.int32
         ),
         "outputs": torch.zeros(batch_cap, 11),
+        "logits": torch.zeros(batch_cap, 11),
     }
     assert runner.resolve_draft_route_admission([seq]) is not None
 
@@ -664,3 +666,133 @@ def test_authoritative_run_resets_context_after_model_failure():
         runner.run([SimpleNamespace()], False)
 
     _assert_default_context()
+
+
+
+def test_one_token_draft_catchup_reuses_decode_graph(monkeypatch):
+    runner = _runner(monkeypatch, k=2, eager=False)
+    seq = _sequence((1, 2, 3), seq_id=19, draft_cached_tokens=1)
+    plan = _plan(runner, [seq], effective_k=2)
+    graph = _Graph()
+    runner.draft_graph_bs = [1]
+    runner.draft_graphs = {1: graph}
+    runner.draft_graph_vars = {
+        "input_ids": torch.zeros(1, dtype=torch.int64),
+        "positions": torch.zeros(1, dtype=torch.int64),
+        "slot_mapping": torch.zeros(1, dtype=torch.int32),
+        "context_lens": torch.zeros(1, dtype=torch.int32),
+        "block_tables": torch.zeros(1, 8, dtype=torch.int32),
+        "outputs": torch.zeros(1, 11),
+        "logits": torch.zeros(1, 11),
+    }
+
+    execution = runner._execute_draft_proposals(plan, [seq])
+
+    assert execution.catchup_positions == 1
+    assert execution.graph_decode_steps == 2
+    assert execution.eager_decode_steps == 0
+    assert graph.replays == 3
+    assert runner.draft_model.calls == []
+    _assert_default_context()
+
+
+def _verifier_runner_fixture():
+    from nanovllm.engine.speculative_execution import (
+        _verifier_readiness_fingerprint,
+    )
+
+    runner = SimpleNamespace(
+        speculative_memory_plan=SimpleNamespace(
+            batch_size=2,
+            max_effective_k=2,
+            vocab_size=7,
+        ),
+        kv_cache=torch.empty(1),
+        draft_route_registry=SimpleNamespace(plan_fingerprint="plan-a"),
+        numerical_mode="fast",
+        enforce_eager=False,
+        graphs={1: object(), 2: object()},
+        varlen_graphs={(4, 2): object(), (8, 4): object()},
+        draft_graphs={1: object(), 2: object()},
+        graph_vars={"input_ids": torch.empty(2, dtype=torch.int64)},
+        varlen_vars={"input_ids": torch.empty(8, dtype=torch.int64)},
+        draft_graph_vars={"input_ids": torch.empty(2, dtype=torch.int64)},
+        draft_kv_cache=torch.empty(1),
+        speculative_verifier_ready=True,
+        speculative_verifier_shapes=frozenset({(1, 1), (2, 2)}),
+        _spec_q_rows=torch.empty(4, 7),
+        _spec_proposal_ids=torch.empty(4, dtype=torch.int64),
+        _spec_target_probability_rows=torch.empty(6, 7),
+        _spec_bonus_noise=torch.empty(2, 7),
+        _spec_result_rows=torch.empty(2, 5, dtype=torch.int64),
+    )
+    runner.speculative_verifier_fingerprint = (
+        _verifier_readiness_fingerprint(runner)
+    )
+    return runner
+
+
+def test_verifier_readiness_binds_backend_graphs_and_exclusive_workspaces():
+    from nanovllm.engine.speculative_execution import (
+        _verifier_readiness_fingerprint,
+        verifier_route_ready,
+    )
+
+    runner = _verifier_runner_fixture()
+    assert verifier_route_ready(runner, 2, 2)
+    assert not verifier_route_ready(runner, 2, 1)
+
+    runner.numerical_mode = "invariant"
+    assert not verifier_route_ready(runner, 2, 2)
+    runner.numerical_mode = "fast"
+
+    runner.varlen_graphs[(8, 4)] = object()
+    assert not verifier_route_ready(runner, 2, 2)
+    runner.speculative_verifier_fingerprint = (
+        _verifier_readiness_fingerprint(runner)
+    )
+
+    runner.graph_vars["input_ids"] = torch.empty(2, dtype=torch.int64)
+    assert not verifier_route_ready(runner, 2, 2)
+    runner.speculative_verifier_fingerprint = (
+        _verifier_readiness_fingerprint(runner)
+    )
+
+    runner._spec_result_rows = torch.empty(2, 5, dtype=torch.int64)
+    assert not verifier_route_ready(runner, 2, 2)
+    runner.speculative_verifier_fingerprint = (
+        _verifier_readiness_fingerprint(runner)
+    )
+
+    # A sufficiently large view still fails closed when q aliases p storage.
+    runner._spec_q_rows = runner._spec_target_probability_rows[:4]
+    runner.speculative_verifier_fingerprint = (
+        _verifier_readiness_fingerprint(runner)
+    )
+    assert not verifier_route_ready(runner, 2, 2)
+
+
+def test_host_result_packing_reuses_runner_owned_storage():
+    from nanovllm.engine.speculative_execution import _host_results
+
+    runner = SimpleNamespace(
+        _spec_result_rows=torch.full((2, 6), -99, dtype=torch.int64)
+    )
+    pointer = runner._spec_result_rows.data_ptr()
+    rows = (SimpleNamespace(seq_id=10), SimpleNamespace(seq_id=11))
+    proposals = torch.tensor([[1, 2, 3], [4, 5, 6]], dtype=torch.int64)
+    counts = torch.tensor([2, 3], dtype=torch.int64)
+    terminals = torch.tensor([8, 9], dtype=torch.int64)
+    fallbacks = torch.tensor([True, False])
+
+    results = _host_results(
+        runner, rows, proposals, counts, terminals, fallbacks
+    )
+
+    assert runner._spec_result_rows.data_ptr() == pointer
+    assert runner._spec_result_rows.tolist() == [
+        [1, 2, 3, 2, 8, 1],
+        [4, 5, 6, 3, 9, 0],
+    ]
+    assert results[0].committed_token_ids == (1, 2, 8)
+    assert results[1].committed_token_ids == (4, 5, 6, 9)

@@ -54,13 +54,52 @@ class Attention(nn.Module):
         self.head_dim = head_dim
         self.scale = scale
         self.num_kv_heads = num_kv_heads
+        self.numerical_mode = "fast"
         self.k_cache = self.v_cache = torch.tensor([])
+
+    def _invariant_paged_attention(self, q: torch.Tensor) -> torch.Tensor:
+        context = get_context()
+        owners = context.query_sequence_ids
+        lengths = context.query_context_lengths
+        if owners is None or lengths is None or len(owners) != q.size(0) or len(lengths) != q.size(0):
+            raise RuntimeError("invariant attention requires complete query metadata")
+        if context.block_tables is None:
+            raise RuntimeError("invariant attention requires paged KV block tables")
+        if self.num_heads % self.num_kv_heads:
+            raise RuntimeError("invariant attention requires integral grouped-query heads")
+        groups = self.num_heads // self.num_kv_heads
+        outputs = []
+        for query_index, (sequence_index, context_length) in enumerate(zip(owners, lengths)):
+            if context_length < 1:
+                raise RuntimeError("invariant attention context lengths must be positive")
+            block_count = (context_length + self.k_cache.size(1) - 1) // self.k_cache.size(1)
+            block_ids = context.block_tables[sequence_index, :block_count].to(torch.int64)
+            keys = self.k_cache.index_select(0, block_ids).flatten(0, 1)[:context_length]
+            values = self.v_cache.index_select(0, block_ids).flatten(0, 1)[:context_length]
+            keys = keys[:, :, None, :].expand(-1, -1, groups, -1).reshape(
+                context_length, self.num_heads, self.head_dim
+            )
+            values = values[:, :, None, :].expand(-1, -1, groups, -1).reshape(
+                context_length, self.num_heads, self.head_dim
+            )
+            query = q[query_index].float()
+            scores = (
+                query[:, None, :] * keys.permute(1, 0, 2).float()
+            ).sum(dim=-1) * self.scale
+            probabilities = torch.softmax(scores, dim=-1)
+            output = (
+                probabilities[:, :, None] * values.permute(1, 0, 2).float()
+            ).sum(dim=1)
+            outputs.append(output.to(q.dtype))
+        return torch.stack(outputs, dim=0)
 
     def forward(self, q: torch.Tensor, k: torch.Tensor, v: torch.Tensor):
         context = get_context()
         k_cache, v_cache = self.k_cache, self.v_cache
         if k_cache.numel() and v_cache.numel():
             store_kvcache(k, v, k_cache, v_cache, context.slot_mapping)
+        if self.numerical_mode == "invariant" and context.block_tables is not None:
+            return self._invariant_paged_attention(q)
         if context.is_prefill:
             if context.block_tables is not None:    # prefix cache
                 k, v = k_cache, v_cache
