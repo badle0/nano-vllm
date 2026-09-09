@@ -20,6 +20,9 @@ A lightweight vLLM implementation built from scratch.
 See [the branch policy](docs/BRANCHES.md) for the relationship between
 `main`, `fork-main`, release branches, and the retained repair branches.
 
+For the preserved A100 environment, pinned checkpoints, and replacement-instance
+setup, see [the migration procedure](docs/INSTANCE_MIGRATION.md).
+
 ## Key Features
 
 -  **Fast offline inference** — Comparable inference speeds to vLLM
